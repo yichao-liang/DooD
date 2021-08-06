@@ -19,6 +19,7 @@ from torchvision.utils import save_image
 
 import models.base
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
+from data import synthetic
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,11 +28,14 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-def smooth(array):
-    '''smoothing for not dividing by 0
+def safe_div(dividend, divisor):
+    '''divident / divisor, only do it for nonzero divisor dims
     '''
-    array[array == 0] += 1e-12
-    return array
+    idx = divisor != 0.
+    idx = idx.squeeze()
+    divisor[idx] = divisor[idx].clamp(min=1e-6)
+    dividend[idx] =  dividend[idx] / divisor[idx] 
+    return dividend
 
 def get_baseline_save_dir():
     return "save/baseline"
@@ -64,7 +68,8 @@ def get_save_dir(args):
     return get_save_dir_from_path_base(get_path_base_from_args(args))
 
 def get_save_test_img_dir(args, iteration):
-    return f"{get_save_dir(args)}/images/reconstruction_ite{iteration}.pdf"
+    Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
+    return f"{get_save_dir(args)}/images/reconstruction_ep{iteration}.pdf"
 
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
@@ -90,10 +95,16 @@ def init(run_args, device):
     if run_args.model_type == 'base':
         # Generative model
         generative_model = models.base.GenerativeModel(
-                                prior_dist=run_args.prior_dist).to(device)
+                                control_points_dim=run_args.points_per_stroke,
+                                prior_dist=run_args.prior_dist,
+                                likelihood_dist=run_args.likelihood_dist,
+                                device=device).to(device)
 
         # Guide
-        guide = models.base.Guide(dist=run_args.inference_dist).to(device)
+        guide = models.base.Guide(control_points_dim=run_args.points_per_stroke,
+                                dist=run_args.inference_dist,
+                                net_type=run_args.inference_net_architecture
+                                ).to(device)
 
         # Model tuple
         model = (generative_model, guide)
@@ -123,12 +134,12 @@ def init(run_args, device):
                     transform=transforms.Compose([
                        transforms.RandomRotation(30, fill=(0,)),
                        transforms.ToTensor(),
+                       transforms.GaussianBlur(kernel_size=3)
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ]))
-
         # to only use a subset
         # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
-        # idx = trn_dataset.targets == 1
+        # # idx = trn_dataset.targets == 1
         # trn_dataset.targets = trn_dataset.targets[idx]
         # trn_dataset.data= trn_dataset.data[idx]
 
@@ -145,9 +156,9 @@ def init(run_args, device):
                             transforms.ToTensor(),
                             #transforms.Normalize((0.1307,), (0.3081,))
                         ]))
-                # to only use a subset
+        # to only use a subset
         # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
-        # idx = tst_dataset.targets == 1
+        # # idx = tst_dataset.targets == 1
         # tst_dataset.targets = tst_dataset.targets[idx]
         # tst_dataset.data= tst_dataset.data[idx]
 
@@ -156,6 +167,11 @@ def init(run_args, device):
         )
         
         data_loader = train_loader, test_loader
+    elif run_args.dataset == 'generative_model':
+        # train and test dataloader
+        data_loader = synthetic.get_data_loader(generative_model, 
+                                                batch_size=run_args.batch_size,
+                                                device=run_args.device)
     else:
         raise NotImplementedError
 
@@ -349,12 +365,40 @@ def init_mlp(in_dim, out_dim, hidden_dim, num_layers, non_linearity=None,):
         x -> Linear(in_dim, out_dim) -> y
     """
     if non_linearity is None:
-        non_linearity = nn.ReLU()
+        # non_linearity = nn.ReLU()
+        non_linearity = nn.Tanh()
     dims = [in_dim] + [hidden_dim for _ in range(num_layers)] + [out_dim]
 
     return MultilayerPerceptron(dims, non_linearity)
 
+class ConvolutionNetwork(nn.Module):
+    def __init__(self, n_in_channels=1, n_mid_channels=32, mlp=None):
+        super().__init__()
+        self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
+        self.conv2 = nn.Conv2d(n_mid_channels, 64, 3, 1)
+        self.mlp = mlp
+        self.dropout = nn.Dropout(0.25)
+    
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = self.dropout(F.max_pool2d(x, 2))
+        x = torch.flatten(x, 1)
+        output = self.mlp(x)
 
+        return output
+
+def init_cnn(in_dim, out_dim, num_mlp_layers, non_linearity=None):
+    """Initializes a convnet, assuming input:
+         - has 1 channel and; 
+         - it's a squared image.
+    """
+    conv_output_size = 9216
+    mlp = init_mlp(in_dim=conv_output_size, out_dim=out_dim, hidden_dim=256, 
+                                num_layers=num_mlp_layers)
+    conv_net = ConvolutionNetwork(mlp=mlp)
+
+    return conv_net
 
 def get_device():
     if torch.cuda.is_available():

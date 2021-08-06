@@ -29,54 +29,79 @@ def get_args_parser():
                                         argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--seed", default=1)
 
-    # model
+    # Model
     parser.add_argument(
         "--model-type",
-        default="base", # base is a 2-level (obs, hidden) model
+        default="base", 
         type=str,
         help=" "
     )
     parser.add_argument(
         "--prior_dist",
-        default='Dirichlet',
-        # default='Normal',
+        # default='Dirichlet',
+        default='Normal',
         type=str,
         choices=['Dirichlet', 'Normal'],
+        help=""
+    )
+    parser.add_argument(
+        "--likelihood_dist",
+        # default='Normal',
+        default='Laplace',
+        type=str,
+        choices=['Normal', 'Laplace'],
         help=""
     )
     parser.add_argument(
         "--inference-dist",
-        default='Dirichlet',
-        # default='Normal',
+        # default='Dirichlet',
+        default='Normal',
         type=str,
         choices=['Dirichlet', 'Normal'],
         help=""
     )
+    parser.add_argument(
+        "--inference-net-architecture",
+        default='CNN',
+        # default='MLP',
+        type=str,
+        choices=['CNN','MLP'],
+        help=""
+    )
+    parser.add_argument(
+        "--points-per-stroke",
+        default='5',
+        type=int,
+        help="Number of control points per stroke curve."
+    )
 
-    # optimization
+    # Optimization
     parser.add_argument("--continue-training", action="store_true", help=" ")
-    parser.add_argument("--num-iterations", default=100000, type=int, help=" ")
+    parser.add_argument("--num-iterations", default=1000000, type=int, help=" ")
     parser.add_argument("--lr", default=1e-3, type=float, help=" ")
     parser.add_argument("--log-interval", default=50, type=int, help=" ")
     parser.add_argument("--save-interval", default=1000, type=int, help=" ")
-    # parser.add_argument("--checkpoint-interval", default=1000, type=int, help=" ")
-
     # Loss
     parser.add_argument(
         "--loss",
-        default="elbo",
+        # default="elbo",
+        default="l1",
+        # default="nll",
+        choices=['elbo','l1','nll'],
         type=str,
         help=" ",
     )
 
-    # data
+    # Data
     parser.add_argument("--dataset",
                     default="mnist",
-                    choices=['mnist', 'omniglot'],
+                    # default="generative_model",
+                    choices=['mnist', 'omniglot', 'generative_model'],
                     type=str, help=" ")
     parser.add_argument("--data-dir", 
                         default="./omniglot_dataset/omniglot/",
                         type=str, help=" ")
+    # when changed to 128, the model stopped learning anything
     parser.add_argument("--batch-size", default=64, type=int, help=" ")
 
     return parser
