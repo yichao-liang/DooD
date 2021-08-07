@@ -40,6 +40,7 @@ def get_args_parser():
         "--prior_dist",
         # default='Dirichlet',
         default='Normal',
+        # default='Uniform',
         type=str,
         choices=['Dirichlet', 'Normal'],
         help=""
@@ -69,6 +70,12 @@ def get_args_parser():
         help=""
     )
     parser.add_argument(
+        "--strokes_per_img",
+        default=1,
+        type=int,
+        help="Maximum number of strokes per image"
+    )
+    parser.add_argument(
         "--points-per-stroke",
         default='5',
         type=int,
@@ -85,8 +92,8 @@ def get_args_parser():
     parser.add_argument(
         "--loss",
         # default="elbo",
-        default="l1",
-        # default="nll",
+        # default="l1",
+        default="nll",
         choices=['elbo','l1','nll'],
         type=str,
         help=" ",
@@ -102,7 +109,7 @@ def get_args_parser():
                         default="./omniglot_dataset/omniglot/",
                         type=str, help=" ")
     # when changed to 128, the model stopped learning anything
-    parser.add_argument("--batch-size", default=64, type=int, help=" ")
+    parser.add_argument("--batch-size", default=32, type=int, help=" ")
 
     return parser
 

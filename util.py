@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import numpy as np
 import torch.nn as nn
 import torch
@@ -16,6 +17,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
+from einops import rearrange
 
 import models.base
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
@@ -36,6 +38,42 @@ def safe_div(dividend, divisor):
     divisor[idx] = divisor[idx].clamp(min=1e-6)
     dividend[idx] =  dividend[idx] / divisor[idx] 
     return dividend
+
+def add_control_points_plot(gen, latents, writer, tag=None, epoch=None):
+    n = 8
+    steps = torch.linspace(0, 1, 500).cuda()
+    curves = gen.bezier.sample_curve(latents[:n], steps)
+
+    fig, ax= plt.subplots(2,4,figsize=(10, 4))
+
+    for i in range(n):
+        ax[i//4][i%4].set_aspect('equal')
+        ax[i//4][i%4].axis('equal')
+        ax[i//4][i%4].invert_yaxis()
+        im = ax[i//4][i%4].scatter(latents.squeeze().cpu()[i][:,0],
+                           latents.squeeze().cpu()[i][:,1],
+                                            marker='x',
+                                            s=30,c=np.arange(5),
+                                            cmap='rainbow')
+        ax[i//4][i%4].scatter(x=curves.squeeze().cpu()[i][0,:],
+                      y=curves.squeeze().cpu()[i][1,:],
+                                            s=0.1,
+                                            c=-np.arange(500),
+                                            cmap='rainbow')       
+    fig.subplots_adjust(right=0.94)
+    cbar_ax = fig.add_axes([0.95, 0.1, 0.01, 0.8])
+    fig.colorbar(im, cax=cbar_ax)
+
+    canvas = FigureCanvas(fig)
+    canvas.draw()       # draw the canvas, cache the renderer
+
+    image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+    width, height = fig.get_size_inches() * fig.get_dpi() 
+    image = torch.tensor(image.reshape(int(height), int(width), 3)).float()
+    image = rearrange(image, 'h w c -> c h w')
+    # breakpoint()
+
+    writer.add_image(tag, image, epoch)
 
 def get_baseline_save_dir():
     return "save/baseline"
@@ -134,14 +172,14 @@ def init(run_args, device):
                     transform=transforms.Compose([
                        transforms.RandomRotation(30, fill=(0,)),
                        transforms.ToTensor(),
-                       transforms.GaussianBlur(kernel_size=3)
+                    #    transforms.GaussianBlur(kernel_size=3)
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ]))
         # to only use a subset
-        # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
+        idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
         # # idx = trn_dataset.targets == 1
-        # trn_dataset.targets = trn_dataset.targets[idx]
-        # trn_dataset.data= trn_dataset.data[idx]
+        trn_dataset.targets = trn_dataset.targets[idx]
+        trn_dataset.data= trn_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
@@ -157,10 +195,10 @@ def init(run_args, device):
                             #transforms.Normalize((0.1307,), (0.3081,))
                         ]))
         # to only use a subset
-        # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
+        idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
         # # idx = tst_dataset.targets == 1
-        # tst_dataset.targets = tst_dataset.targets[idx]
-        # tst_dataset.data= tst_dataset.data[idx]
+        tst_dataset.targets = tst_dataset.targets[idx]
+        tst_dataset.data= tst_dataset.data[idx]
 
         test_loader = DataLoader(tst_dataset,
                 batch_size=run_args.batch_size, shuffle=True, num_workers=4

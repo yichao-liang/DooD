@@ -50,11 +50,12 @@ def train(model, optimizer, stats, data_loader, args):
             loss.backward()
 
             # Check for nans
+            writer.add_scalars("Gradient Norm", {f"Grad/{n}":
+                                        p.grad.norm(2) for n, p in 
+                                        guide.named_parameters()}, iteration)
             for name, parameter in guide.named_parameters():
                 # print(f"{name} has norm: {parameter.norm(1)}")
                 # print(f"{name}.grad has norm: {parameter.grad.norm(2)}")
-                writer.add_scalar(f"Grad/{name}", parameter.grad.norm(2), 
-                                                iteration)
                 # mod the grad
                 if torch.isnan(parameter).any() or torch.isnan(parameter.grad).any():
                     print(f"{name}.grad has {parameter.grad.isnan().sum()}/{np.prod(parameter.shape)} nan parameters")
@@ -102,7 +103,14 @@ def train(model, optimizer, stats, data_loader, args):
         fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
         comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], fillers, recon_img[8:n], fillers])
         img_grad = make_grid(comparision, nrow=8)
+        # draw control points
+        if args.inference_dist == 'Dirichlet':
+            # reshape for Dir
+            # breakpoint()
+            latent = latent.chunk(2, -1)[0].view(*latent.shape[:-3], 
+                            args.strokes_per_img, args.points_per_stroke, -1)
         writer.add_image("Train/Reconstruction", img_grad, epoch)
+        util.add_control_points_plot(generative_model, latent, writer, tag="Train/Control Points", epoch=epoch)
         
         # test every epoch
         save_imgs_dir = util.get_save_test_img_dir(args, epoch)
@@ -151,3 +159,9 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
         img_grad = make_grid(comparision, nrow=8)
         writer.add_image("Test/Reconstruction", img_grad, epoch)
         util.logging.info(f"Epoch {epoch} Test loss | Loss = {stats.tst_losses[-1]:.3f}")
+        # Log the control points plot
+        if args.inference_dist == 'Dirichlet':
+            # reshape for Dir
+            latent = latent.chunk(2, -1)[0].view(*latent.shape[:-3], 
+                            args.strokes_per_img, args.points_per_stroke, -1)
+        util.add_control_points_plot(generative_model, latent, writer, tag="Test/Control Points", epoch=epoch)

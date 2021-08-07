@@ -11,7 +11,7 @@ import util
 from splinesketch.code.bezier import Bezier
 
 class GenerativeModel(nn.Module):
-    def __init__(self, control_points_dim=20, 
+    def __init__(self, control_points_dim=5, 
                         prior_dist='Normal', 
                         likelihood_dist='Normal',
                         device=None):
@@ -24,8 +24,7 @@ class GenerativeModel(nn.Module):
         """
 
         super().__init__()
-        self.supported_prior_dist = ["Normal", "Dirichlet"]
-        assert prior_dist in self.supported_prior_dist
+        self.n_strokes = 1
         self.control_points_dim = control_points_dim
 
         # num_stroke set to 1
@@ -35,12 +34,17 @@ class GenerativeModel(nn.Module):
             self.register_buffer("control_points_loc", 
                                 torch.zeros(1, self.control_points_dim, 2) + 0.5)
             self.register_buffer("control_points_scale", 
-                                torch.ones(1, self.control_points_dim, 2))
+                                torch.ones(1, self.control_points_dim, 2) * 1000)
         elif prior_dist == 'Dirichlet':
             # control_points_dim * 2 for x, y coordinates. the last dim can't be
             # used for x, y because it has to add up to 1.
             self.register_buffer("concentration",
                                 torch.ones(1, self.control_points_dim * 2, 2))
+        elif prior_dist == 'Uniform':
+            self.register_buffer("uniform_low",
+                    torch.zeros(self.n_strokes, self.control_points_dim, 2) - 10)
+            self.register_buffer("uniform_high",
+                    torch.ones(self.n_strokes, self.control_points_dim, 2) + 9)
         else:
             raise NotImplementedError
 
@@ -57,6 +61,12 @@ class GenerativeModel(nn.Module):
         elif self.prior_dist == 'Dirichlet':
             return torch.distributions.Independent(
                 torch.distributions.Dirichlet(self.concentration),
+                reinterpreted_batch_ndims=2,
+            )
+        elif self.prior_dist == 'Uniform':
+            return torch.distributions.Independent(
+                torch.distributions.Uniform(self.uniform_low, 
+                                            self.uniform_high),
                 reinterpreted_batch_ndims=2,
             )
         else:
@@ -103,7 +113,7 @@ class GenerativeModel(nn.Module):
 
         if self.likelihood_dist=='Laplace':
             event_dist = Laplace
-            imgs_dist_std = torch.ones_like(imgs_dist_loc)/ 10 
+            imgs_dist_std = torch.ones_like(imgs_dist_loc) 
         elif self.likelihood_dist=='Normal':
             event_dist = Normal
             imgs_dist_std = torch.ones_like(imgs_dist_loc)/ 100
@@ -132,6 +142,17 @@ class GenerativeModel(nn.Module):
         # imgs = imgs * max_per_recon
 
         log_prior, log_likelihood = 0, 0 
+        if ((self.prior_dist == 'Dirichlet') and (latents.shape[-2] * 2 == 
+                        self.control_points_dist_b(shape).event_shape[-2])):
+            '''This happens when e.g. we use a *Normal inference dist* with output
+            size [b, n_strokes, n_points, 2 (for x, y)] with a *Dir prior
+            dist* which has shape [b, n_strokes, n_points*2 (for x, y), 2
+            (which adds up to 1)].'''
+            latents = latents.view([*shape, self.n_strokes, 
+                                                self.control_points_dim * 2, 1])
+            latents = torch.cat([latents, torch.ones_like(latents)-latents], 
+                                                                        dim=-1)
+
         log_prior = self.control_points_dist_b(shape).log_prob(latents)
         log_likelihood = self.img_dist_b(latents).log_prob(imgs)
         # log_joint = log_prior + log_likelihood
