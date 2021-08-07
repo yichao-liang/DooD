@@ -150,8 +150,10 @@ def init(run_args, device):
         raise NotImplementedError
 
     # Optimizer
-    parameters = guide.parameters()
-    optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
+    # parameters = guide.parameters()
+    parameters = itertools.chain(guide.parameters(), generative_model.parameters())
+    optimizer = torch.optim.Adam(parameters, 
+                                    lr=run_args.lr)
 
     # Stats
     stats = Stats([], [], [], [])

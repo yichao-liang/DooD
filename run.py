@@ -91,9 +91,9 @@ def get_args_parser():
     # Loss
     parser.add_argument(
         "--loss",
-        # default="elbo",
+        default="elbo",
         # default="l1",
-        default="nll",
+        # default="nll",
         choices=['elbo','l1','nll'],
         type=str,
         help=" ",
@@ -108,8 +108,10 @@ def get_args_parser():
     parser.add_argument("--data-dir", 
                         default="./omniglot_dataset/omniglot/",
                         type=str, help=" ")
-    # when changed to 128, the model stopped learning anything
-    parser.add_argument("--batch-size", default=32, type=int, help=" ")
+    # 32 worked for all losses, but for elbo sometimes it miss the "-" in "7"s
+    # 64 seems working well for elbos and most others.
+    # 128, the model stops learning anything quite often.
+    parser.add_argument("--batch-size", default=64, type=int, help=" ")
 
     return parser
 

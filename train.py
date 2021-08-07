@@ -34,7 +34,7 @@ def train(model, optimizer, stats, data_loader, args):
             # if args.loss == 'elbo':
             loss, neg_gen_prob, inf_prob = losses.get_elbo_loss(
                                         generative_model, guide, imgs, 
-                                        loss=args.loss)
+                                        loss=args.loss, iteration=iteration)
 
             loss = loss.mean()
             neg_gen_prob = neg_gen_prob.mean()
