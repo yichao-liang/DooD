@@ -5,6 +5,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import util
 import losses
+from models.base import schedule_model_parameters
 
 def train(model, optimizer, stats, data_loader, args):
     # Write will output to ./log
@@ -30,6 +31,8 @@ def train(model, optimizer, stats, data_loader, args):
             # imgs = one_batch.to(args.device)
 
             optimizer.zero_grad()
+            schedule_model_parameters(generative_model, guide, iteration, 
+                                                        args.loss, args.device)
 
             # if args.loss == 'elbo':
             loss, neg_gen_prob, inf_prob = losses.get_elbo_loss(

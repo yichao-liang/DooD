@@ -10,22 +10,47 @@ from kornia.morphology import dilation
 import util
 from splinesketch.code.bezier import Bezier
 
+def schedule_model_parameters(gen, guide, iteration, loss, device):
+    if loss == 'l1':
+        if iteration == 0:
+            # this loss doesn't use a prior
+            gen.sigma = torch.log(torch.tensor(.02))
+    if loss == 'elbo':
+        if iteration == 0:
+            # sigma = .04 worked for "1, 7"
+            gen.sigma = torch.log(torch.tensor(.05)) 
+            # scale = 0.2 worked well for 1 stroke settings
+            gen.control_points_scale = (torch.ones(gen.strks_per_img, 
+                                                gen.ctrl_pts_per_strk, 2
+                                            )/3).to(device)
+        if iteration == 1e4: 
+            # update at 100 works for "1, 7" but not for all
+            gen.sigma = torch.log(torch.tensor(.03))
+    elif loss == 'nll':
+        # working with σ in renderer set to >=.02, σ for image Gaussian <=.2
+        if iteration == 0:
+            gen.sigma = torch.log(torch.tensor(.02))
+            gen.control_points_scale = (torch.ones(
+                                    gen.strks_per_img, 
+                                    gen.ctrl_pts_per_strk, 2
+                                )/5).to(device)
+
 class GenerativeModel(nn.Module):
-    def __init__(self, control_points_dim=5, 
+    def __init__(self, ctrl_pts_per_strk=5, 
                         prior_dist='Normal', 
                         likelihood_dist='Normal',
-                        device=None):
+                        strks_per_img=1):
         """in the base model we pre-specify the number of control points and 
         work with data that has 1 stroke.
 
         Args:
-            control_points_dim (int): number of control points per stroke
+            ctrl_pts_per_strk (int): number of control points per stroke
             prior_dist (str): currently support ['Normal', 'Dirichlet']
         """
 
         super().__init__()
-        self.n_strokes = 1
-        self.control_points_dim = control_points_dim
+        self.strks_per_img = strks_per_img
+        self.ctrl_pts_per_strk = ctrl_pts_per_strk
 
         # num_stroke set to 1
         # Prior and likelihood distribution.
@@ -33,24 +58,24 @@ class GenerativeModel(nn.Module):
         self.likelihood_dist = likelihood_dist
         if prior_dist == 'Normal':
             self.register_buffer("control_points_loc", 
-                                    torch.zeros(self.n_strokes, 
-                                    self.control_points_dim, 2) + 0.5)
+                                    torch.zeros(self.strks_per_img, 
+                                    self.ctrl_pts_per_strk, 2) + 0.5)
             self.register_buffer("control_points_scale", 
-                                    torch.ones(self.n_strokes, 
-                                    self.control_points_dim, 2) / 5)
+                                    torch.ones(self.strks_per_img, 
+                                    self.ctrl_pts_per_strk, 2) / 5)
                 # divide by 5 works
                 # shouldn't use value too small, e.g. .1, which leads to no mass
                 # on point around 1.
         elif prior_dist == 'Dirichlet':
-            # control_points_dim * 2 for x, y coordinates. the last dim can't be
+            # ctrl_pts_per_strk * 2 for x, y coordinates. the last dim can't be
             # used for x, y because it has to add up to 1.
             self.register_buffer("concentration",
-                                torch.ones(self.n_strokes, self.control_points_dim * 2, 2))
+                                torch.ones(self.strks_per_img, self.ctrl_pts_per_strk * 2, 2))
         elif prior_dist == 'Uniform':
             self.register_buffer("uniform_low",
-                    torch.zeros(self.n_strokes, self.control_points_dim, 2) - 10)
+                    torch.zeros(self.strks_per_img, self.ctrl_pts_per_strk, 2) - 10)
             self.register_buffer("uniform_high",
-                    torch.ones(self.n_strokes, self.control_points_dim, 2) + 9)
+                    torch.ones(self.strks_per_img, self.ctrl_pts_per_strk, 2) + 9)
         else:
             raise NotImplementedError
 
@@ -66,7 +91,7 @@ class GenerativeModel(nn.Module):
         self.sigma = torch.nn.Parameter(torch.tensor(-4.), requires_grad=True)
         """
         self.sigma = torch.log(torch.tensor(.04))
-        self.dilation_kernel = (torch.ones(3,3)).to(device)
+        self.register_buffer("dilation_kernel", torch.ones(3,3))
         # self.gauss = kornia.filters.GaussianBlur2d((7, 7), (5.5, 5.5))
     
     def control_points_dist(self):
@@ -163,11 +188,11 @@ class GenerativeModel(nn.Module):
         if ((self.prior_dist == 'Dirichlet') and (latents.shape[-2] * 2 == 
                         self.control_points_dist_b(shape).event_shape[-2])):
             '''This happens when e.g. we use a *Normal inference dist* with output
-            size [b, n_strokes, n_points, 2 (for x, y)] with a *Dir prior
-            dist* which has shape [b, n_strokes, n_points*2 (for x, y), 2
+            size [b, strks_per_img, n_points, 2 (for x, y)] with a *Dir prior
+            dist* which has shape [b, strks_per_img, n_points*2 (for x, y), 2
             (which adds up to 1)].'''
-            latents = latents.view([*shape, self.n_strokes, 
-                                                self.control_points_dim * 2, 1])
+            latents = latents.view([*shape, self.strks_per_img, 
+                                                self.ctrl_pts_per_strk * 2, 1])
             latents = torch.cat([latents, torch.ones_like(latents)-latents], 
                                                                         dim=-1)
 
@@ -184,24 +209,26 @@ class GenerativeModel(nn.Module):
         return imgs, control_points_b
 
 class Guide(nn.Module):
-    def __init__(self, control_points_dim=20, img_dim=[1, 28, 28], 
-                hidden_dim=256, num_layers=3, dist="Normal", net_type="CNN"):
+    def __init__(self, ctrl_pts_per_strk=20, img_dim=[1, 28, 28], 
+                hidden_dim=512, num_layers=3, dist="Normal", net_type="CNN",
+                strks_per_img=1):
         super().__init__()
 
+        # Parameters
         self.img_dim = np.prod(img_dim)
-        self.control_points_dim = control_points_dim
-        self.n_strokes = 1
+        self.strks_per_img = strks_per_img
+        self.ctrl_pts_per_strk = ctrl_pts_per_strk
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
 
-
+        # Inference distribution
         self.dist = dist
         if dist == 'Dirichlet':
             # _ * 2 (for x, y) * 2 (for concentration, 2 values for an value)
-            self.output_dim = self.control_points_dim * 2 * 2
+            self.output_dim = self.strks_per_img*self.ctrl_pts_per_strk*2*2
         elif dist == 'Normal':
             # _ * 2 (for x, y) * 2 (for loc, std)
-            self.output_dim = self.control_points_dim * 2 * 2
+            self.output_dim = self.strks_per_img*self.ctrl_pts_per_strk*2*2
         else: raise NotImplementedError
 
         self.net_type = net_type
@@ -226,7 +253,7 @@ class Guide(nn.Module):
         Args:
             imgs: [*shape, channels, h, w]
         Return:
-            dist: [*shape, n_strokes, n_control_points, 2 (for x, y)]
+            dist: [*shape, strks_per_img, n_control_points, 2 (for x, y)]
         '''
         shape = imgs.shape[:-3]
         if self.net_type == "MLP":
@@ -239,7 +266,7 @@ class Guide(nn.Module):
                 torch.sigmoid(
                 self.control_points_net(imgs)
                 # 1: num_stroke, _: num_cont_points, 2: (x, y), 2: mean, std
-                ).view(*[*shape, self.n_strokes, self.control_points_dim, 2, 2]) 
+                ).view(*[*shape, self.strks_per_img, self.ctrl_pts_per_strk, 2, 2]) 
                 .chunk(2, -1)
                 )
             raw_loc = raw_loc.squeeze(-1)
@@ -253,7 +280,7 @@ class Guide(nn.Module):
             concentration = (
                 torch.sigmoid(
                     self.control_points_net(imgs)
-                ).view(*[*shape, self.n_strokes, self.control_points_dim * 2, 2])
+                ).view(*[*shape, self.strks_per_img, self.ctrl_pts_per_strk * 2, 2])
             )
             return torch.distributions.Independent(
                     torch.distributions.Dirichlet(concentration),

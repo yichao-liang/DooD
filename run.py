@@ -27,7 +27,7 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=1)
+    parser.add_argument("--seed", default=3)
 
     # Model
     parser.add_argument(
@@ -77,7 +77,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--points-per-stroke",
-        default='5',
+        default=4,
         type=int,
         help="Number of control points per stroke curve."
     )
@@ -109,8 +109,8 @@ def get_args_parser():
                         default="./omniglot_dataset/omniglot/",
                         type=str, help=" ")
     # 32 worked for all losses, but for elbo sometimes it miss the "-" in "7"s
-    # 64 seems working well for elbos and most others.
-    # 128, the model stops learning anything quite often.
+    # 64 works well for elbos and most others loss (in "1, 7" dataset).
+    # 128, the model stops learning anything quite often (in "1, 7").
     parser.add_argument("--batch-size", default=64, type=int, help=" ")
 
     return parser

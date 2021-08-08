@@ -17,8 +17,8 @@ def get_elbo_loss(generative_model, guide, imgs, loss="nll", iteration=None):
             if iteration == 0:
                 generative_model.sigma = torch.log(torch.tensor(.04))
                 generative_model.control_points_scale = (torch.ones(
-                                        generative_model.n_strokes, 
-                                        generative_model.control_points_dim, 2
+                                        generative_model.strks_per_img, 
+                                        generative_model.ctrl_pts_per_strk, 2
                                     )/5).cuda()
             if iteration == 100:
                 generative_model.sigma = torch.log(torch.tensor(.03))
@@ -27,8 +27,8 @@ def get_elbo_loss(generative_model, guide, imgs, loss="nll", iteration=None):
             if iteration == 0:
                 generative_model.sigma = torch.log(torch.tensor(.02))
                 generative_model.control_points_scale = (torch.ones(
-                                        generative_model.n_strokes, 
-                                        generative_model.control_points_dim, 2
+                                        generative_model.strks_per_img, 
+                                        generative_model.ctrl_pts_per_strk, 2
                                     )/5).cuda()
 
         latent = guide.rsample(imgs)

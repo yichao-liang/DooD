@@ -39,27 +39,40 @@ def safe_div(dividend, divisor):
     dividend[idx] =  dividend[idx] / divisor[idx] 
     return dividend
 
-def add_control_points_plot(gen, latents, writer, tag=None, epoch=None):
-    n = 8
-    steps = torch.linspace(0, 1, 500).cuda()
-    curves = gen.bezier.sample_curve(latents[:n], steps)
+# Plotting
+def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,):
+    num_shown = 8
+    num_steps_per_strk = 500
+    num_strks_per_img, num_pts_per_strk = latents.shape[1], latents.shape[2]
+    total_pts_num = num_strks_per_img * num_pts_per_strk
+
+    steps = torch.linspace(0, 1, num_steps_per_strk).cuda()
+    latents = latents[:num_shown]
+    curves = gen.bezier.sample_curve(latents[:num_shown], steps)
 
     fig, ax= plt.subplots(2,4,figsize=(10, 4))
 
-    for i in range(n):
+    # [num_shown, num_strks, num_pts, 2]-> [num_shown, total_pts_num, 2]
+    latents = latents.view([num_shown, total_pts_num, 2]).cpu()
+    # [num_shown, num_strks, 2, num_steps]
+    curves = curves.cpu().flip(1)
+    curves = rearrange(curves, 'b k xy p -> b (k p) xy')
+    # transpose(2, 3).reshape(num_shown, num_strks_per_img*
+    #                                                 num_steps_per_strk, 2).cpu()
+    for i in range(num_shown):
         ax[i//4][i%4].set_aspect('equal')
         ax[i//4][i%4].axis('equal')
         ax[i//4][i%4].invert_yaxis()
-        im = ax[i//4][i%4].scatter(latents.squeeze().cpu()[i][:,0],
-                           latents.squeeze().cpu()[i][:,1],
-                                            marker='x',
-                                            s=30,c=np.arange(5),
+        im = ax[i//4][i%4].scatter(x=latents[i][:,0],
+                                   y=latents[i][:,1],
+                                    marker='x',
+                                    s=30,c=np.arange(total_pts_num),
                                             cmap='rainbow')
-        ax[i//4][i%4].scatter(x=curves.squeeze().cpu()[i][0,:],
-                      y=curves.squeeze().cpu()[i][1,:],
-                                            s=0.1,
-                                            c=-np.arange(500),
-                                            cmap='rainbow')       
+        ax[i//4][i%4].scatter(x=curves[i][:,0], y=curves[i][:,1],
+                                                s=0.1,
+                                                c=-np.arange(num_strks_per_img*
+                                                    num_steps_per_strk),
+                                                cmap='rainbow')       
     fig.subplots_adjust(right=0.94)
     cbar_ax = fig.add_axes([0.95, 0.1, 0.01, 0.8])
     fig.colorbar(im, cax=cbar_ax)
@@ -133,15 +146,17 @@ def init(run_args, device):
     if run_args.model_type == 'base':
         # Generative model
         generative_model = models.base.GenerativeModel(
-                                control_points_dim=run_args.points_per_stroke,
+                                ctrl_pts_per_strk=run_args.points_per_stroke,
                                 prior_dist=run_args.prior_dist,
                                 likelihood_dist=run_args.likelihood_dist,
-                                device=device).to(device)
+                                strks_per_img=run_args.strokes_per_img,
+                                ).to(device)
 
         # Guide
-        guide = models.base.Guide(control_points_dim=run_args.points_per_stroke,
+        guide = models.base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
                                 dist=run_args.inference_dist,
-                                net_type=run_args.inference_net_architecture
+                                net_type=run_args.inference_net_architecture,
+                                strks_per_img=run_args.strokes_per_img,
                                 ).to(device)
 
         # Model tuple
@@ -178,10 +193,10 @@ def init(run_args, device):
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ]))
         # to only use a subset
-        idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
-        # # idx = trn_dataset.targets == 1
-        trn_dataset.targets = trn_dataset.targets[idx]
-        trn_dataset.data= trn_dataset.data[idx]
+        # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
+        # idx = trn_dataset.targets == 1
+        # trn_dataset.targets = trn_dataset.targets[idx]
+        # trn_dataset.data= trn_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
@@ -197,10 +212,10 @@ def init(run_args, device):
                             #transforms.Normalize((0.1307,), (0.3081,))
                         ]))
         # to only use a subset
-        idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
-        # # idx = tst_dataset.targets == 1
-        tst_dataset.targets = tst_dataset.targets[idx]
-        tst_dataset.data= tst_dataset.data[idx]
+        # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
+        # idx = tst_dataset.targets == 1
+        # tst_dataset.targets = tst_dataset.targets[idx]
+        # tst_dataset.data= tst_dataset.data[idx]
 
         test_loader = DataLoader(tst_dataset,
                 batch_size=run_args.batch_size, shuffle=True, num_workers=4
