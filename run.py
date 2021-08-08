@@ -71,7 +71,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--strokes_per_img",
-        default=1,
+        default=2,
         type=int,
         help="Maximum number of strokes per image"
     )
