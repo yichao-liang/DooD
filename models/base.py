@@ -14,17 +14,20 @@ def schedule_model_parameters(gen, guide, iteration, loss, device):
     if loss == 'l1':
         if iteration == 0:
             # this loss doesn't use a prior
+            # .02 works well for 1 stroke
+            # might need higher for more strokes
             gen.sigma = torch.log(torch.tensor(.02))
     if loss == 'elbo':
         if iteration == 0:
             # sigma = .04 worked for "1, 7"
-            gen.sigma = torch.log(torch.tensor(.05)) 
-            # scale = 0.2 worked well for 1 stroke settings
+            # scale = 1/5 worked well for 1 stroke settings, but smaller than 1/5
+            # second update at 100 works for "1, 7" but not for all
+            gen.sigma = torch.log(torch.tensor(.04)) 
+            # doesn't work well
             gen.control_points_scale = (torch.ones(gen.strks_per_img, 
                                                 gen.ctrl_pts_per_strk, 2
-                                            )/3).to(device)
-        if iteration == 1e4: 
-            # update at 100 works for "1, 7" but not for all
+                                            )/5).to(device)
+        if iteration == 2e3: 
             gen.sigma = torch.log(torch.tensor(.03))
     elif loss == 'nll':
         # working with σ in renderer set to >=.02, σ for image Gaussian <=.2
@@ -209,9 +212,8 @@ class GenerativeModel(nn.Module):
         return imgs, control_points_b
 
 class Guide(nn.Module):
-    def __init__(self, ctrl_pts_per_strk=20, img_dim=[1, 28, 28], 
-                hidden_dim=512, num_layers=3, dist="Normal", net_type="CNN",
-                strks_per_img=1):
+    def __init__(self, strks_per_img=1, ctrl_pts_per_strk=5, img_dim=[1, 28, 28], 
+                hidden_dim=256, num_layers=2, dist="Normal", net_type="CNN"):
         super().__init__()
 
         # Parameters
@@ -237,16 +239,19 @@ class Guide(nn.Module):
                 in_dim=self.img_dim,
                 out_dim=self.output_dim,            
                 hidden_dim=self.hidden_dim,
-                num_layers=self.num_layers,
-            )
+                num_layers=self.num_layers,)
         elif net_type == 'CNN':
             self.control_points_net = util.init_cnn(
                 in_dim=self.img_dim,
                 out_dim=self.output_dim,
-                num_mlp_layers=num_layers,
-            )
+                num_mlp_layers=num_layers,)
+        elif net_type == 'STN':
+            self.stn, self.control_points_net = util.init_stn(
+                                        in_dim=self.img_dim,
+                                        out_dim=self.output_dim,
+                                        num_mlp_layers=num_layers,
+                                        end_cnn=True)    
         else: raise NotImplementedError
-
     
     def get_control_points_dist(self, imgs):
         '''q(control_points | img) = Normal( ; f(MLP(imgs)))
@@ -259,6 +264,10 @@ class Guide(nn.Module):
         if self.net_type == "MLP":
             # flatten the images
             imgs = imgs.view(-1, self.img_dim)
+        elif self.net_type == "STN":
+            imgs = self.stn(imgs)
+            if self.keep_stn_out:
+                self.stn_out_imgs = imgs.detach().clone()
 
         if self.dist == 'Normal':
             # raw_loc shape: [batch, strokes, points, (x,y), 1]
@@ -296,7 +305,7 @@ class Guide(nn.Module):
         '''
         return self.get_control_points_dist(imgs).log_prob(latent)
 
-    def rsample(self, imgs, sample_shape=[]):
+    def rsample(self, imgs, sample_shape=[], stn_out=False):
         '''Sample from q(control_points | imgs)
 
         Args:
@@ -307,5 +316,9 @@ class Guide(nn.Module):
             control_points: [*sample_shape, *batch_shape, num_strokes, 
                                                     num_points, 2 (for x, y)]
         '''
+        self.keep_stn_out = stn_out
         control_points = self.get_control_points_dist(imgs).rsample(sample_shape)
-        return control_points
+        if stn_out and self.net_type == "STN":
+            return control_points, self.stn_out_imgs
+        else:
+            return control_points

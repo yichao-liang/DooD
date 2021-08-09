@@ -87,6 +87,7 @@ def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,):
     # breakpoint()
 
     writer.add_image(tag, image, epoch)
+    plt.close('all')
 
 def get_baseline_save_dir():
     return "save/baseline"
@@ -193,10 +194,10 @@ def init(run_args, device):
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ]))
         # to only use a subset
-        # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
+        idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
         # idx = trn_dataset.targets == 1
-        # trn_dataset.targets = trn_dataset.targets[idx]
-        # trn_dataset.data= trn_dataset.data[idx]
+        trn_dataset.targets = trn_dataset.targets[idx]
+        trn_dataset.data= trn_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
@@ -212,10 +213,10 @@ def init(run_args, device):
                             #transforms.Normalize((0.1307,), (0.3081,))
                         ]))
         # to only use a subset
-        # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
+        idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
         # idx = tst_dataset.targets == 1
-        # tst_dataset.targets = tst_dataset.targets[idx]
-        # tst_dataset.data= tst_dataset.data[idx]
+        tst_dataset.targets = tst_dataset.targets[idx]
+        tst_dataset.data= tst_dataset.data[idx]
 
         test_loader = DataLoader(tst_dataset,
                 batch_size=run_args.batch_size, shuffle=True, num_workers=4
@@ -454,6 +455,48 @@ def init_cnn(in_dim, out_dim, num_mlp_layers, non_linearity=None):
     conv_net = ConvolutionNetwork(mlp=mlp)
 
     return conv_net
+
+class SpatialTransformerNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.localization = nn.Sequential(
+                nn.Conv2d(1, 8, kernel_size=7),
+                nn.MaxPool2d(2, stride=2),
+                nn.ReLU(True),
+                nn.Conv2d(8, 10, kernel_size=5),
+                nn.MaxPool2d(2, stride=2),
+                nn.ReLU(True),
+            )
+        # Regressor for the 3x2 affine matrix
+        self.fc_loc = nn.Sequential(
+                nn.Linear(10 * 3 * 3, 32),
+                nn.ReLU(True),
+                nn.Linear(32, 3 * 2)
+            )
+        # Initialize the weight/bias with identity transformation
+        self.fc_loc[2].weight.data.zero_()
+        self.fc_loc[2].bias = torch.nn.Parameter(torch.tensor([1,0,0,0,1,0], 
+                                                            dtype=torch.float))
+    def forward(self, x):
+        xs = self.localization(x)
+        xs = xs.view(-1, 10 * 3 * 3)
+        theta = self.fc_loc(xs)
+        theta = theta.view(-1, 2, 3)
+
+        grid = F.affine_grid(theta, x.shape, align_corners=True)
+        x = F.grid_sample(x, grid, align_corners=True)
+        return x
+ 
+def init_stn(in_dim=None, out_dim=None, num_mlp_layers=None, 
+                        non_linearity=None, end_cnn=False):
+    stn = SpatialTransformerNetwork()
+    if end_cnn:
+        cnn = init_cnn(in_dim=in_dim, out_dim=out_dim, 
+                                num_mlp_layers=num_mlp_layers,
+                        ) 
+        return stn, cnn
+    else:
+        return stn
 
 def get_device():
     if torch.cuda.is_available():

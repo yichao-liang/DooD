@@ -27,7 +27,7 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=3)
+    parser.add_argument("--seed", default=7)
 
     # Model
     parser.add_argument(
@@ -62,16 +62,17 @@ def get_args_parser():
         help=""
     )
     parser.add_argument(
-        "--inference-net-architecture",
-        default='CNN',
+        "--inference_net_architecture",
+        default='STN',
+        # default='CNN',
         # default='MLP',
         type=str,
-        choices=['CNN','MLP'],
+        choices=['STN','CNN','MLP'],
         help=""
     )
     parser.add_argument(
         "--strokes_per_img",
-        default=2,
+        default=1,
         type=int,
         help="Maximum number of strokes per image"
     )
@@ -91,8 +92,8 @@ def get_args_parser():
     # Loss
     parser.add_argument(
         "--loss",
-        default="elbo",
-        # default="l1",
+        # default="elbo",
+        default="l1",
         # default="nll",
         choices=['elbo','l1','nll'],
         type=str,

@@ -33,7 +33,6 @@ def train(model, optimizer, stats, data_loader, args):
             optimizer.zero_grad()
             schedule_model_parameters(generative_model, guide, iteration, 
                                                         args.loss, args.device)
-
             # if args.loss == 'elbo':
             loss, neg_gen_prob, inf_prob = losses.get_elbo_loss(
                                         generative_model, guide, imgs, 
@@ -101,10 +100,19 @@ def train(model, optimizer, stats, data_loader, args):
         # Log training reconstruction
         with torch.no_grad():
             n = min(imgs.shape[0], 16)
-            latent = guide.rsample(imgs)
+            if args.inference_net_architecture == "STN":
+                latent, stn_out = guide.rsample(imgs, stn_out=True)
+            else:
+                latent = guide.rsample(imgs)
             recon_img = generative_model.img_dist_b(latent).mean
         fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
-        comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], fillers, recon_img[8:n], fillers])
+        if args.inference_net_architecture == 'STN':
+            comparision = torch.cat([imgs[:8], stn_out[:8], recon_img[:8] ,
+                                    imgs[8:n], fillers, stn_out[8:n], fillers, 
+                                    recon_img[8:n], fillers])        
+        else:
+            comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], 
+                                            fillers, recon_img[8:n], fillers])
         img_grad = make_grid(comparision, nrow=8)
         # draw control points
         if args.inference_dist == 'Dirichlet':
@@ -142,10 +150,20 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
 
         if save_imgs_dir is not None:
             n = min(imgs.shape[0], 16)
-            latent = guide.rsample(imgs)
+            if args.inference_net_architecture == "STN":
+                latent, stn_out = guide.rsample(imgs, stn_out=True)
+            else:
+                latent = guide.rsample(imgs)
             recon_img = generative_model.img_dist_b(latent).mean
             fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
-            comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], fillers, recon_img[8:n], fillers])
+
+            if args.inference_net_architecture == "STN":
+                comparision = torch.cat([imgs[:8], stn_out[:8], recon_img[:8], 
+                                    imgs[8:n], fillers, stn_out[8:n], fillers, 
+                                    recon_img[8:n], fillers])
+            else:
+                comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], 
+                                            fillers, recon_img[8:n], fillers])
             save_image(comparision.cpu(), save_imgs_dir, nrow=8)
         
         # Logging

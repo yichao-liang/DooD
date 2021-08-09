@@ -9,27 +9,7 @@ def get_elbo_loss(generative_model, guide, imgs, loss="nll", iteration=None):
     '''
 
     if torch.is_tensor(imgs):
-        if loss == 'l1':
-            if iteration == 0:
-                # this loss doesn't use a prior
-                generative_model.sigma = torch.log(torch.tensor(.02))
-        if loss == 'elbo':
-            if iteration == 0:
-                generative_model.sigma = torch.log(torch.tensor(.04))
-                generative_model.control_points_scale = (torch.ones(
-                                        generative_model.strks_per_img, 
-                                        generative_model.ctrl_pts_per_strk, 2
-                                    )/5).cuda()
-            if iteration == 100:
-                generative_model.sigma = torch.log(torch.tensor(.03))
-        elif loss == 'nll':
-            # working with σ in renderer set to >=.02, σ for image Gaussian <=.2
-            if iteration == 0:
-                generative_model.sigma = torch.log(torch.tensor(.02))
-                generative_model.control_points_scale = (torch.ones(
-                                        generative_model.strks_per_img, 
-                                        generative_model.ctrl_pts_per_strk, 2
-                                    )/5).cuda()
+
 
         latent = guide.rsample(imgs)
 
