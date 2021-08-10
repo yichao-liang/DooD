@@ -12,6 +12,7 @@ def get_elbo_loss(generative_model, guide, imgs, loss="nll", iteration=None):
 
 
         latent = guide.rsample(imgs)
+        generative_model.stn_transform = guide.stn_transform
 
         guide_log_prob = guide.log_prob(imgs, latent)
         log_prior, log_likelihood = generative_model.log_prob(latent, imgs)

@@ -55,6 +55,12 @@ def train(model, optimizer, stats, data_loader, args):
             writer.add_scalars("Gradient Norm", {f"Grad/{n}":
                                         p.grad.norm(2) for n, p in 
                                         guide.named_parameters()}, iteration)
+            writer.add_scalars("Parameters/gen.sigma",
+                            util.constrain_parameter(generative_model.sigma, 
+                                                min=.01, max=.05),iteration)
+            writer.add_scalars("Parameters/tanh.norm.slope",
+                util.constrain_parameter(generative_model.tanh_norm_slope, 
+                                                min=.1,max=.7),iteration)
             for name, parameter in guide.named_parameters():
                 # print(f"{name} has norm: {parameter.norm(1)}")
                 # print(f"{name}.grad has norm: {parameter.grad.norm(2)}")
@@ -104,6 +110,7 @@ def train(model, optimizer, stats, data_loader, args):
                 latent, stn_out = guide.rsample(imgs, stn_out=True)
             else:
                 latent = guide.rsample(imgs)
+            generative_model.stn_transform = guide.stn_transform
             recon_img = generative_model.img_dist_b(latent).mean
         fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
         if args.inference_net_architecture == 'STN':
@@ -123,7 +130,7 @@ def train(model, optimizer, stats, data_loader, args):
         writer.add_image("Train/Reconstruction", img_grad, epoch)
         util.add_control_points_plot(generative_model, latent, writer, tag="Train/Control Points", epoch=epoch)
         
-        # test every epoch
+        # Test every epoch
         save_imgs_dir = util.get_save_test_img_dir(args, epoch)
         test(model, stats, test_loader, args, save_imgs_dir, epoch=epoch, writer=writer)
 
@@ -154,6 +161,7 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
                 latent, stn_out = guide.rsample(imgs, stn_out=True)
             else:
                 latent = guide.rsample(imgs)
+            generative_model.stn_transform = guide.stn_transform
             recon_img = generative_model.img_dist_b(latent).mean
             fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
 

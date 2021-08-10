@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from einops import rearrange
+from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
 import models.base
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
@@ -38,6 +39,26 @@ def safe_div(dividend, divisor):
     divisor[idx] = divisor[idx].clamp(min=1e-6)
     dividend[idx] =  dividend[idx] / divisor[idx] 
     return dividend
+
+def sigmoid(x, min=0., max=1., shift=.5, slope=1.):
+    return (
+        (max-min)/(1+torch.exp(-slope * (-shift + x))
+        ) + min)
+
+def constrain_parameter(param, min=5e-2, max=1e-2):
+    return torch.sigmoid(param) * (max-min) + min
+
+def normalize_pixel_values(img, method='tanh', slope=0.3):
+    if method == 'tanh':
+        img = torch.tanh(img/slope)
+    elif method == 'maxnorm':
+        batch_dim = img.shape[0]
+        max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
+        max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1)
+        img = safe_div(img, max_per_recon)
+    else:
+        raise NotImplementedError
+    return img
 
 # Plotting
 def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,):
@@ -190,12 +211,12 @@ def init(run_args, device):
                     transform=transforms.Compose([
                        transforms.RandomRotation(30, fill=(0,)),
                        transforms.ToTensor(),
-                    #    transforms.GaussianBlur(kernel_size=3)
+                       transforms.GaussianBlur(kernel_size=3)
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ]))
         # to only use a subset
         idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
-        # idx = trn_dataset.targets == 1
+        # # idx = trn_dataset.targets == 1
         trn_dataset.targets = trn_dataset.targets[idx]
         trn_dataset.data= trn_dataset.data[idx]
 
@@ -214,7 +235,7 @@ def init(run_args, device):
                         ]))
         # to only use a subset
         idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
-        # idx = tst_dataset.targets == 1
+        # # idx = tst_dataset.targets == 1
         tst_dataset.targets = tst_dataset.targets[idx]
         tst_dataset.data= tst_dataset.data[idx]
 
@@ -459,7 +480,7 @@ def init_cnn(in_dim, out_dim, num_mlp_layers, non_linearity=None):
 class SpatialTransformerNetwork(nn.Module):
     def __init__(self):
         super().__init__()
-        self.localization = nn.Sequential(
+        self.localization1 = nn.Sequential(
                 nn.Conv2d(1, 8, kernel_size=7),
                 nn.MaxPool2d(2, stride=2),
                 nn.ReLU(True),
@@ -468,25 +489,76 @@ class SpatialTransformerNetwork(nn.Module):
                 nn.ReLU(True),
             )
         # Regressor for the 3x2 affine matrix
-        self.fc_loc = nn.Sequential(
+        # todo: contraint the angle to be within [-pi, pi]
+        self.localization2 = nn.Sequential(
                 nn.Linear(10 * 3 * 3, 32),
                 nn.ReLU(True),
-                nn.Linear(32, 3 * 2)
+                nn.Linear(32, 4) # translation x, y; scale; angle
             )
         # Initialize the weight/bias with identity transformation
-        self.fc_loc[2].weight.data.zero_()
-        self.fc_loc[2].bias = torch.nn.Parameter(torch.tensor([1,0,0,0,1,0], 
+        self.localization2[2].weight.data.zero_()
+        self.localization2[2].bias = torch.nn.Parameter(torch.tensor([0,0,1,0], 
                                                             dtype=torch.float))
-    def forward(self, x):
-        xs = self.localization(x)
+    def get_transform_param(self, x):
+        '''
+        Args:
+            x [n_batch, n_channel, h, w]: input map
+        Return:
+            thetas [n_batch, 4 (translation x, y; scale; angle)]: contraint 
+                affine matrix
+        '''
+        # step1: a transformation conditional on the input
+        xs = self.localization1(x)
         xs = xs.view(-1, 10 * 3 * 3)
-        theta = self.fc_loc(xs)
-        theta = theta.view(-1, 2, 3)
+        thetas = self.localization2(xs)
+        thetas = thetas.view(-1, 4)
+        thetas = self.get_affine_matrix_from_param(thetas)
+        return thetas
 
+    def get_affine_matrix_from_param(self, thetas):
+        '''Get a batch of 2x3 affine matrix from transformation parameters 
+        thetas of shape [batch_size, 4 (shift x, y; scale; angle)].
+        '''
+        batch_size = thetas.shape[0]
+        translations = thetas[:, :2]
+        center = torch.zeros_like(thetas[:, :2])
+        scale = thetas[:, 2:3].expand(-1, 2)
+        angle = torch.tanh(thetas[:, 3]) * np.pi
+        affine_matrix = get_affine_matrix2d(translations=translations,
+                                            center=center,
+                                            scale=scale,
+                                            angle=angle)[:, :2]
+        return affine_matrix
+
+    @staticmethod
+    def transform(x, theta):
+        # step2: the transformation parameters are used to create a sampling grid
         grid = F.affine_grid(theta, x.shape, align_corners=True)
-        x = F.grid_sample(x, grid, align_corners=True)
+        # step3: take the image, sampling grid to the sampler, producing output
+        x = F.grid_sample(x, grid, align_corners=True,)
         return x
- 
+    
+    def forward(self, x, output_theta=False):
+        thetas = self.get_transform_param(x)
+        x_out = self.transform(x, thetas)
+        if output_theta:
+            return x_out, thetas
+        else:
+            x_out
+    
+def inverse_stn_transformation(x, theta):
+    '''
+    Args:
+        x: reconstructed images
+        theta: transformation parameters output by the localization network
+            to "zoom in"/focus on a part of the image.
+    Return:
+        x: images put back to its original background
+    '''
+    r_theta = invert_affine_transform(theta)
+    x_out = SpatialTransformerNetwork.transform(x, r_theta)
+    return x_out
+
 def init_stn(in_dim=None, out_dim=None, num_mlp_layers=None, 
                         non_linearity=None, end_cnn=False):
     stn = SpatialTransformerNetwork()

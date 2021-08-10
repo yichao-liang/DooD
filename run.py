@@ -63,8 +63,8 @@ def get_args_parser():
     )
     parser.add_argument(
         "--inference_net_architecture",
-        default='STN',
-        # default='CNN',
+        # default='STN',
+        default='CNN',
         # default='MLP',
         type=str,
         choices=['STN','CNN','MLP'],
@@ -78,7 +78,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--points-per-stroke",
-        default=4,
+        default=5,
         type=int,
         help="Number of control points per stroke curve."
     )
@@ -92,8 +92,8 @@ def get_args_parser():
     # Loss
     parser.add_argument(
         "--loss",
-        # default="elbo",
-        default="l1",
+        default="elbo",
+        # default="l1",
         # default="nll",
         choices=['elbo','l1','nll'],
         type=str,
@@ -112,7 +112,7 @@ def get_args_parser():
     # 32 worked for all losses, but for elbo sometimes it miss the "-" in "7"s
     # 64 works well for elbos and most others loss (in "1, 7" dataset).
     # 128, the model stops learning anything quite often (in "1, 7").
-    parser.add_argument("--batch-size", default=64, type=int, help=" ")
+    parser.add_argument("--batch-size", default=128, type=int, help=" ")
 
     return parser
 
