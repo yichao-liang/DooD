@@ -32,7 +32,9 @@ def get_args_parser():
     # Model
     parser.add_argument(
         "--model-type",
+        # default="sequential", 
         default="base", 
+        choices=['base', 'sequential'],
         type=str,
         help=" "
     )
@@ -72,7 +74,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--strokes_per_img",
-        default=1,
+        default=3,
         type=int,
         help="Maximum number of strokes per image"
     )
@@ -100,7 +102,7 @@ def get_args_parser():
         help=" ",
     )
 
-    # Data
+    # Dataset
     parser.add_argument("--dataset",
                     default="mnist",
                     # default="generative_model",

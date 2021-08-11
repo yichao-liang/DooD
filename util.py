@@ -31,6 +31,27 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
+ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
+
+def init_z_where(z_where_type):
+    '''
+    '3': (scale, shift x, y)
+    '4_no_rotate': (scale x, y, shift x, y)
+    '4_rotate': (scale, shift x, y, rotate)
+    '5': (scale x, y, shift x, y, rotate
+    '''
+    init_z_where_params = {'3': ZWhereParam(torch.tensor([1,0,0]), 
+                                                torch.ones(3)/5, 3),
+                           '4_no_rotate': ZWhereParam(torch.tensor([1,1,0,0]),
+                                                torch.ones(4)/5, 4),
+                           '4_rotate': ZWhereParam(torch.tensor([1,0,0,0]),
+                                                torch.ones(4)/5, 4),
+                           '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
+                                                torch.ones(5)/5, 5),
+                        }
+    assert z_where_type in init_z_where_params
+    return init_z_where_params.get(z_where_type)
+    
 def safe_div(dividend, divisor):
     '''divident / divisor, only do it for nonzero divisor dims
     '''
@@ -512,23 +533,8 @@ class SpatialTransformerNetwork(nn.Module):
         xs = xs.view(-1, 10 * 3 * 3)
         thetas = self.localization2(xs)
         thetas = thetas.view(-1, 4)
-        thetas = self.get_affine_matrix_from_param(thetas)
+        thetas = SpatialTransformerNetwork.get_affine_matrix_from_param(thetas)
         return thetas
-
-    def get_affine_matrix_from_param(self, thetas):
-        '''Get a batch of 2x3 affine matrix from transformation parameters 
-        thetas of shape [batch_size, 4 (shift x, y; scale; angle)].
-        '''
-        batch_size = thetas.shape[0]
-        translations = thetas[:, :2]
-        center = torch.zeros_like(thetas[:, :2])
-        scale = thetas[:, 2:3].expand(-1, 2)
-        angle = torch.tanh(thetas[:, 3]) * np.pi
-        affine_matrix = get_affine_matrix2d(translations=translations,
-                                            center=center,
-                                            scale=scale,
-                                            angle=angle)[:, :2]
-        return affine_matrix
 
     @staticmethod
     def transform(x, theta):
@@ -545,7 +551,42 @@ class SpatialTransformerNetwork(nn.Module):
             return x_out, thetas
         else:
             x_out
-    
+
+def get_affine_matrix_from_param(thetas, z_where_type):
+    '''Get a batch of 2x3 affine matrix from transformation parameters 
+    thetas of shape [batch_size, 4 (shift x, y; scale; angle)]. <-deprecated format
+    # todo make capatible with base model stn
+    z_where_type:
+        '3': (scale, shift x, y)
+        '4_rotate': (scale, shift x, y, rotate) or 
+        '4_no_rotate': (scale x, y, shift x, y)
+        '5': (scale x, y, shift x, y, rotate)
+    '''
+    center = torch.zeros_like(thetas[:, :2])
+    if z_where_type=='4_rotate':
+        scale = thetas[:, 0:1].expand(-1, 2)
+        translations = thetas[:, 1:2]
+        angle = torch.tanh(thetas[:, 3]) * np.pi
+    elif z_where_type == '4_no_rotate':
+        scale = thetas[:, 0:2]
+        translations = thetas[:, 2:4]
+        angle = torch.zeros_like(thetas[:, 0:1])
+    elif z_where_type == '3':
+        scale = thetas[:, 0:1].expand(-1, 2)
+        translations = thetas[:, 1:2]
+        angle = torch.tanh(thetas[:, 3]) * np.pi
+    elif z_where_type == '5':
+        scale = thetas[:, 0:2]
+        translations = thetas[:, 2:4]
+        angle = torch.tanh(thetas[:, 3]) * np.pi
+    else:
+        raise NotImplementedError
+    affine_matrix = get_affine_matrix2d(translations=translations,
+                                        center=center,
+                                        scale=scale,
+                                        angle=angle)[:, :2]
+    return affine_matrix    
+
 def inverse_stn_transformation(x, theta):
     '''
     Args:

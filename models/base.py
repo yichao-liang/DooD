@@ -46,7 +46,7 @@ def schedule_model_parameters(gen, guide, iteration, loss, device):
 class GenerativeModel(nn.Module):
     def __init__(self, ctrl_pts_per_strk=5, 
                         prior_dist='Normal', 
-                        likelihood_dist='Normal',
+                        likelihood_dist='Laplace',
                         strks_per_img=1):
         """in the base model we pre-specify the number of control points and 
         work with data that has 1 stroke.
@@ -96,14 +96,15 @@ class GenerativeModel(nn.Module):
         higher, the larger range of curve points that it takes into 
         consideration.
         """
-        # To make it learnable:
+        # Renderer parameter
         self.sigma = torch.nn.Parameter(torch.tensor(6.), requires_grad=True)
         # self.sigma = torch.log(torch.tensor(.04))
+        # Post-processing parameter
         self.register_buffer("dilation_kernel", torch.ones(2,2))
-        self.register_buffer("erosion_kernel", torch.ones(3,3))
         self.norm_pixel_method = 'tanh' # maxnorm or tanh
         self.tanh_norm_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
+        # self.register_buffer("erosion_kernel", torch.ones(3,3))
         # self.norm_pixel_method = 'maxnorm'
         # self.gauss = kornia.filters.GaussianBlur2d((7, 7), (5.5, 5.5))
     
@@ -128,7 +129,7 @@ class GenerativeModel(nn.Module):
         else:
             raise NotImplementedError
                                     
-    def control_points_dist_b(self, batch_shape):
+    def control_points_dist_b(self, batch_shape=[1]):
         '''batch of control points where each member corresponds to an image
         '''
         # batch_size = torch.Size([batch_shape])
@@ -144,7 +145,7 @@ class GenerativeModel(nn.Module):
             control_points_b: tensor of shape:
                 [batch, 1 stroke, num_control_points, 2]
         Return:
-            distribution of shape: [*shape, H, W]
+            distribution of shape: [*shape, 1 (channel), H, W]
         '''
         batch_dim = control_points_b.shape[0]
 
