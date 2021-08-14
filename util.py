@@ -8,8 +8,6 @@ import getpass
 import logging
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import numpy as np
 import torch.nn as nn
 import torch
@@ -20,7 +18,7 @@ from torchvision.utils import save_image
 from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
-import models.base
+from models import base, sequential
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
 from data import synthetic
 
@@ -82,54 +80,172 @@ def normalize_pixel_values(img, method='tanh', slope=0.3):
     return img
 
 # Plotting
-def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,):
-    num_shown = 8
-    num_steps_per_strk = 500
-    num_strks_per_img, num_pts_per_strk = latents.shape[1], latents.shape[2]
-    total_pts_num = num_strks_per_img * num_pts_per_strk
+def batch_add_bounding_boxes(imgs, z_wheres, n_obj, color=None, n_img=None):
+    """
+    :param imgs: 4d tensor of numpy array, channel dim either 1 or 3
+    :param z_wheres: tensor or numpy of shape (n_imgs, max_n_objects, 3)
+    :param n_obj:
+    :param color:
+    :param n_img:
+    :return:
+    """
 
-    steps = torch.linspace(0, 1, num_steps_per_strk).cuda()
-    latents = latents[:num_shown]
-    curves = gen.bezier.sample_curve(latents[:num_shown], steps)
+    # Check arguments
+    assert len(imgs.shape) == 4
+    assert imgs.shape[1] in [1, 3]
+    assert len(z_wheres.shape) == 3
+    assert z_wheres.shape[0] == imgs.shape[0]
+    assert z_wheres.shape[2] == 3
 
-    fig, ax= plt.subplots(2,4,figsize=(10, 4))
+    target_shape = list(imgs.shape)
+    target_shape[1] = 3
 
-    # [num_shown, num_strks, num_pts, 2]-> [num_shown, total_pts_num, 2]
-    latents = latents.view([num_shown, total_pts_num, 2]).cpu()
-    # [num_shown, num_strks, 2, num_steps]
-    curves = curves.cpu().flip(1)
-    curves = rearrange(curves, 'b k xy p -> b (k p) xy')
-    # transpose(2, 3).reshape(num_shown, num_strks_per_img*
-    #                                                 num_steps_per_strk, 2).cpu()
-    for i in range(num_shown):
-        ax[i//4][i%4].set_aspect('equal')
-        ax[i//4][i%4].axis('equal')
-        ax[i//4][i%4].invert_yaxis()
-        im = ax[i//4][i%4].scatter(x=latents[i][:,0],
-                                   y=latents[i][:,1],
-                                    marker='x',
-                                    s=30,c=np.arange(total_pts_num),
-                                            cmap='rainbow')
-        ax[i//4][i%4].scatter(x=curves[i][:,0], y=curves[i][:,1],
-                                                s=0.1,
-                                                c=-np.arange(num_strks_per_img*
-                                                    num_steps_per_strk),
-                                                cmap='rainbow')       
-    fig.subplots_adjust(right=0.94)
-    cbar_ax = fig.add_axes([0.95, 0.1, 0.01, 0.8])
-    fig.colorbar(im, cax=cbar_ax)
+    if n_img is None:
+        n_img = len(imgs)
+    if color is None:
+        color = np.array([[1., 0., 0.],
+                          [0., 1., 0.],
+                          [0., 0., 1.]])
+    out = torch.stack([
+        add_bounding_boxes(imgs[j], z_wheres[j], color, n_obj[j])
+        for j in range(n_img)
+    ])
 
-    canvas = FigureCanvas(fig)
-    canvas.draw()       # draw the canvas, cache the renderer
+    out_shape = tuple(out.shape)
+    target_shape = tuple(target_shape)
+    assert out_shape == target_shape, "{}, {}".format(out_shape, target_shape)
+    return out
 
-    image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-    width, height = fig.get_size_inches() * fig.get_dpi() 
-    image = torch.tensor(image.reshape(int(height), int(width), 3)).float()
-    image = rearrange(image, 'h w c -> c h w')
-    # breakpoint()
 
-    writer.add_image(tag, image, epoch)
-    plt.close('all')
+def add_bounding_boxes(img, z_wheres, color, n_obj):
+    """
+    Adds bounding boxes to the n_obj objects in img, according to z_wheres.
+    The output is never on cuda.
+    :param img: image in 3d or 4d shape, either Tensor or numpy. If 4d, the
+                first dimension must be 1. The channel dimension must be
+                either 1 or 3.
+    :param z_wheres: tensor or numpy of shape (1, max_n_objects, 3) or
+                (max_n_objects, 3)
+    :param color: color of all bounding boxes (RGB)
+    :param n_obj: number of objects in the scene. This controls the number of
+                bounding boxes to be drawn, and cannot be greater than the
+                max number of objects supported by z_where (dim=1). Has to be
+                a scalar or a single-element Tensor/array.
+    :return: image with required bounding boxes, with same type and dimension
+                as the original image input, except 3 color channels.
+    """
+
+    try:
+        n_obj = n_obj.item()
+    except AttributeError:
+        pass
+    n_obj = int(round(n_obj))
+    assert n_obj <= z_wheres.shape[1]
+
+    try:
+        img = img.cpu()
+    except AttributeError:
+        pass
+
+    if len(img.shape) == 3:
+        color_dim = 0
+    else:
+        color_dim = 1
+
+    if len(z_wheres.shape) == 3:
+        assert z_wheres.shape[0] == 1
+        z_wheres = z_wheres[0]
+
+    target_shape = list(img.shape)
+    target_shape[color_dim] = 3
+
+    for i in range(n_obj):
+        img = add_bounding_box(img, z_wheres[i:i+1], color[i])
+    if img.shape[color_dim] == 1:  # this might happen if n_obj==0
+        reps = [3, 1, 1]
+        if color_dim == 1:
+            reps = [1] + reps
+        reps = tuple(reps)
+        if isinstance(img, torch.Tensor):
+            img = img.repeat(*reps)
+        else:
+            img = np.tile(img, reps)
+
+    target_shape = tuple(target_shape)
+    img_shape = tuple(img.shape)
+    assert img_shape == target_shape, "{}, {}".format(img_shape, target_shape)
+    return img
+
+
+def add_bounding_box(img, z_where, color):
+    """
+    Adds a bounding box to img with parameters z_where and the given color.
+    Makes a copy of the input image, which is left unaltered. The output is
+    never on cuda.
+    :param img: image in 3d or 4d shape, either Tensor or numpy. If 4d, the
+                first dimension must be 1. The channel dimension must be
+                either 1 or 3.
+    :param z_where: tensor or numpy with 3 elements, and shape (1, ..., 1, 3)
+    :param color:
+    :return: image with required bounding box in the specified color, with same
+                type and dimension as the original image input, except 3 color
+                channels.
+    """
+    def _bounding_box(z_where, x_size, rounded=True, margin=1):
+        z_where = z_where.cpu().numpy().flatten()
+        assert z_where.shape[0] == z_where.size == 3
+        s, x, y = tuple(z_where)
+        w = x_size / s
+        h = x_size / s
+        xtrans = -x / s * x_size / 2
+        ytrans = -y / s * x_size / 2
+        x1 = (x_size - w) / 2 + xtrans - margin
+        y1 = (x_size - h) / 2 + ytrans - margin
+        x2 = x1 + w + 2 * margin
+        y2 = y1 + h + 2 * margin
+        x1, x2 = sorted((x1, x2))
+        y1, y2 = sorted((y1, y2))
+        coords = (x1, x2, y1, y2)
+        if rounded:
+            coords = (int(round(t)) for t in coords)
+        return coords
+
+    target_shape = list(img.shape)
+    collapse_first = False
+    torch_tensor = isinstance(img, torch.Tensor)
+    img = img.cpu().numpy().copy()
+    if len(img.shape) == 3:
+        collapse_first = True
+        img = np.expand_dims(img, 0)
+        target_shape[0] = 3
+    else:
+        target_shape[1] = 3
+    assert len(img.shape) == 4 and img.shape[0] == 1
+    if img.shape[1] == 1:
+        img = np.tile(img, (1, 3, 1, 1))
+    assert img.shape[1] == 3
+    color = color[:, None]
+
+    x1, x2, y1, y2 = _bounding_box(z_where, img.shape[2])
+    x_max = y_max = img.shape[2] - 1
+    if 0 <= y1 <= y_max:
+        img[0, :, y1, max(x1, 0):min(x2, x_max)] = color
+    if 0 <= y2 - 1 <= y_max:
+        img[0, :, y2 - 1, max(x1, 0):min(x2, x_max)] = color
+    if 0 <= x1 <= x_max:
+        img[0, :, max(y1, 0):min(y2, y_max), x1] = color
+    if 0 <= x2 - 1 <= x_max:
+        img[0, :, max(y1, 0):min(y2, y_max), x2 - 1] = color
+
+    if collapse_first:
+        img = img[0]
+    if torch_tensor:
+        img = torch.from_numpy(img)
+
+    target_shape = tuple(target_shape)
+    img_shape = tuple(img.shape)
+    assert img_shape == target_shape, "{}, {}".format(img_shape, target_shape)
+    return img
 
 def get_baseline_save_dir():
     return "save/baseline"
@@ -161,9 +277,9 @@ def get_save_dir_from_path_base(path_base):
 def get_save_dir(args):
     return get_save_dir_from_path_base(get_path_base_from_args(args))
 
-def get_save_test_img_dir(args, iteration):
+def get_save_test_img_dir(args, iteration, suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
-    return f"{get_save_dir(args)}/images/reconstruction_ep{iteration}.pdf"
+    return f"{get_save_dir(args)}/images/reconstruction_ep{iteration}_{suffix}.pdf"
 
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
@@ -188,7 +304,7 @@ def get_checkpoint_paths(checkpoint_iteration=-1):
 def init(run_args, device):
     if run_args.model_type == 'base':
         # Generative model
-        generative_model = models.base.GenerativeModel(
+        generative_model = base.GenerativeModel(
                                 ctrl_pts_per_strk=run_args.points_per_stroke,
                                 prior_dist=run_args.prior_dist,
                                 likelihood_dist=run_args.likelihood_dist,
@@ -196,16 +312,25 @@ def init(run_args, device):
                                 ).to(device)
 
         # Guide
-        guide = models.base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
+        guide = base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
                                 dist=run_args.inference_dist,
                                 net_type=run_args.inference_net_architecture,
                                 strks_per_img=run_args.strokes_per_img,
                                 ).to(device)
 
-        # Model tuple
-        model = (generative_model, guide)
+    elif run_args.model_type == 'sequential':
+        generative_model = sequential.GenerativeModel(
+                                max_strks=run_args.strokes_per_img,
+                                pts_per_strk=run_args.points_per_stroke,
+                                ).to(device)
+        guide = sequential.Guide(
+                                max_strks=run_args.strokes_per_img,
+                                pts_per_strk=run_args.points_per_stroke,
+                                ).to(device)
     else:
         raise NotImplementedError
+    # Model tuple
+    model = (generative_model, guide)
 
     # Optimizer
     # parameters = guide.parameters()
@@ -470,7 +595,8 @@ def init_mlp(in_dim, out_dim, hidden_dim, num_layers, non_linearity=None,):
     return MultilayerPerceptron(dims, non_linearity)
 
 class ConvolutionNetwork(nn.Module):
-    def __init__(self, n_in_channels=1, n_mid_channels=32, mlp=None):
+    def __init__(self, n_in_channels=1, n_mid_channels=32, n_out_channels=64,
+                                                                    mlp=None):
         super().__init__()
         self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
         self.conv2 = nn.Conv2d(n_mid_channels, 64, 3, 1)
@@ -478,23 +604,27 @@ class ConvolutionNetwork(nn.Module):
         self.dropout = nn.Dropout(0.25)
     
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = self.dropout(F.max_pool2d(x, 2))
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = self.dropout(x)
         x = torch.flatten(x, 1)
         output = self.mlp(x)
-
         return output
 
-def init_cnn(in_dim, out_dim, num_mlp_layers, non_linearity=None):
+def init_cnn(in_dim, out_dim, num_mlp_layers, n_in_channels=1, 
+                    n_mid_channels=32, n_out_channels=64, non_linearity=None, 
+                                                mlp_hidden_dim=256):
     """Initializes a convnet, assuming input:
          - has 1 channel and; 
          - it's a squared image.
     """
-    conv_output_size = 9216
-    mlp = init_mlp(in_dim=conv_output_size, out_dim=out_dim, hidden_dim=256, 
-                                num_layers=num_mlp_layers)
-    conv_net = ConvolutionNetwork(mlp=mlp)
+    conv_output_size = 1600 #9216
+    mlp = init_mlp(in_dim=conv_output_size, out_dim=out_dim, 
+                                            hidden_dim=mlp_hidden_dim, 
+                                            num_layers=num_mlp_layers)
+    conv_net = ConvolutionNetwork(mlp=mlp, n_in_channels=n_in_channels,
+                                            n_mid_channels=n_mid_channels, 
+                                            n_out_channels=n_out_channels)
 
     return conv_net
 
@@ -535,27 +665,55 @@ class SpatialTransformerNetwork(nn.Module):
         thetas = thetas.view(-1, 4)
         thetas = SpatialTransformerNetwork.get_affine_matrix_from_param(thetas)
         return thetas
-
-    @staticmethod
-    def transform(x, theta):
-        # step2: the transformation parameters are used to create a sampling grid
-        grid = F.affine_grid(theta, x.shape, align_corners=True)
-        # step3: take the image, sampling grid to the sampler, producing output
-        x = F.grid_sample(x, grid, align_corners=True,)
-        return x
     
     def forward(self, x, output_theta=False):
         thetas = self.get_transform_param(x)
-        x_out = self.transform(x, thetas)
+        x_out = spatial_transform(x, thetas)
         if output_theta:
             return x_out, thetas
         else:
             x_out
 
+def spatial_transform(x, theta):
+    '''
+    Args:
+        x: unstransformed image from the dataset
+        theta: [2, 3] affine transformation matrix. Output of a spatial
+            transfomer's localization output.
+    Return:
+        transformed image
+    '''
+    # step2: the transformation parameters are used to create a sampling grid
+    grid = F.affine_grid(theta, x.shape, align_corners=True)
+    # step3: take the image, sampling grid to the sampler, producing output
+    x = F.grid_sample(x, grid, align_corners=True,)
+    return x
+
+def inverse_spatial_transformation(x, theta):
+    '''
+    Args:
+        x: transformed images
+        theta: [2, 3] affine transformation parameters output by the 
+            localization network to "zoom in"/focus on a part of the image.
+    Return:
+        x: images put back to its original background
+    '''
+    r_theta = invert_affine_transform(theta)
+    x_out = spatial_transform(x, r_theta)
+    return x_out
+
+def invert_z_where(z_where):
+    z_where_inv = torch.zeros_like(z_where)
+    scale = z_where[:, 0:1]   # (batch, 1)
+    z_where_inv[:, 1:3] = -z_where[:, 1:3] / scale   # (batch, 2)
+    z_where_inv[:, 0:1] = 1 / scale    # (batch, 1)
+    return z_where_inv
+
 def get_affine_matrix_from_param(thetas, z_where_type):
     '''Get a batch of 2x3 affine matrix from transformation parameters 
     thetas of shape [batch_size, 4 (shift x, y; scale; angle)]. <-deprecated format
     # todo make capatible with base model stn
+    # todo constraint the scale, shift parameters
     z_where_type:
         '3': (scale, shift x, y)
         '4_rotate': (scale, shift x, y, rotate) or 
@@ -565,16 +723,16 @@ def get_affine_matrix_from_param(thetas, z_where_type):
     center = torch.zeros_like(thetas[:, :2])
     if z_where_type=='4_rotate':
         scale = thetas[:, 0:1].expand(-1, 2)
-        translations = thetas[:, 1:2]
+        translations = thetas[:, 1:3]
         angle = torch.tanh(thetas[:, 3]) * np.pi
     elif z_where_type == '4_no_rotate':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
-        angle = torch.zeros_like(thetas[:, 0:1])
+        angle = torch.zeros_like(thetas[:, 0])
     elif z_where_type == '3':
         scale = thetas[:, 0:1].expand(-1, 2)
-        translations = thetas[:, 1:2]
-        angle = torch.tanh(thetas[:, 3]) * np.pi
+        translations = thetas[:, 1:3]
+        angle = torch.zeros_like(thetas[:, 0]) * np.pi
     elif z_where_type == '5':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
@@ -587,18 +745,7 @@ def get_affine_matrix_from_param(thetas, z_where_type):
                                         angle=angle)[:, :2]
     return affine_matrix    
 
-def inverse_stn_transformation(x, theta):
-    '''
-    Args:
-        x: reconstructed images
-        theta: transformation parameters output by the localization network
-            to "zoom in"/focus on a part of the image.
-    Return:
-        x: images put back to its original background
-    '''
-    r_theta = invert_affine_transform(theta)
-    x_out = SpatialTransformerNetwork.transform(x, r_theta)
-    return x_out
+
 
 def init_stn(in_dim=None, out_dim=None, num_mlp_layers=None, 
                         non_linearity=None, end_cnn=False):
@@ -610,6 +757,36 @@ def init_stn(in_dim=None, out_dim=None, num_mlp_layers=None,
         return stn, cnn
     else:
         return stn
+
+class Predictor(nn.Module):
+    """
+    Infer presence and location from RNN hidden state
+    """
+    def __init__(self, in_dim, z_where_type, z_where_dim):
+        nn.Module.__init__(self)
+        self.z_where_dim = z_where_dim
+        if z_where_type == '3':
+            self.seq = nn.Sequential(
+                nn.Linear(in_dim, 200),
+                nn.ReLU(),
+                nn.Linear(200, 1 + z_where_dim * 2),
+            )
+            # Initialize the weight/bias with identity transformation
+            self.seq[2].weight.data.zero_()
+            self.seq[2].bias = torch.nn.Parameter(torch.tensor([10,1,0,0,-10,-10,-10], 
+                                                            dtype=torch.float))
+        else:
+            raise NotImplementedError
+        
+    def forward(self, h):
+        # todo make capacible with other z_where_types
+        z = self.seq(h)
+        z_pres_p = torch.sigmoid(z[:, :1])
+        z_where_loc_scale = F.softplus(z[:, 1:1+1])
+        z_where_loc_shift = z[:, 1+1:1+self.z_where_dim]
+        z_where_loc = torch.cat([z_where_loc_scale, z_where_loc_shift], dim=1)
+        z_where_scale = F.softplus(z[:, (1+self.z_where_dim):])
+        return z_pres_p, z_where_loc, z_where_scale
 
 def get_device():
     if torch.cuda.is_available():

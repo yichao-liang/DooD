@@ -3,7 +3,7 @@ import train
 from pathlib import Path
 
 def main(args):
-    # cuda
+    # Cuda
     device = util.get_device()
     args.device = device
 
@@ -27,13 +27,13 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=7)
+    parser.add_argument("--seed", default=1)
 
     # Model
     parser.add_argument(
         "--model-type",
-        # default="sequential", 
-        default="base", 
+        default="sequential", 
+        # default="base", 
         choices=['base', 'sequential'],
         type=str,
         help=" "
@@ -74,7 +74,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--strokes_per_img",
-        default=3,
+        default=2,
         type=int,
         help="Maximum number of strokes per image"
     )
@@ -114,7 +114,7 @@ def get_args_parser():
     # 32 worked for all losses, but for elbo sometimes it miss the "-" in "7"s
     # 64 works well for elbos and most others loss (in "1, 7" dataset).
     # 128, the model stops learning anything quite often (in "1, 7").
-    parser.add_argument("--batch-size", default=128, type=int, help=" ")
+    parser.add_argument("--batch-size", default=64, type=int, help=" ")
 
     return parser
 

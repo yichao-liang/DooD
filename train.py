@@ -4,8 +4,9 @@ from torchvision.utils import save_image, make_grid
 from torch.utils.tensorboard import SummaryWriter
 
 import util
+import plot
 import losses
-from models.base import schedule_model_parameters
+from models import base, sequential 
 
 def train(model, optimizer, stats, data_loader, args):
     # Write will output to ./log
@@ -31,12 +32,18 @@ def train(model, optimizer, stats, data_loader, args):
             # imgs = one_batch.to(args.device)
 
             optimizer.zero_grad()
-            schedule_model_parameters(generative_model, guide, iteration, 
-                                                        args.loss, args.device)
-            # if args.loss == 'elbo':
-            loss, neg_gen_prob, inf_prob = losses.get_elbo_loss(
+            if args.model_type == 'base':
+                base.schedule_model_parameters(generative_model, guide, 
+                                            iteration, args.loss, args.device)
+                loss, neg_gen_prob, inf_prob = losses.get_loss_base(
                                         generative_model, guide, imgs, 
-                                        loss=args.loss, iteration=iteration)
+                                        loss=args.loss,)
+            elif args.model_type == 'sequential':
+                loss, neg_gen_prob, inf_prob = losses.get_loss_sequential(
+                                                generative_model, guide,
+                                                imgs, args.loss)
+            else:
+                raise NotImplementedError
 
             loss = loss.mean()
             neg_gen_prob = neg_gen_prob.mean()
@@ -46,19 +53,17 @@ def train(model, optimizer, stats, data_loader, args):
                                 'Train/generative_negative_log_prob': 
                                                             neg_gen_prob},
                                 iteration)
-            # else:
-                # raise NotImplementedError()
-
+                                
             loss.backward()
 
             # Check for nans
             writer.add_scalars("Gradient Norm", {f"Grad/{n}":
                                         p.grad.norm(2) for n, p in 
                                         guide.named_parameters()}, iteration)
-            writer.add_scalars("Parameters/gen.sigma",
+            writer.add_scalar("Parameters/gen.sigma",
                             util.constrain_parameter(generative_model.sigma, 
                                                 min=.01, max=.05),iteration)
-            writer.add_scalars("Parameters/tanh.norm.slope",
+            writer.add_scalar("Parameters/tanh.norm.slope",
                 util.constrain_parameter(generative_model.tanh_norm_slope, 
                                                 min=.1,max=.7),iteration)
             for name, parameter in guide.named_parameters():
@@ -91,10 +96,10 @@ def train(model, optimizer, stats, data_loader, args):
                 util.save_checkpoint(
                     util.get_checkpoint_path(args, 
                     checkpoint_iteration=iteration),
-                model,
-                optimizer,
-                stats,
-                run_args=args,
+                    model,
+                    optimizer,
+                    stats,
+                    run_args=args,
                 )
             
             # End training based on `iteration`
@@ -103,36 +108,18 @@ def train(model, optimizer, stats, data_loader, args):
                 break
         epoch += 1
 
-        # Log training reconstruction
+        # Log training reconstruction in Tensorboard
         with torch.no_grad():
-            n = min(imgs.shape[0], 16)
-            if args.inference_net_architecture == "STN":
-                latent, stn_out = guide.rsample(imgs, stn_out=True)
-            else:
-                latent = guide.rsample(imgs)
-            generative_model.stn_transform = guide.stn_transform
-            recon_img = generative_model.img_dist_b(latent).mean
-        fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
-        if args.inference_net_architecture == 'STN':
-            comparision = torch.cat([imgs[:8], stn_out[:8], recon_img[:8] ,
-                                    imgs[8:n], fillers, stn_out[8:n], fillers, 
-                                    recon_img[8:n], fillers])        
-        else:
-            comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], 
-                                            fillers, recon_img[8:n], fillers])
-        img_grad = make_grid(comparision, nrow=8)
-        # draw control points
-        if args.inference_dist == 'Dirichlet':
-            # reshape for Dir
-            # breakpoint()
-            latent = latent.chunk(2, -1)[0].view(*latent.shape[:-3], 
-                            args.strokes_per_img, args.points_per_stroke, -1)
-        writer.add_image("Train/Reconstruction", img_grad, epoch)
-        util.add_control_points_plot(generative_model, latent, writer, tag="Train/Control Points", epoch=epoch)
-        
+            plot.plot_reconstructions(imgs=imgs, 
+                                      guide=guide, 
+                                      generative_model=generative_model, 
+                                      args=args, 
+                                      writer=writer, 
+                                      epoch=epoch,
+                                      is_train=True)
+
         # Test every epoch
-        save_imgs_dir = util.get_save_test_img_dir(args, epoch)
-        test(model, stats, test_loader, args, save_imgs_dir, epoch=epoch, writer=writer)
+        test(model, stats, test_loader, args, epoch=epoch, writer=writer)
 
 def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
                                                                 writer=None):
@@ -148,31 +135,25 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
         for imgs, _ in test_loader:
             imgs = imgs.to(args.device)
 
-            loss_tp, neg_gen_prob_tp, inf_prob_tp = losses.get_elbo_loss(
-                                                generative_model, guide, imgs,
-                                                loss=args.loss)
+            if args.model_type == 'base':
+                loss, neg_gen_prob, inf_prob = losses.get_loss_base(
+                                        generative_model, guide, imgs, 
+                                        loss=args.loss,)
+            elif args.model_type == 'sequential':
+                loss_tp, neg_gen_prob_tp, inf_prob_tp = losses.get_loss_sequential(
+                                                generative_model, guide,
+                                                imgs, args.loss)
             loss += loss_tp.sum()
             neg_gen_prob += neg_gen_prob_tp.sum()
             inf_prob += inf_prob_tp.sum()
-
-        if save_imgs_dir is not None:
-            n = min(imgs.shape[0], 16)
-            if args.inference_net_architecture == "STN":
-                latent, stn_out = guide.rsample(imgs, stn_out=True)
-            else:
-                latent = guide.rsample(imgs)
-            generative_model.stn_transform = guide.stn_transform
-            recon_img = generative_model.img_dist_b(latent).mean
-            fillers = torch.zeros(16-n, 1, 28, 28).to(args.device)
-
-            if args.inference_net_architecture == "STN":
-                comparision = torch.cat([imgs[:8], stn_out[:8], recon_img[:8], 
-                                    imgs[8:n], fillers, stn_out[8:n], fillers, 
-                                    recon_img[8:n], fillers])
-            else:
-                comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], 
-                                            fillers, recon_img[8:n], fillers])
-            save_image(comparision.cpu(), save_imgs_dir, nrow=8)
+            
+        plot.plot_reconstructions(imgs=imgs, 
+                                      guide=guide, 
+                                      generative_model=generative_model, 
+                                      args=args, 
+                                      writer=writer, 
+                                      epoch=epoch,
+                                      is_train=False)
         
         # Logging
         data_size = len(test_loader.dataset)
@@ -185,12 +166,4 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
                                 'Test/generative_negative_log_prob': 
                                                                 neg_gen_prob,
                                 }, epoch)
-        img_grad = make_grid(comparision, nrow=8)
-        writer.add_image("Test/Reconstruction", img_grad, epoch)
         util.logging.info(f"Epoch {epoch} Test loss | Loss = {stats.tst_losses[-1]:.3f}")
-        # Log the control points plot
-        if args.inference_dist == 'Dirichlet':
-            # reshape for Dir
-            latent = latent.chunk(2, -1)[0].view(*latent.shape[:-3], 
-                            args.strokes_per_img, args.points_per_stroke, -1)
-        util.add_control_points_plot(generative_model, latent, writer, tag="Test/Control Points", epoch=epoch)
