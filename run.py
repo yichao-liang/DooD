@@ -41,11 +41,17 @@ def get_args_parser():
     parser.add_argument(
         "--prior_dist",
         # default='Dirichlet',
-        default='Normal',
-        # default='Uniform',
+        # default='Normal',
+        # default='Independent',
+        default='Sequential',
         type=str,
-        choices=['Dirichlet', 'Normal'],
-        help=""
+        choices=['Dirichlet', 'Normal', 'Independent', 'Sequential'],
+        help='''
+        For the `base` model, it can choose between "Dirichlet", "Normal" prior;
+        For the `sequential` model, it always uses a Normal distribution for 
+        each step, but it can choose between "independent" or "sequential"
+        between steps.
+        '''
     )
     parser.add_argument(
         "--likelihood_dist",
@@ -65,9 +71,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--inference_net_architecture",
-        # default='STN',
         default='CNN',
-        # default='MLP',
         type=str,
         choices=['STN','CNN','MLP'],
         help=""
@@ -84,6 +88,49 @@ def get_args_parser():
         type=int,
         help="Number of control points per stroke curve."
     )
+    parser.add_argument(
+        "--z_where_type",
+        default='4_rotate',
+        # default='3',
+        type=str,
+        choices=['3', '4_rotate', '4_no_rotate', '5'],
+        help='''
+        "3": (scale, shift x, y)
+        "4_rotate": (scale, shift x, y, rotate)
+        "4_no_rotate": (scale x, y, shift x, y)
+        "5": (scale x, y, shift x, y, rotate)'''
+    ) 
+    parser.add_argument(
+        "--input_dependent_render_param",
+        # default=False,
+        default=True,
+        type=bool,
+        help="",
+    )
+    parser.add_argument(
+        "--execution_guided",
+        default=False,
+        # default=True,
+        type=bool,
+        help=" "
+    )
+    parser.add_argument(
+        '--exec_guid_type',
+        # default='canvas_so_far',
+        default='canvas',
+        choices=['residual', 'canvas', 'target+residual'],
+        type=str,
+        help="""Only useful is --execution_guided = True. 
+        Residual: only uses the difference between the target and canvas-so-far;
+        Canvas_so_far: stack the target image on canvas-so-far"""
+    )
+    parser.add_argument(
+        "--transform_z_what",
+        default=False,
+        # default=True,
+        type=bool,
+        help=" "
+    )
 
     # Optimization
     parser.add_argument("--continue-training", action="store_true", help=" ")
@@ -95,8 +142,6 @@ def get_args_parser():
     parser.add_argument(
         "--loss",
         default="elbo",
-        # default="l1",
-        # default="nll",
         choices=['elbo','l1','nll'],
         type=str,
         help=" ",
@@ -104,9 +149,11 @@ def get_args_parser():
 
     # Dataset
     parser.add_argument("--dataset",
-                    default="mnist",
+                    # default="multimnist",
+                    default='mnist',
                     # default="generative_model",
-                    choices=['mnist', 'omniglot', 'generative_model'],
+                    choices=['mnist', 'omniglot', 'generative_model', 
+                    'multimnist'],
                     type=str, help=" ")
     parser.add_argument("--data-dir", 
                         default="./omniglot_dataset/omniglot/",
@@ -115,6 +162,7 @@ def get_args_parser():
     # 64 works well for elbos and most others loss (in "1, 7" dataset).
     # 128, the model stops learning anything quite often (in "1, 7").
     parser.add_argument("--batch-size", default=64, type=int, help=" ")
+    parser.add_argument("--img_res", default=50, type=int, help=" ")
 
     return parser
 

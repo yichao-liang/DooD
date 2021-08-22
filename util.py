@@ -20,7 +20,7 @@ from kornia.geometry.transform import invert_affine_transform, get_affine_matrix
 
 from models import base, sequential
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
-from data import synthetic
+from data import synthetic, multimnist
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,7 +59,7 @@ def safe_div(dividend, divisor):
     dividend[idx] =  dividend[idx] / divisor[idx] 
     return dividend
 
-def sigmoid(x, min=0., max=1., shift=.5, slope=1.):
+def sigmoid(x, min=0., max=1., shift=0., slope=1.):
     return (
         (max-min)/(1+torch.exp(-slope * (-shift + x))
         ) + min)
@@ -67,185 +67,37 @@ def sigmoid(x, min=0., max=1., shift=.5, slope=1.):
 def constrain_parameter(param, min=5e-2, max=1e-2):
     return torch.sigmoid(param) * (max-min) + min
 
-def normalize_pixel_values(img, method='tanh', slope=0.3):
+def normalize_pixel_values(img, method='tanh', slope=0.3, maxnorm_max=1.):
+    '''
+    Args:
+        img:
+            for 'tanh' 1: [bs, 1, res, res] or 2: [bs, n_strk, 1, res, res]
+            for 'maxnorm': [bs, 1, res, res]
+        slope int or Tensor: if 1: [bs]; if 2: [bs, n_strk]
+    '''
     if method == 'tanh':
-        img = torch.tanh(img/slope)
+        try:
+            if len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
+                assert (len(img.shape) == 4 and len(slope.shape) == 1) or\
+                    (len(img.shape) == 5 and len(slope.shape) == 2)
+                slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+                # img_ = torch.tanh(img/slope)
+                # if execution guided
+                img_ = torch.tanh(img/slope.clone())
+                return img_
+            else: 
+                img = torch.tanh(img/slope)
+        except:
+            breakpoint()
     elif method == 'maxnorm':
         batch_dim = img.shape[0]
         max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
-        max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1)
+        max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1) / maxnorm_max
         img = safe_div(img, max_per_recon)
     else:
         raise NotImplementedError
     return img
 
-# Plotting
-def batch_add_bounding_boxes(imgs, z_wheres, n_obj, color=None, n_img=None):
-    """
-    :param imgs: 4d tensor of numpy array, channel dim either 1 or 3
-    :param z_wheres: tensor or numpy of shape (n_imgs, max_n_objects, 3)
-    :param n_obj:
-    :param color:
-    :param n_img:
-    :return:
-    """
-
-    # Check arguments
-    assert len(imgs.shape) == 4
-    assert imgs.shape[1] in [1, 3]
-    assert len(z_wheres.shape) == 3
-    assert z_wheres.shape[0] == imgs.shape[0]
-    assert z_wheres.shape[2] == 3
-
-    target_shape = list(imgs.shape)
-    target_shape[1] = 3
-
-    if n_img is None:
-        n_img = len(imgs)
-    if color is None:
-        color = np.array([[1., 0., 0.],
-                          [0., 1., 0.],
-                          [0., 0., 1.]])
-    out = torch.stack([
-        add_bounding_boxes(imgs[j], z_wheres[j], color, n_obj[j])
-        for j in range(n_img)
-    ])
-
-    out_shape = tuple(out.shape)
-    target_shape = tuple(target_shape)
-    assert out_shape == target_shape, "{}, {}".format(out_shape, target_shape)
-    return out
-
-
-def add_bounding_boxes(img, z_wheres, color, n_obj):
-    """
-    Adds bounding boxes to the n_obj objects in img, according to z_wheres.
-    The output is never on cuda.
-    :param img: image in 3d or 4d shape, either Tensor or numpy. If 4d, the
-                first dimension must be 1. The channel dimension must be
-                either 1 or 3.
-    :param z_wheres: tensor or numpy of shape (1, max_n_objects, 3) or
-                (max_n_objects, 3)
-    :param color: color of all bounding boxes (RGB)
-    :param n_obj: number of objects in the scene. This controls the number of
-                bounding boxes to be drawn, and cannot be greater than the
-                max number of objects supported by z_where (dim=1). Has to be
-                a scalar or a single-element Tensor/array.
-    :return: image with required bounding boxes, with same type and dimension
-                as the original image input, except 3 color channels.
-    """
-
-    try:
-        n_obj = n_obj.item()
-    except AttributeError:
-        pass
-    n_obj = int(round(n_obj))
-    assert n_obj <= z_wheres.shape[1]
-
-    try:
-        img = img.cpu()
-    except AttributeError:
-        pass
-
-    if len(img.shape) == 3:
-        color_dim = 0
-    else:
-        color_dim = 1
-
-    if len(z_wheres.shape) == 3:
-        assert z_wheres.shape[0] == 1
-        z_wheres = z_wheres[0]
-
-    target_shape = list(img.shape)
-    target_shape[color_dim] = 3
-
-    for i in range(n_obj):
-        img = add_bounding_box(img, z_wheres[i:i+1], color[i])
-    if img.shape[color_dim] == 1:  # this might happen if n_obj==0
-        reps = [3, 1, 1]
-        if color_dim == 1:
-            reps = [1] + reps
-        reps = tuple(reps)
-        if isinstance(img, torch.Tensor):
-            img = img.repeat(*reps)
-        else:
-            img = np.tile(img, reps)
-
-    target_shape = tuple(target_shape)
-    img_shape = tuple(img.shape)
-    assert img_shape == target_shape, "{}, {}".format(img_shape, target_shape)
-    return img
-
-
-def add_bounding_box(img, z_where, color):
-    """
-    Adds a bounding box to img with parameters z_where and the given color.
-    Makes a copy of the input image, which is left unaltered. The output is
-    never on cuda.
-    :param img: image in 3d or 4d shape, either Tensor or numpy. If 4d, the
-                first dimension must be 1. The channel dimension must be
-                either 1 or 3.
-    :param z_where: tensor or numpy with 3 elements, and shape (1, ..., 1, 3)
-    :param color:
-    :return: image with required bounding box in the specified color, with same
-                type and dimension as the original image input, except 3 color
-                channels.
-    """
-    def _bounding_box(z_where, x_size, rounded=True, margin=1):
-        z_where = z_where.cpu().numpy().flatten()
-        assert z_where.shape[0] == z_where.size == 3
-        s, x, y = tuple(z_where)
-        w = x_size / s
-        h = x_size / s
-        xtrans = -x / s * x_size / 2
-        ytrans = -y / s * x_size / 2
-        x1 = (x_size - w) / 2 + xtrans - margin
-        y1 = (x_size - h) / 2 + ytrans - margin
-        x2 = x1 + w + 2 * margin
-        y2 = y1 + h + 2 * margin
-        x1, x2 = sorted((x1, x2))
-        y1, y2 = sorted((y1, y2))
-        coords = (x1, x2, y1, y2)
-        if rounded:
-            coords = (int(round(t)) for t in coords)
-        return coords
-
-    target_shape = list(img.shape)
-    collapse_first = False
-    torch_tensor = isinstance(img, torch.Tensor)
-    img = img.cpu().numpy().copy()
-    if len(img.shape) == 3:
-        collapse_first = True
-        img = np.expand_dims(img, 0)
-        target_shape[0] = 3
-    else:
-        target_shape[1] = 3
-    assert len(img.shape) == 4 and img.shape[0] == 1
-    if img.shape[1] == 1:
-        img = np.tile(img, (1, 3, 1, 1))
-    assert img.shape[1] == 3
-    color = color[:, None]
-
-    x1, x2, y1, y2 = _bounding_box(z_where, img.shape[2])
-    x_max = y_max = img.shape[2] - 1
-    if 0 <= y1 <= y_max:
-        img[0, :, y1, max(x1, 0):min(x2, x_max)] = color
-    if 0 <= y2 - 1 <= y_max:
-        img[0, :, y2 - 1, max(x1, 0):min(x2, x_max)] = color
-    if 0 <= x1 <= x_max:
-        img[0, :, max(y1, 0):min(y2, y_max), x1] = color
-    if 0 <= x2 - 1 <= x_max:
-        img[0, :, max(y1, 0):min(y2, y_max), x2 - 1] = color
-
-    if collapse_first:
-        img = img[0]
-    if torch_tensor:
-        img = torch.from_numpy(img)
-
-    target_shape = tuple(target_shape)
-    img_shape = tuple(img.shape)
-    assert img_shape == target_shape, "{}, {}".format(img_shape, target_shape)
-    return img
 
 def get_baseline_save_dir():
     return "save/baseline"
@@ -300,8 +152,14 @@ def get_checkpoint_paths(checkpoint_iteration=-1):
     for path_base in sorted(os.listdir(save_dir)):
         yield get_checkpoint_path_from_path_base(path_base, checkpoint_iteration)
 
+transform = transforms.Compose([
+                       #transforms.RandomRotation(30, fill=(0,)),
+                       transforms.GaussianBlur(kernel_size=3)
+                       #transforms.Normalize((0.1307,), (0.3081,))
+                   ])
 
-def init(run_args, device):
+def init(run_args, device):        
+
     if run_args.model_type == 'base':
         # Generative model
         generative_model = base.GenerativeModel(
@@ -309,6 +167,7 @@ def init(run_args, device):
                                 prior_dist=run_args.prior_dist,
                                 likelihood_dist=run_args.likelihood_dist,
                                 strks_per_img=run_args.strokes_per_img,
+                                res=run_args.img_res,
                                 ).to(device)
 
         # Guide
@@ -316,16 +175,32 @@ def init(run_args, device):
                                 dist=run_args.inference_dist,
                                 net_type=run_args.inference_net_architecture,
                                 strks_per_img=run_args.strokes_per_img,
+                                img_dim=[1, run_args.img_res, run_args.img_res],
                                 ).to(device)
 
     elif run_args.model_type == 'sequential':
         generative_model = sequential.GenerativeModel(
                                 max_strks=run_args.strokes_per_img,
                                 pts_per_strk=run_args.points_per_stroke,
+                                z_where_type=run_args.z_where_type,
+                                res=run_args.img_res,
+                                execution_guided=run_args.execution_guided,
+                                transform_z_what=run_args.transform_z_what,
+                                input_dependent_param=\
+                                        run_args.input_dependent_render_param,
+                                prior_dist=run_args.prior_dist,
                                 ).to(device)
         guide = sequential.Guide(
                                 max_strks=run_args.strokes_per_img,
                                 pts_per_strk=run_args.points_per_stroke,
+                                z_where_type=run_args.z_where_type,
+                                img_dim=[1, run_args.img_res, run_args.img_res],
+                                execution_guided=run_args.execution_guided,
+                                transform_z_what=run_args.transform_z_what,
+                                input_dependent_param=\
+                                        run_args.input_dependent_render_param,
+                                exec_guid_type=run_args.exec_guid_type,
+                                prior_dist=run_args.prior_dist,
                                 ).to(device)
     else:
         raise NotImplementedError
@@ -353,37 +228,42 @@ def init(run_args, device):
                                                 use_interpolate=20)
     elif run_args.dataset == 'mnist':
         # Training and Testing dataset
+        res = run_args.img_res
         trn_dataset = datasets.MNIST(root='./data', train=True, download=True,
-                    transform=transforms.Compose([
-                       transforms.RandomRotation(30, fill=(0,)),
-                       transforms.ToTensor(),
-                       transforms.GaussianBlur(kernel_size=3)
-                       #transforms.Normalize((0.1307,), (0.3081,))
-                   ]))
+            transform=transforms.Compose([
+                transforms.RandomRotation(30, fill=(0,)),
+                transforms.Resize([res,res], antialias=True),
+                transforms.ToTensor(),
+                #transforms.Normalize((0.1307,), (0.3081,))
+            ]))
         # to only use a subset
-        idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
-        # # idx = trn_dataset.targets == 1
-        trn_dataset.targets = trn_dataset.targets[idx]
-        trn_dataset.data= trn_dataset.data[idx]
+        # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
+        # idx = torch.logical_or(trn_dataset.targets == 0, trn_dataset.targets == 8)
+        # idx = trn_dataset.targets == 1
+        # trn_dataset.targets = trn_dataset.targets[idx]
+        # trn_dataset.data= trn_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
                                 shuffle=True, 
-                                num_workers=4
+                                num_workers=4,
         )
 
         # Test dataset
-        tst_dataset = datasets.MNIST(root='./data', train=False,
+        # tst_dataset = datasets.MNIST(root='./data', train=False,
+        tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
                         transform=transforms.Compose([
-                            transforms.RandomRotation(30, fill=(0,)),
+                            # transforms.RandomRotation(30, fill=(0,)),
+                            transforms.Resize([res,res], antialias=True),
                             transforms.ToTensor(),
                             #transforms.Normalize((0.1307,), (0.3081,))
-                        ]))
+                        ]),
+                        download=True)
         # to only use a subset
-        idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
-        # # idx = tst_dataset.targets == 1
-        tst_dataset.targets = tst_dataset.targets[idx]
-        tst_dataset.data= tst_dataset.data[idx]
+        # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
+        # idx = tst_dataset.targets == 1
+        # tst_dataset.targets = tst_dataset.targets[idx]
+        # tst_dataset.data= tst_dataset.data[idx]
 
         test_loader = DataLoader(tst_dataset,
                 batch_size=run_args.batch_size, shuffle=True, num_workers=4
@@ -395,6 +275,16 @@ def init(run_args, device):
         data_loader = synthetic.get_data_loader(generative_model, 
                                                 batch_size=run_args.batch_size,
                                                 device=run_args.device)
+    elif run_args.dataset == 'multimnist':
+        keep_classes = ['11', '77', '17', '71',]# '171']
+        data_loader = (multimnist.get_dataloader(keep_classes=keep_classes,
+                                                device=run_args.device,
+                                                batch_size=run_args.batch_size,
+                                                shuffle=True,
+                                                transform=transforms.Compose([
+                    transforms.GaussianBlur(kernel_size=3),
+                    transforms.Resize([28, 28])
+                   ])), None)
     else:
         raise NotImplementedError
 
@@ -426,6 +316,18 @@ def save_checkpoint(path, model, optimizer, stats, run_args=None):
             },
             path,
         )
+    elif run_args.model_type == 'sequential' or run_args.model_type == 'base':
+        generative_model, guide = model
+        torch.save(
+            {
+                "generative_model_state_dict": generative_model.state_dict(),
+                "guide_state_dict": guide.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "stats": stats,
+                "run_args": run_args,
+            },
+            path,
+        )
     else:
         generative_model, guide = model
         torch.save(
@@ -448,7 +350,15 @@ def load_checkpoint(path, device):
     run_args = checkpoint["run_args"]
     model, optimizer, stats, data_loader = init(run_args, device)
 
-    if run_args.model_type == "predictive":
+    if run_args.model_type == 'sequential':
+        generative_model, guide = model
+
+        generative_model.load_state_dict(
+                                    checkpoint["generative_model_state_dict"])
+        guide.load_state_dict(checkpoint['guide_state_dict'])
+        model = (generative_model, guide)
+        
+    elif run_args.model_type == "predictive":
         predictive_model = model
 
         predictive_model.load_state_dict(checkpoint["predictive_model_state_dict"])
@@ -468,6 +378,7 @@ def load_checkpoint(path, device):
         guide.load_state_dict(checkpoint["guide_state_dict"])
 
         model = (generative_model, guide)
+
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     stats = checkpoint["stats"]
     return model, optimizer, stats, data_loader, run_args
@@ -599,27 +510,37 @@ class ConvolutionNetwork(nn.Module):
                                                                     mlp=None):
         super().__init__()
         self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
-        self.conv2 = nn.Conv2d(n_mid_channels, 64, 3, 1)
+        self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 3, 1)
         self.mlp = mlp
-        self.dropout = nn.Dropout(0.25)
+        self.dropout = nn.Dropout(0.50)
     
     def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
         x = self.dropout(x)
         x = torch.flatten(x, 1)
-        output = self.mlp(x)
-        return output
+        if self.mlp:
+            x = self.mlp(x)
+        return x
 
-def init_cnn(in_dim, out_dim, num_mlp_layers, n_in_channels=1, 
-                    n_mid_channels=32, n_out_channels=64, non_linearity=None, 
-                                                mlp_hidden_dim=256):
+def init_cnn(mlp_out_dim, 
+             cnn_out_dim,
+             num_mlp_layers, 
+             n_in_channels=1, 
+             n_mid_channels=32, 
+             n_out_channels=64, 
+             non_linearity=None, 
+             mlp_hidden_dim=256):
+
     """Initializes a convnet, assuming input:
          - has 1 channel and; 
          - it's a squared image.
     """
-    conv_output_size = 1600 #9216
-    mlp = init_mlp(in_dim=conv_output_size, out_dim=out_dim, 
+    conv_output_size = cnn_out_dim #4608 #1600 #9216
+    mlp = init_mlp(in_dim=conv_output_size, out_dim=mlp_out_dim, 
                                             hidden_dim=mlp_hidden_dim, 
                                             num_layers=num_mlp_layers)
     conv_net = ConvolutionNetwork(mlp=mlp, n_in_channels=n_in_channels,
@@ -724,7 +645,7 @@ def get_affine_matrix_from_param(thetas, z_where_type):
     if z_where_type=='4_rotate':
         scale = thetas[:, 0:1].expand(-1, 2)
         translations = thetas[:, 1:3]
-        angle = torch.tanh(thetas[:, 3]) * np.pi
+        angle = thetas[:, 3]
     elif z_where_type == '4_no_rotate':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
@@ -732,11 +653,11 @@ def get_affine_matrix_from_param(thetas, z_where_type):
     elif z_where_type == '3':
         scale = thetas[:, 0:1].expand(-1, 2)
         translations = thetas[:, 1:3]
-        angle = torch.zeros_like(thetas[:, 0]) * np.pi
+        angle = torch.zeros_like(thetas[:, 0]) 
     elif z_where_type == '5':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
-        angle = torch.tanh(thetas[:, 3]) * np.pi
+        angle = thetas[:, 3]
     else:
         raise NotImplementedError
     affine_matrix = get_affine_matrix2d(translations=translations,
@@ -757,36 +678,6 @@ def init_stn(in_dim=None, out_dim=None, num_mlp_layers=None,
         return stn, cnn
     else:
         return stn
-
-class Predictor(nn.Module):
-    """
-    Infer presence and location from RNN hidden state
-    """
-    def __init__(self, in_dim, z_where_type, z_where_dim):
-        nn.Module.__init__(self)
-        self.z_where_dim = z_where_dim
-        if z_where_type == '3':
-            self.seq = nn.Sequential(
-                nn.Linear(in_dim, 200),
-                nn.ReLU(),
-                nn.Linear(200, 1 + z_where_dim * 2),
-            )
-            # Initialize the weight/bias with identity transformation
-            self.seq[2].weight.data.zero_()
-            self.seq[2].bias = torch.nn.Parameter(torch.tensor([10,1,0,0,-10,-10,-10], 
-                                                            dtype=torch.float))
-        else:
-            raise NotImplementedError
-        
-    def forward(self, h):
-        # todo make capacible with other z_where_types
-        z = self.seq(h)
-        z_pres_p = torch.sigmoid(z[:, :1])
-        z_where_loc_scale = F.softplus(z[:, 1:1+1])
-        z_where_loc_shift = z[:, 1+1:1+self.z_where_dim]
-        z_where_loc = torch.cat([z_where_loc_scale, z_where_loc_shift], dim=1)
-        z_where_scale = F.softplus(z[:, (1+self.z_where_dim):])
-        return z_pres_p, z_where_loc, z_where_scale
 
 def get_device():
     if torch.cuda.is_available():

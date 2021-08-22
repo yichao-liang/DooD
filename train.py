@@ -24,48 +24,72 @@ def train(model, optimizer, stats, data_loader, args):
     train_loader, test_loader = data_loader
     data_size = len(train_loader.dataset)
     
-    # one_batch, _ = next(iter(train_loader))
+    imgs, _ = next(iter(train_loader))
+    imgs = util.transform(imgs.to(args.device))
     while iteration < args.num_iterations:
+
+        # Log training reconstruction in Tensorboard
+        with torch.no_grad():
+            plot.plot_reconstructions(imgs=imgs, 
+                                      guide=guide, 
+                                      generative_model=generative_model, 
+                                      args=args, 
+                                      writer=writer, 
+                                      epoch=epoch,
+                                      is_train=True)
+
         for imgs, _ in train_loader:
             # fit on only 1 batch
-            imgs = imgs.to(args.device)
-            # imgs = one_batch.to(args.device)
-
-            optimizer.zero_grad()
-            if args.model_type == 'base':
-                base.schedule_model_parameters(generative_model, guide, 
-                                            iteration, args.loss, args.device)
-                loss, neg_gen_prob, inf_prob = losses.get_loss_base(
-                                        generative_model, guide, imgs, 
-                                        loss=args.loss,)
-            elif args.model_type == 'sequential':
-                loss, neg_gen_prob, inf_prob = losses.get_loss_sequential(
-                                                generative_model, guide,
-                                                imgs, args.loss)
+            if iteration < 10000:
+                imgs = util.transform(imgs.to(args.device))
             else:
-                raise NotImplementedError
+                imgs = imgs.to(args.device)
+            # imgs = one_batch.to(args.device)
+            with torch.autograd.set_detect_anomaly(True):
+                optimizer.zero_grad()
+                if args.model_type == 'base':
+                    base.schedule_model_parameters(generative_model, guide, 
+                                                iteration, args.loss, args.device)
+                    loss_tuple = losses.get_loss_base(
+                                            generative_model, guide, imgs, 
+                                            loss=args.loss,)
+                elif args.model_type == 'sequential':
+                    loss_tuple = losses.get_loss_sequential(
+                                                    generative_model, guide,
+                                                    imgs, args.loss)
+                else:
+                    raise NotImplementedError
 
-            loss = loss.mean()
-            neg_gen_prob = neg_gen_prob.mean()
-            inf_prob = inf_prob.mean()
-            writer.add_scalars("Train curves", {'Train/-ELBO': loss,
-                                'Train/inference_log_prob': inf_prob, 
-                                'Train/generative_negative_log_prob': 
-                                                            neg_gen_prob},
-                                iteration)
-                                
-            loss.backward()
+                loss = loss_tuple.overall_loss.mean()
+                loss.backward()
 
-            # Check for nans
+            # Log loss, gradients and some parameters
+            for n, l in zip(loss_tuple._fields, loss_tuple):
+                writer.add_scalar("Train curves/"+n, l.detach().mean(), iteration)
+            # writer.add_scalars("Train curves", {n:l.detach().mean() for n, l in 
+            #                     zip(loss_tuple._fields, loss_tuple)}, iteration)                                
             writer.add_scalars("Gradient Norm", {f"Grad/{n}":
                                         p.grad.norm(2) for n, p in 
                                         guide.named_parameters()}, iteration)
-            writer.add_scalar("Parameters/gen.sigma",
-                            util.constrain_parameter(generative_model.sigma, 
-                                                min=.01, max=.05),iteration)
-            writer.add_scalar("Parameters/tanh.norm.slope",
-                util.constrain_parameter(generative_model.tanh_norm_slope, 
-                                                min=.1,max=.7),iteration)
+            if generative_model.input_dependent_param:
+                writer.add_scalar("Parameters/gen.sigma",
+                                        generative_model.sigma.mean(),iteration)
+                # writer.add_scalar("Parameters/tanh.norm.slope",
+                #              generative_model.tanh_norm_slope.mean(), iteration)
+                # if args.model_type == 'sequential':
+                #     writer.add_scalar("Parameters/tanh.norm.slope.per_stroke",
+                #       generative_model.tanh_norm_slope_stroke.mean(), iteration)
+            else:
+                writer.add_scalar("Parameters/gen.sigma", 
+                                 generative_model.get_sigma().mean() ,iteration)
+                writer.add_scalar("Parameters/tanh.norm.slope",
+                            generative_model.get_tanh_slope().mean(), iteration)
+                writer.add_scalar("Parameters/imgs_dist.std",
+                            generative_model.get_imgs_dist_std().mean(), iteration)
+                if args.model_type == 'sequential':
+                    writer.add_scalar("Parameters/tanh.norm.slope.per_stroke",
+                       generative_model.get_tanh_slope_strk().mean(), iteration)
+            # Check for nans
             for name, parameter in guide.named_parameters():
                 # print(f"{name} has norm: {parameter.norm(1)}")
                 # print(f"{name}.grad has norm: {parameter.grad.norm(2)}")
@@ -73,7 +97,6 @@ def train(model, optimizer, stats, data_loader, args):
                 if torch.isnan(parameter).any() or torch.isnan(parameter.grad).any():
                     print(f"{name}.grad has {parameter.grad.isnan().sum()}/{np.prod(parameter.shape)} nan parameters")
                     breakpoint()
-
                 if torch.isnan(parameter).any(): 
                     breakpoint()
                     raise RuntimeError(f"nan in guide parameter {name}: {parameter}")
@@ -107,19 +130,12 @@ def train(model, optimizer, stats, data_loader, args):
             if iteration == args.num_iterations:
                 break
         epoch += 1
-
-        # Log training reconstruction in Tensorboard
-        with torch.no_grad():
-            plot.plot_reconstructions(imgs=imgs, 
-                                      guide=guide, 
-                                      generative_model=generative_model, 
-                                      args=args, 
-                                      writer=writer, 
-                                      epoch=epoch,
-                                      is_train=True)
+        writer.flush()
 
         # Test every epoch
-        test(model, stats, test_loader, args, epoch=epoch, writer=writer)
+        if test_loader:
+            test(model, stats, test_loader, args, epoch=epoch, writer=writer)
+    writer.close()
 
 def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
                                                                 writer=None):
@@ -127,26 +143,47 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
     Args:
         test_loader (DataLoader): testset dataloader
     '''
+    if args.model_type == 'sequential':
+        cum_losses = [0]*8
+    elif args.model_type == 'base':
+        cum_losses = [0]*3
+
     generative_model, guide = model
     generative_model.eval(); guide.eval()
 
     with torch.no_grad():
-        loss, neg_gen_prob, inf_prob = 0, 0, 0
         for imgs, _ in test_loader:
             imgs = imgs.to(args.device)
 
             if args.model_type == 'base':
-                loss, neg_gen_prob, inf_prob = losses.get_loss_base(
+                loss_tuple = losses.get_loss_base(
                                         generative_model, guide, imgs, 
                                         loss=args.loss,)
             elif args.model_type == 'sequential':
-                loss_tp, neg_gen_prob_tp, inf_prob_tp = losses.get_loss_sequential(
+                loss_tuple = losses.get_loss_sequential(
                                                 generative_model, guide,
                                                 imgs, args.loss)
-            loss += loss_tp.sum()
-            neg_gen_prob += neg_gen_prob_tp.sum()
-            inf_prob += inf_prob_tp.sum()
-            
+            for i in range(len(loss_tuple)):
+                cum_losses[i] += loss_tuple[i].sum()      
+        
+        # Logging
+        data_size = len(test_loader.dataset)
+        for i in range(len(cum_losses)):
+            cum_losses[i] /= data_size
+
+        if args.model_type == 'sequential':
+            loss_tuple = losses.SequentialLoss(*cum_losses)
+        elif args.model_type == 'base':
+            loss_tuple = losses.BaseLoss(*cum_losses)
+
+        stats.tst_losses.append(loss_tuple.overall_loss)
+        
+        for n, l in zip(loss_tuple._fields, loss_tuple):
+            writer.add_scalar("Test curves/"+n, l, epoch)
+        # writer.add_scalars("Test curves", {n:l for n, l in 
+        #                         zip(loss_tuple._fields, loss_tuple)}, epoch)   
+        util.logging.info(f"Epoch {epoch} Test loss | Loss = {stats.tst_losses[-1]:.3f}")
+
         plot.plot_reconstructions(imgs=imgs, 
                                       guide=guide, 
                                       generative_model=generative_model, 
@@ -154,16 +191,5 @@ def test(model, stats, test_loader, args, save_imgs_dir=None, epoch=None,
                                       writer=writer, 
                                       epoch=epoch,
                                       is_train=False)
-        
-        # Logging
-        data_size = len(test_loader.dataset)
-        loss /= data_size
-        neg_gen_prob /= data_size
-        inf_prob /= data_size
-        stats.tst_losses.append(loss)
-        writer.add_scalars("Test curves", {'Test/-ELBO': loss,
-                                'Test/inference_log_prob': inf_prob, 
-                                'Test/generative_negative_log_prob': 
-                                                                neg_gen_prob,
-                                }, epoch)
-        util.logging.info(f"Epoch {epoch} Test loss | Loss = {stats.tst_losses[-1]:.3f}")
+
+        writer.flush()
