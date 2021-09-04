@@ -13,12 +13,13 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
-from models import base, sequential
+from models import base, sequential, air, vae
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
 from data import synthetic, multimnist
 
@@ -31,6 +32,48 @@ logging.basicConfig(
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 
+def transform_z_what(z_what, z_where, z_where_type, res):
+    '''Apply z_where_mtrx to z_what such that it has a similar result as
+    applying the inverse z_where_mtrx to the z_what-rendering.
+    Args:
+        z_what [bs, n_pts, 2]
+        z_where_mtrx [bs, z_where_dim]
+        res (int): resolution for target image; used in affine_grid
+    Return:
+        transformed_z_what [bs, n_pts, 2]
+    '''
+    bs, n_pts, _ = z_what.shape
+    # Get the center of the inverse affine grid
+    z_where_mtrx = get_affine_matrix_from_param(thetas=z_where, 
+                                                z_where_type=z_where_type, 
+                                                center=None)
+    inv_z_where_mtrx = invert_affine_transform(z_where_mtrx)
+    ag = F.affine_grid(inv_z_where_mtrx, [bs, 1, res, res], align_corners=True)
+
+    l_coord, r_coord = int(np.ceil((res/2) - 1)),  int(np.floor(res/2))
+    center = ((ag[:, l_coord, l_coord].cuda() + 
+               ag[:, r_coord, r_coord].cuda()) / 2) + 0.5
+    
+    # Get the adjusted z_where_mtrx, apply to z_what
+    adj_z_where_mtrx = get_affine_matrix_from_param(thetas=z_where, 
+                                                z_where_type=z_where_type, 
+                                                center=center)
+    homo_coord = torch.cat([z_what, torch.ones(bs, n_pts, 1).to(z_what.device)], 
+                                                                        dim=2)
+    transformed_z_what = ((adj_z_where_mtrx @ homo_coord.transpose(1,2)
+                                                            ).transpose(1,2))
+    return transformed_z_what
+
+
+def incremental_average(m_prev, a, n):
+    '''
+    Args:
+        m_pres: mean of n-1 elements
+        a: new elements
+        n (int): n-th element
+    '''
+    return m_prev + ((a - m_prev)/n)
+
 def init_z_where(z_where_type):
     '''
     '3': (scale, shift x, y)
@@ -38,12 +81,15 @@ def init_z_where(z_where_type):
     '4_rotate': (scale, shift x, y, rotate)
     '5': (scale x, y, shift x, y, rotate
     '''
-    init_z_where_params = {'3': ZWhereParam(torch.tensor([1,0,0]), 
-                                                torch.ones(3)/5, 3),
-                           '4_no_rotate': ZWhereParam(torch.tensor([1,1,0,0]),
+    init_z_where_params = {'3': ZWhereParam(torch.tensor([.8,0,0]), 
+                                                torch.tensor([.2,.2,.2]), 3),
+                                                # torch.ones(3)/5, 3),
+                           '4_no_rotate': ZWhereParam(torch.tensor([.3,1,0,0]),
                                                 torch.ones(4)/5, 4),
-                           '4_rotate': ZWhereParam(torch.tensor([1,0,0,0]),
-                                                torch.ones(4)/5, 4),
+                           '4_rotate': ZWhereParam(
+                                                torch.tensor([.5,0,0,0]),
+                                                torch.tensor([0.2,1,1,1]), 4),
+                                                # torch.ones(4)/5, 4),
                            '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
                                                 torch.ones(5)/5, 5),
                         }
@@ -53,9 +99,11 @@ def init_z_where(z_where_type):
 def safe_div(dividend, divisor):
     '''divident / divisor, only do it for nonzero divisor dims
     '''
-    idx = divisor != 0.
+    # experiment only do it for divisor larger then 1e-6
+    # idx = divisor = 0
+    idx = divisor >= 1e-4
     idx = idx.squeeze()
-    divisor[idx] = divisor[idx].clamp(min=1e-6)
+    # divisor[idx] = divisor[idx].clamp(min=1e-6)
     dividend[idx] =  dividend[idx] / divisor[idx] 
     return dividend
 
@@ -67,7 +115,7 @@ def sigmoid(x, min=0., max=1., shift=0., slope=1.):
 def constrain_parameter(param, min=5e-2, max=1e-2):
     return torch.sigmoid(param) * (max-min) + min
 
-def normalize_pixel_values(img, method='tanh', slope=0.3, maxnorm_max=1.):
+def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
     '''
     Args:
         img:
@@ -77,9 +125,11 @@ def normalize_pixel_values(img, method='tanh', slope=0.3, maxnorm_max=1.):
     '''
     if method == 'tanh':
         try:
-            if len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
+            if type(slope) == float:
+                img = torch.tanh(img/slope)
+            elif len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
                 assert (len(img.shape) == 4 and len(slope.shape) == 1) or\
-                    (len(img.shape) == 5 and len(slope.shape) == 2)
+                       (len(img.shape) == 5 and len(slope.shape) == 2)
                 slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
                 # img_ = torch.tanh(img/slope)
                 # if execution guided
@@ -153,14 +203,12 @@ def get_checkpoint_paths(checkpoint_iteration=-1):
         yield get_checkpoint_path_from_path_base(path_base, checkpoint_iteration)
 
 transform = transforms.Compose([
-                       #transforms.RandomRotation(30, fill=(0,)),
                        transforms.GaussianBlur(kernel_size=3)
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ])
 
 def init(run_args, device):        
-
-    if run_args.model_type == 'base':
+    if run_args.model_type == 'Base':
         # Generative model
         generative_model = base.GenerativeModel(
                                 ctrl_pts_per_strk=run_args.points_per_stroke,
@@ -178,7 +226,9 @@ def init(run_args, device):
                                 img_dim=[1, run_args.img_res, run_args.img_res],
                                 ).to(device)
 
-    elif run_args.model_type == 'sequential':
+    elif run_args.model_type == 'Sequential':
+        if run_args.prior_dist == "Sequential":
+            run_args.execution_guided = True
         generative_model = sequential.GenerativeModel(
                                 max_strks=run_args.strokes_per_img,
                                 pts_per_strk=run_args.points_per_stroke,
@@ -201,7 +251,39 @@ def init(run_args, device):
                                         run_args.input_dependent_render_param,
                                 exec_guid_type=run_args.exec_guid_type,
                                 prior_dist=run_args.prior_dist,
+                                target_in_pos=run_args.target_in_pos,
+                                feature_extractor_sharing=\
+                                            run_args.feature_extractor_sharing,
                                 ).to(device)
+    elif run_args.model_type == 'AIR':
+        run_args.z_where_type = '3'
+        run_args.lr, run_args.bl_lr = 1e-4, 1e-3
+        generative_model = air.GenerativeModel(
+                                max_strks=run_args.strokes_per_img,
+                                res=run_args.img_res,
+                                z_where_type=run_args.z_where_type,
+                                execution_guided=run_args.execution_guided,
+                                transform_z_what=run_args.transform_z_what,
+                                z_what_dim=run_args.z_dim,
+                        ).to(device)
+        guide = air.Guide(
+                        max_strks=run_args.strokes_per_img,
+                        img_dim=[1, run_args.img_res, run_args.img_res],
+                        z_where_type=run_args.z_where_type,
+                        execution_guided=run_args.execution_guided,
+                        feature_extractor_sharing=\
+                                            run_args.feature_extractor_sharing,
+                        z_what_dim=run_args.z_dim,
+                        ).to(device)
+    elif run_args.model_type == 'VAE':
+        generative_model = vae.GenerativeModel(
+                                res=run_args.img_res,
+                                z_dim=run_args.z_dim,
+                                ).to(device)
+        guide = vae.Guide(
+                        img_dim=[1, run_args.img_res, run_args.img_res],
+                        z_dim=run_args.z_dim,
+                        ).to(device)
     else:
         raise NotImplementedError
     # Model tuple
@@ -209,9 +291,46 @@ def init(run_args, device):
 
     # Optimizer
     # parameters = guide.parameters()
-    parameters = itertools.chain(guide.parameters(), generative_model.parameters())
-    optimizer = torch.optim.Adam(parameters, 
-                                    lr=run_args.lr)
+    if run_args.model_type == 'AIR':
+        air_parameters = itertools.chain(guide.air_params(), 
+                                         generative_model.parameters())
+        optimizer = torch.optim.Adam([
+            {
+                'params': air_parameters, 
+                'lr': run_args.lr,
+                'weight_decay': run_args.weight_decay
+            },
+            {
+                'params': guide.baseline_params(),
+                'lr': run_args.bl_lr,
+                'weight_decay': run_args.weight_decay,
+            }
+        ])
+    elif run_args.model_type == 'Sequential':
+        
+        if run_args.execution_guided:
+            air_parameters = itertools.chain(guide.air_params(), 
+                                             guide.internal_decoder.parameters(),
+                                             generative_model.parameters())
+        else:
+            air_parameters = itertools.chain(guide.air_params(), 
+                                             generative_model.parameters())
+        optimizer = torch.optim.Adam([
+            {
+                'params': air_parameters, 
+                'lr': run_args.lr,
+                'weight_decay': run_args.weight_decay
+            },
+            {
+                'params': guide.baseline_params(),
+                'lr': run_args.bl_lr,
+                'weight_decay': run_args.weight_decay,
+            }
+        ]) 
+    else:
+        parameters = itertools.chain(guide.parameters(), 
+                                     generative_model.parameters())
+        optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
 
     # Stats
     stats = Stats([], [], [], [])
@@ -229,14 +348,33 @@ def init(run_args, device):
     elif run_args.dataset == 'mnist':
         # Training and Testing dataset
         res = run_args.img_res
+
         trn_dataset = datasets.MNIST(root='./data', train=True, download=True,
-            transform=transforms.Compose([
+                transform=transforms.Compose([
                 transforms.RandomRotation(30, fill=(0,)),
                 transforms.Resize([res,res], antialias=True),
                 transforms.ToTensor(),
                 #transforms.Normalize((0.1307,), (0.3081,))
             ]))
-        # to only use a subset
+        val_dataset = datasets.MNIST(root='./data', train=True, download=False,
+                transform=transforms.Compose([
+                transforms.Resize([res,res], antialias=True),
+                transforms.ToTensor(),
+                #transforms.Normalize((0.1307,), (0.3081,))
+            ]))
+
+        # Get index of trn, val set
+        # num_train = len(trn_dataset)
+        # valid_size = 0.2
+        # indices = list(range(num_train))
+        # np.random.shuffle(indices)
+        # split = int(np.floor(valid_size * num_train))
+        # trn_idx, val_idx = indices[split:], indices[:split]
+
+        # trn_sampler = SubsetRandomSampler(trn_idx)
+        # val_sampler = SubsetRandomSampler(val_idx)
+
+        # To only use a subset
         # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
         # idx = torch.logical_or(trn_dataset.targets == 0, trn_dataset.targets == 8)
         # idx = trn_dataset.targets == 1
@@ -245,9 +383,17 @@ def init(run_args, device):
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
-                                shuffle=True, 
                                 num_workers=4,
-        )
+                                shuffle=True,
+                                # sampler=trn_sampler
+                                )
+
+        valid_loader = DataLoader(val_dataset,
+                                batch_size=run_args.batch_size,
+                                num_workers=4,
+                                shuffle=True,
+                                # sampler=val_sampler
+                                )
 
         # Test dataset
         # tst_dataset = datasets.MNIST(root='./data', train=False,
@@ -259,6 +405,7 @@ def init(run_args, device):
                             #transforms.Normalize((0.1307,), (0.3081,))
                         ]),
                         download=True)
+
         # to only use a subset
         # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
         # idx = tst_dataset.targets == 1
@@ -269,7 +416,7 @@ def init(run_args, device):
                 batch_size=run_args.batch_size, shuffle=True, num_workers=4
         )
         
-        data_loader = train_loader, test_loader
+        data_loader = train_loader, valid_loader
     elif run_args.dataset == 'generative_model':
         # train and test dataloader
         data_loader = synthetic.get_data_loader(generative_model, 
@@ -383,7 +530,7 @@ def load_checkpoint(path, device):
     stats = checkpoint["stats"]
     return model, optimizer, stats, data_loader, run_args
 
-
+ClfStats = collections.namedtuple("ClfStats", ['trn_accuracy', 'tst_accuracy'])
 Stats = collections.namedtuple("Stats", ["trn_losses", "trn_elbos", 
                                             "tst_losses", "tst_elbos"])
 
@@ -630,7 +777,7 @@ def invert_z_where(z_where):
     z_where_inv[:, 0:1] = 1 / scale    # (batch, 1)
     return z_where_inv
 
-def get_affine_matrix_from_param(thetas, z_where_type):
+def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     '''Get a batch of 2x3 affine matrix from transformation parameters 
     thetas of shape [batch_size, 4 (shift x, y; scale; angle)]. <-deprecated format
     # todo make capatible with base model stn
@@ -641,7 +788,8 @@ def get_affine_matrix_from_param(thetas, z_where_type):
         '4_no_rotate': (scale x, y, shift x, y)
         '5': (scale x, y, shift x, y, rotate)
     '''
-    center = torch.zeros_like(thetas[:, :2])
+    if center is None:
+        center = torch.zeros_like(thetas[:, :2])
     if z_where_type=='4_rotate':
         scale = thetas[:, 0:1].expand(-1, 2)
         translations = thetas[:, 1:3]

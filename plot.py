@@ -3,12 +3,14 @@ from einops import rearrange
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import offsetbox
+import matplotlib.lines as mlines
 import numpy as np
 import torch
 from torchvision.utils import save_image, make_grid
 from torchvision import transforms
 from torch.utils.tensorboard import SummaryWriter
 from skimage.draw import line_aa, line
+from kornia.geometry.transform import invert_affine_transform
 
 import util
 from splinesketch.code.bezier import Bezier
@@ -44,13 +46,14 @@ def plot_reconstructions(imgs:torch.Tensor,
     imgs = imgs[:n]
     res = imgs.shape[-1]
 
-    if args.model_type == 'base':
+    if args.model_type == 'Base':
         if args.inference_net_architecture == "STN":
             latent, stn_out = guide.rsample(imgs, stn_out=True)
         else:
             latent = guide.rsample(imgs)
         generative_model.stn_transform = guide.stn_transform
         recon_img = generative_model.img_dist_b(latent).mean
+        pts = latent
 
         if args.inference_net_architecture == 'STN':
             comparision = torch.cat([imgs[:8], stn_out[:8], recon_img[:8] ,
@@ -59,8 +62,9 @@ def plot_reconstructions(imgs:torch.Tensor,
         else:
             comparision = torch.cat([imgs[:8], recon_img[:8], imgs[8:n], 
                                         fillers, recon_img[8:n], fillers])
+                            
 
-    elif args.model_type == 'sequential':
+    elif args.model_type == 'Sequential' or args.model_type == 'AIR':
 
         # Get the info for make plots
         guide_out = guide(imgs)
@@ -77,7 +81,8 @@ def plot_reconstructions(imgs:torch.Tensor,
                         z_where_type=args.z_where_type)
                         
         # Reconstruction images; z_what: [bs, n_strks, n_pts, 2]
-        if generative_model.input_dependent_param:
+        if args.model_type == 'Sequential' and \
+           generative_model.input_dependent_param:
             generative_model.sigma = guide_out.decoder_param.sigma
             generative_model.tanh_norm_slope_stroke = guide_out.decoder_param.slope[0]
             generative_model.tanh_norm_slope = guide_out.decoder_param.slope[1]
@@ -88,7 +93,7 @@ def plot_reconstructions(imgs:torch.Tensor,
             recon_img = generative_model.renders_imgs(latent).expand(n,3,res,res)
 
         print(f"epoch {epoch}")
-        print(np.array(guide_out.z_pres_pms.detach().cpu()).round(3))
+        print(np.array(guide_out.z_pms.z_pres.detach().cpu()).round(3))
         # if args.z_where_type == '4_rotate':
         #     print(np.array(latent.z_where[:n,:,3].detach().cpu()).round(2))
         # Add bounding boxes based on z_where
@@ -136,7 +141,6 @@ def plot_reconstructions(imgs:torch.Tensor,
         recon_glimpse = recon_glimpse.reshape([n,3,n_strks*resize_res,
                                                                     resize_res])
 
-        # comparision: [n, 3, res * (1_for_target + n_strks_stn + 1_for_recon), res]
         recon_img = transform(recon_img)
         # pre canvas for debugging execution guided
         if args.execution_guided:
@@ -149,6 +153,7 @@ def plot_reconstructions(imgs:torch.Tensor,
             else: raise NotImplementedError
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)
+        # comparision: [n, 3, res * (1_for_target + n_strks_stn + 1_for_recon), res]
         comparision = torch.cat([imgs_w_box, 
                                  recon_img, 
                                  stn_out,
@@ -157,6 +162,12 @@ def plot_reconstructions(imgs:torch.Tensor,
         # comparision = torch.cat([imgs_w_box, recon_img, stn_out], dim=2)
         assert comparision.shape == torch.Size([n, 3, 
                                     resize_res * (1+n_strks*2+1+1), resize_res])
+
+    elif args.model_type == 'VAE':
+        latent = guide(imgs)
+        recon_img = generative_model.img_dist(latent.z_smpl).mean
+        comparision = torch.cat([transform(imgs), 
+                                 transform(recon_img)], dim=2)
 
     # Save image in a dir
     suffix = 'trn' if is_train else 'tst'
@@ -174,23 +185,24 @@ def plot_reconstructions(imgs:torch.Tensor,
         latent = latent.chunk(2, -1)[0].view(*latent.shape[:-3], 
                         args.strokes_per_img, args.points_per_stroke, -1)
 
-    if args.model_type == "sequential":
+    if args.model_type == "Sequential":
             # todo 2: add transform to z_what for plotting
         # Get affine matrix: [bs * n_strk, 2, 3]
         pts_per_strk = latent.z_what.shape[2]
         z_what = latent.z_what.view(n * n_strks, pts_per_strk, 2)
-        homo_coord = torch.cat([z_what, 
-                                torch.ones(n*n_strks, pts_per_strk, 1)
-                                .to(z_what.device)], dim=2)
-        transformed_z_what = (z_where_mtrx @ homo_coord.transpose(1,2)).transpose(1,2)
-        latent = transformed_z_what.reshape(n, n_strks, pts_per_strk, 2)
-    add_control_points_plot(gen=generative_model, 
-                            latents=latent, 
-                            writer=writer, 
-                            epoch=epoch,
-                            is_train=is_train, 
-                            )
-
+        z_where = latent.z_where.view(n*n_strks, -1)
+        pts = transformed_z_what = util.transform_z_what(
+                                    z_what=z_what, 
+                                    z_where=z_where,
+                                    z_where_type=args.z_where_type,
+                                    res=res).view(n, n_strks, pts_per_strk, 2)
+    if args.model_type in ['Sequential', 'Base']:
+        add_control_points_plot(gen=generative_model, 
+                                latents=pts, 
+                                writer=writer, 
+                                epoch=epoch,
+                                is_train=is_train, 
+                                )
 def color_img_edge(imgs, z_pres, color):
     '''
     Args:
@@ -221,7 +233,7 @@ def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,
     latents = latents[:num_shown]
     curves = gen.bezier.sample_curve(latents[:num_shown], steps)
 
-    fig, ax= plt.subplots(2,8,figsize=(15, 4))
+    fig, ax= plt.subplots(2,8,figsize=(18, 4))
 
     # [num_shown, num_strks, num_pts, 2]-> [num_shown, total_pts_num, 2]
     latents = latents.reshape([n, total_pts_num, 2]).cpu()
@@ -244,20 +256,31 @@ def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,
                                                 c=-np.arange(num_strks_per_img*
                                                     num_steps_per_strk),
                                                 cmap='rainbow')       
+        line = mlines.Line2D([0, 0], [1, 0], color='black', alpha=.5)
+        ax[i//8][i%8].add_line(line)
+        line = mlines.Line2D([0, 1], [1, 1], color='black', alpha=.5)
+        ax[i//8][i%8].add_line(line)
+        line = mlines.Line2D([0, 1], [0, 0], color='black', alpha=.5)
+        ax[i//8][i%8].add_line(line)
+        line = mlines.Line2D([1, 1], [0, 1], color='black', alpha=.5)
+        ax[i//8][i%8].add_line(line)
     fig.subplots_adjust(right=0.94)
     cbar_ax = fig.add_axes([0.95, 0.1, 0.01, 0.8])
     fig.colorbar(im, cax=cbar_ax)
 
-    canvas = FigureCanvas(fig)
-    canvas.draw()       # draw the canvas, cache the renderer
-
-    image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
-    width, height = fig.get_size_inches() * fig.get_dpi() 
-    image = torch.tensor(image.reshape(int(height), int(width), 3)).float()
-    image = rearrange(image, 'h w c -> c h w')
-
     tag = "Train/Control Points" if is_train else "Test/Control Points"
-    writer.add_image(tag, image, epoch)
+    # Add as figure
+    writer.add_figure(tag, fig, epoch)
+    # Adding as image
+    # canvas = FigureCanvas(fig)
+    # canvas.draw()       # draw the canvas, cache the renderer
+
+    # image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8')
+    # width, height = fig.get_size_inches() * fig.get_dpi() 
+    # image = torch.tensor(image.reshape(int(height), int(width), 3)).float()
+    # image = rearrange(image, 'h w c -> c h w')
+
+    # writer.add_image(tag, image, epoch)
     plt.close('all')
 
 def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/', 
@@ -397,7 +420,8 @@ def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks):
     '''
     colors = torch.tensor([[1., 0., 0.],
                            [0., 1., 0.],
-                           [0., 0., 1.]]).view(3,3,1)
+                           [0., 0., 1.],
+                           [1., 1., 0.]]).view(4,3,1)
     bs, res = imgs.shape[0], imgs.shape[-1]
     imgs = imgs.expand(bs, 3, res, res)
     new_img = imgs.clone()

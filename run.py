@@ -1,6 +1,7 @@
 import util
 import train
 from pathlib import Path
+from torch.utils.tensorboard import SummaryWriter
 
 def main(args):
     # Cuda
@@ -10,31 +11,36 @@ def main(args):
     # seed
     util.set_seed(args.seed)
 
+    # Write will output to ./log
+    writer = SummaryWriter(log_dir=f"./log/{args.model_type}")
+
     # initialize models, optimizer, stats, data
     checkpoint_path = util.get_checkpoint_path(args)
     if not (args.continue_training and Path(checkpoint_path).exists()):
         util.logging.info("Training from scratch")
         model, optimizer, stats, data_loader = util.init(args, device)
     else:
-        model, optimizer, stats, data_loader, _ = util.load_checkpoint(
+        model, optimizer, stats, data_loader, args = util.load_checkpoint(
                                                     checkpoint_path, device)
 
     # train
-    train.train(model, optimizer, stats, data_loader, args)
+    train.train(model, optimizer, stats, data_loader, args, writer)
 
 def get_args_parser():
     import argparse
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=1)
+    parser.add_argument("--seed", default=2)
 
     # Model
     parser.add_argument(
         "--model-type",
-        default="sequential", 
-        # default="base", 
-        choices=['base', 'sequential'],
+        default="Sequential", 
+        # default="AIR", 
+        # default="VAE", 
+        # default="Base", 
+        choices=['Base', 'Sequential', 'AIR', 'VAE'],
         type=str,
         help=" "
     )
@@ -53,6 +59,18 @@ def get_args_parser():
         between steps.
         '''
     )
+    parser.add_argument(
+        "--target_in_pos",
+        default='RNN',
+        # default='MLP',
+        type=str,
+        choices=['RNN', 'MLP'],
+        help='''Only used when `prior_dist` = Independent and `execution_guided`
+        = True. This controls where the target image is input to the guide net; 
+        either at the RNN or the MLP. For `prior_dist` = Squential, this is 
+        always set to MLP, as the RNN is also used for the generation task where 
+        the target image doesn't exist.
+        ''') 
     parser.add_argument(
         "--likelihood_dist",
         # default='Normal',
@@ -131,11 +149,34 @@ def get_args_parser():
         type=bool,
         help=" "
     )
+    parser.add_argument(
+        "--feature_extractor_sharing",
+        # default=False,
+        default=True,
+        type=bool,
+        help='''Sharing the feature extractor for the target, canvas and glimpse
+        The advantage of sharing is more training data but it may also result in
+        is being less stable as the input can be quite differert.'''
+    )
+    parser.add_argument(
+        "--z_dim",
+        default=50,
+        type=int,
+        help="Only for VAE and AIR"
+    )
 
     # Optimization
     parser.add_argument("--continue-training", action="store_true", help=" ")
     parser.add_argument("--num-iterations", default=1000000, type=int, help=" ")
-    parser.add_argument("--lr", default=1e-3, type=float, help=" ")
+    parser.add_argument("--bl_lr", default=1e-3, type=float, help='''
+    1e-3 worked for Sequential though has collapse for vrnn; 
+    1e-3 is suggested for AIR
+    ''')
+    parser.add_argument("--lr", default=1e-3, type=float, help='''
+    1e-3 worked for VAE, Base, Sequential
+    1e-4 is suggested for AIR
+    ''')
+    parser.add_argument("--weight_decay", default=0.0, type=float, help="")
     parser.add_argument("--log-interval", default=50, type=int, help=" ")
     parser.add_argument("--save-interval", default=1000, type=int, help=" ")
     # Loss
