@@ -22,7 +22,7 @@ no_pres_clr = torch.tensor((.5,0,0.5), dtype=torch.float).view(1, 3, 1) # orange
 nrow = 16 # number of imgs/row
 
 resize_res = 64
-transform = transforms.Compose([
+display_transform = transforms.Compose([
                         transforms.Resize([resize_res, resize_res]),
                         ])
 
@@ -31,8 +31,11 @@ def plot_reconstructions(imgs:torch.Tensor,
                          generative_model:torch.nn.Module, 
                          args:argparse.ArgumentParser, 
                          writer:SummaryWriter, 
-                         epoch:int, 
-                         is_train:bool=True):
+                         iteration:int=None,
+                         epoch:int=None, 
+                         writer_tag:str='Train',
+                         dataset_name:str=None,
+                         max_display=16):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
     2) control points
@@ -42,7 +45,7 @@ def plot_reconstructions(imgs:torch.Tensor,
     bs = imgs.shape[0]
     n_strks = args.strokes_per_img
 
-    n = min(bs, 16)
+    n = min(bs, max_display)
     imgs = imgs[:n]
     res = imgs.shape[-1]
 
@@ -67,12 +70,12 @@ def plot_reconstructions(imgs:torch.Tensor,
     elif args.model_type == 'Sequential' or args.model_type == 'AIR':
 
         # Get the info for make plots
-        guide_out = guide(imgs)
+        guide_out = guide(imgs, num_particles=1)
         latent = guide_out.z_smpl
         z_where_dim = latent.z_where.shape[-1]
 
         # Invert z_where for adding bounding boxes
-        n_strks = latent.z_where.shape[1]
+        ptcs, bs, n_strks = latent.z_where.shape[:3]
         z_where_inv = util.invert_z_where(
             latent.z_where.view(n*n_strks, z_where_dim) # 3 for z_where type
         ).view(n, n_strks, z_where_dim)
@@ -83,14 +86,19 @@ def plot_reconstructions(imgs:torch.Tensor,
         # Reconstruction images; z_what: [bs, n_strks, n_pts, 2]
         if args.model_type == 'Sequential' and \
            generative_model.input_dependent_param:
-            generative_model.sigma = guide_out.decoder_param.sigma
-            generative_model.tanh_norm_slope_stroke = guide_out.decoder_param.slope[0]
-            generative_model.tanh_norm_slope = guide_out.decoder_param.slope[1]
-        recon_glimpse = generative_model.renders_glimpses(latent.z_what)
+            generative_model.sigma = guide_out.decoder_param.sigma[0]
+            generative_model.tanh_norm_slope_stroke = \
+                                    guide_out.decoder_param.slope[0][0]
+            generative_model.tanh_norm_slope = \
+                                    guide_out.decoder_param.slope[1][:, :, -1]
+        recon_glimpse = generative_model.renders_glimpses(latent.z_what[0])
         if args.execution_guided:
-            recon_img = guide_out.canvas.expand(n,3,res,res)
+            if guide.intr_ll is not None:
+                recon_img = guide_out.canvas[0, :, -1].expand(n,3,res,res)
+            else:
+                recon_img = guide_out.canvas[0].expand(n,3,res,res)
         else:
-            recon_img = generative_model.renders_imgs(latent).expand(n,3,res,res)
+            recon_img = generative_model.renders_imgs(latent)[0].expand(n,3,res,res)
 
         print(f"epoch {epoch}")
         print(np.array(guide_out.z_pms.z_pres.detach().cpu()).round(3))
@@ -98,7 +106,7 @@ def plot_reconstructions(imgs:torch.Tensor,
         #     print(np.array(latent.z_where[:n,:,3].detach().cpu()).round(2))
         # Add bounding boxes based on z_where
         imgs_w_box = batch_add_bounding_boxes_skimage(
-                                imgs=transform(imgs).cpu(), 
+                                imgs=display_transform(imgs).cpu(), 
                                 z_where_mtrx=z_where_mtrx.cpu().clone(), 
                                 n_objs=n_strks*torch.ones(imgs.shape[0]),
                                 n_strks=n_strks,
@@ -117,8 +125,8 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         # Take only n image for display, and make it has RGB channels
         # Then view it in shape [n * n_strkes, 3, res, res]
-        stn_out = stn_out.expand(n, n_strks, 3, res, res
-                                                    ).view(n*n_strks,3,res,res)
+        stn_out = stn_out.expand(n,n_strks,3,res,res).view(n*n_strks,3,res,res)
+
         # Add color to indicate whether its kept
         # z_pres: originally in [n, n_strkes] -> [n * n_strkes]
         z_pres = latent.z_pres.view(n * n_strks).bool()
@@ -126,7 +134,7 @@ def plot_reconstructions(imgs:torch.Tensor,
         stn_out = color_img_edge(imgs=stn_out, z_pres=~z_pres, color=no_pres_clr)
 
         # stn_out: [n, 3, n_strks * res, res]
-        stn_out = transform(stn_out)
+        stn_out = display_transform(stn_out)
         stn_out = stn_out.view([n,n_strks,3,resize_res,resize_res])
         stn_out = stn_out.transpose(1,2).reshape([n,3,n_strks*resize_res,
                                                                     resize_res])
@@ -134,22 +142,27 @@ def plot_reconstructions(imgs:torch.Tensor,
         # resize recon_glimpse: 
         # [n, n_strks, 1, res, res] -> [n, 3, n_strks * resize_res, resize_res]
         recon_glimpse =  recon_glimpse.expand([n, n_strks, 3, res, res])
-        recon_glimpse = transform(recon_glimpse.view([n*n_strks, 3, res, res]))
+        recon_glimpse = display_transform(recon_glimpse.view([n*n_strks, 3, res, res]))
         recon_glimpse = recon_glimpse.view([n*n_strks,3,resize_res,resize_res])
         recon_glimpse = recon_glimpse.view([n, n_strks, 3, resize_res, 
                         resize_res]).transpose(1,2)
         recon_glimpse = recon_glimpse.reshape([n,3,n_strks*resize_res,
                                                                     resize_res])
 
-        recon_img = transform(recon_img)
+        recon_img = display_transform(recon_img)
         # pre canvas for debugging execution guided
         if args.execution_guided:
             if args.exec_guid_type == 'canvas':
-                cum_canvas = transform(guide_out.canvas.expand(n, 3, res, res))
+                if guide.intr_ll is not None:
+                    cum_canvas = display_transform(guide_out.canvas[:, -1].expand(n, 3,
+                                                                    res,res))
+                else:
+                    cum_canvas = display_transform(guide_out.canvas[0].expand(n, 3, res, 
+                                                                    res))
             elif args.exec_guid_type == 'residual':
                 # just reuse the name cum_canvas; this is actually just the
                 # final residual
-                cum_canvas = transform(guide_out.residual.expand(n, 3, res, res))
+                cum_canvas = display_transform(guide_out.residual.expand(n, 3, res, res))
             else: raise NotImplementedError
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)
@@ -165,18 +178,45 @@ def plot_reconstructions(imgs:torch.Tensor,
 
     elif args.model_type == 'VAE':
         latent = guide(imgs)
-        recon_img = generative_model.img_dist(latent.z_smpl).mean
-        comparision = torch.cat([transform(imgs), 
-                                 transform(recon_img)], dim=2)
+        recon_img = generative_model.img_dist(latent.z_smpl).mean[0]
+        comparision = torch.cat([display_transform(imgs), 
+                                 display_transform(recon_img)], dim=2)
+    elif args.model_type == 'MWS':
+        latent_dist = guide.get_latent_dist(imgs.squeeze(1).round())
+        latent = guide.sample_from_latent_dist(latent_dist, 1)
+        num_particles, batch_size, num_arcs, _ = latent.shape
+        recon_dist = generative_model.get_obs_dist(latent[0])
+
+        # Get sample
+        mixture_ids = torch.randint(recon_dist.num_thetas, torch.Size())
+        probs = recon_dist.cond_transformed[mixture_ids.view(-1)].view(
+            *torch.Size(), batch_size, args.img_res, args.img_res
+        )
+        recon_img = torch.distributions.Bernoulli(probs=probs)._param
+        
+        imgs.unsqueeze_(1)
+        recon_img.unsqueeze_(1)
+        comparision = torch.cat([display_transform(imgs), 
+                                 display_transform(recon_img)], dim=2)
 
     # Save image in a dir
-    suffix = 'trn' if is_train else 'tst'
-    save_imgs_dir = util.get_save_test_img_dir(args, epoch, suffix=suffix)
-    save_image(comparision.cpu(), save_imgs_dir, nrow=nrow)
+    # suffix = 'trn' if is_train else 'tst'
+    if writer_tag[-1] == '/': writer_tag = writer_tag[:-1]
+    writer_tag = writer_tag + '_' + dataset_name
+    save_imgs_dir = util.get_save_test_img_dir(args, epoch, suffix=writer_tag)
+    try:
+        save_image(comparision.cpu(), save_imgs_dir, nrow=nrow)
+    except Exception as e:
+        print(e)
+        breakpoint()
 
     # Log image in Tensorboard
     img_grid = make_grid(comparision, nrow=nrow)
-    tag = 'Train/Reconstruction' if is_train else 'Test/Reconstruction'
+    tag = writer_tag
+    if dataset_name is not None:
+        tag = f'{dataset_name}/Reconstruction/{writer_tag}/'
+    else:
+        tag = f'Reconstruction/{writer_tag}'
     writer.add_image(tag, img_grid, epoch)
 
     # Draw control points
@@ -188,21 +228,23 @@ def plot_reconstructions(imgs:torch.Tensor,
     if args.model_type == "Sequential":
             # todo 2: add transform to z_what for plotting
         # Get affine matrix: [bs * n_strk, 2, 3]
-        pts_per_strk = latent.z_what.shape[2]
+        pts_per_strk = latent.z_what.shape[3]
         z_what = latent.z_what.view(n * n_strks, pts_per_strk, 2)
-        z_where = latent.z_where.view(n*n_strks, -1)
+        z_where = latent.z_where.view(n * n_strks, -1)
         pts = transformed_z_what = util.transform_z_what(
                                     z_what=z_what, 
                                     z_where=z_where,
                                     z_where_type=args.z_where_type,
                                     res=res).view(n, n_strks, pts_per_strk, 2)
-    if args.model_type in ['Sequential', 'Base']:
-        add_control_points_plot(gen=generative_model, 
-                                latents=pts, 
-                                writer=writer, 
-                                epoch=epoch,
-                                is_train=is_train, 
-                                )
+    # removed to test spline z_what with neural decoder
+    # if args.model_type in ['Sequential', 'Base']:
+    #     add_control_points_plot(gen=generative_model, 
+    #                             latents=pts, 
+    #                             writer=writer, 
+    #                             epoch=epoch,
+    #                             writer_tag=writer_tag, 
+    #                             dataset_name=dataset_name,
+    #                             )
 def color_img_edge(imgs, z_pres, color):
     '''
     Args:
@@ -221,8 +263,8 @@ def color_img_edge(imgs, z_pres, color):
     new_imgs[:, :, -1, 0:res][z_pres] = color
     return new_imgs
 
-def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,
-                            is_train:bool=True):
+def add_control_points_plot(gen, latents, writer, epoch=None,
+                            writer_tag:bool=True, dataset_name=None):
     num_shown = 16
     n = min(num_shown, latents.shape[0])
     num_steps_per_strk = 500
@@ -231,7 +273,7 @@ def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,
 
     steps = torch.linspace(0, 1, num_steps_per_strk).cuda()
     latents = latents[:num_shown]
-    curves = gen.bezier.sample_curve(latents[:num_shown], steps)
+    curves = gen.decoder.sample_curve(latents[:num_shown], steps)
 
     fig, ax= plt.subplots(2,8,figsize=(18, 4))
 
@@ -268,8 +310,12 @@ def add_control_points_plot(gen, latents, writer, tag=None, epoch=None,
     cbar_ax = fig.add_axes([0.95, 0.1, 0.01, 0.8])
     fig.colorbar(im, cax=cbar_ax)
 
-    tag = "Train/Control Points" if is_train else "Test/Control Points"
     # Add as figure
+    tag = writer_tag
+    if dataset_name is not None:
+        tag = f'{dataset_name}/Control Points/{tag}'
+    else:
+        tag = f'Constrol Points/{writer_tag}'
     writer.add_figure(tag, fig, epoch)
     # Adding as image
     # canvas = FigureCanvas(fig)
@@ -421,7 +467,8 @@ def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks):
     colors = torch.tensor([[1., 0., 0.],
                            [0., 1., 0.],
                            [0., 0., 1.],
-                           [1., 1., 0.]]).view(4,3,1)
+                           [1., 1., 0.],
+                           [0., 1., 1.]]).view(5,3,1)
     bs, res = imgs.shape[0], imgs.shape[-1]
     imgs = imgs.expand(bs, 3, res, res)
     new_img = imgs.clone()

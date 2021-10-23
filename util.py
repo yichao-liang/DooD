@@ -19,7 +19,7 @@ from torchvision.utils import save_image
 from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
-from models import base, sequential, air, vae
+from models import base, sequential, air, vae#, mws
 from data.omniglot_dataset.omniglot_dataset import TrainingDataset
 from data import synthetic, multimnist
 
@@ -31,6 +31,149 @@ logging.basicConfig(
 )
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
+
+def sampling_gauss_noise(base_tensor, var):
+    out = base_tensor + torch.empty_like(base_tensor).normal_(
+                                                        mean=0, 
+                                                        std=torch.sqrt(var))
+    return out
+
+def character_conditioned_sampling(n_samples, guide_out, decoder):
+    '''Take the guide_out and decoder, return the samples with some variations
+    Args:
+        n_samples::int
+        guide_out::GuideReturn
+        decoder::GenerativeModel
+        var::float: Variance value for the Gaussian noise
+    Return:
+        sampled_img [n_samples, bs, 1, res, res]
+    '''
+    out = guide_out
+    _, bs, n_strks = out.z_smpl.z_pres.shape
+    var = torch.tensor(1e-3)
+    render_var = torch.tensor(1e-6)
+
+    canvas = torch.zeros([n_samples, bs, 1, decoder.res, decoder.res], 
+                                    device=next(decoder.parameters()).device)
+    for t in range(n_strks):
+        # z_pres_p [n_smpls, bs, 1]
+        # don't sample z_pres
+        z_pres_p = out.z_smpl.z_pres[:, :, t: t+1].expand(n_samples, bs, 1)
+
+        # z_where_loc [n_smpls, bs, z_where_dim]
+        z_where_loc = out.z_smpl.z_where[:, :, t, :].expand(n_samples, bs, 
+                                                            decoder.z_where_dim)
+        z_where_loc = sampling_gauss_noise(z_where_loc, var)
+        # todo: make sure the params are still legal
+
+        # sigma, strk_slope, add_slope
+        sigma = out.decoder_param.sigma[:, :, t].expand(n_samples, bs)
+        sigma = sampling_gauss_noise(sigma, render_var) # todo: smaller noise
+        strk_slope = out.decoder_param.slope[0][:, :, t].expand(n_samples, bs)
+        strk_slope = sampling_gauss_noise(strk_slope, render_var)
+
+        decoder.sigma = sigma
+        decoder.tanh_norm_slope_stroke = strk_slope
+
+        # z_what_loc [n_smpls, bs, pts, 2]
+        z_what_loc = out.z_smpl.z_what[:, :, t, :, :].expand(n_samples, bs,
+                                                        decoder.pts_per_strk, 2)
+        z_what_loc = sampling_gauss_noise(z_what_loc, var)
+        
+        # render step
+        # canvas_step [n_smples, bs, 1, res, res]
+        canvas_step = decoder.renders_imgs((z_pres_p,
+                                            z_what_loc.unsqueeze(2),
+                                            z_where_loc.unsqueeze(2)))
+        # update the canvas
+        img_shape = canvas_step.shape[1:]
+        canvas_step = canvas_step.view(n_samples, bs, *img_shape)
+        canvas = canvas + canvas_step
+        add_slope = out.decoder_param.slope[1][:, :, t].expand(n_samples, bs)
+        add_slope = sampling_gauss_noise(add_slope, render_var)
+        canvas = normalize_pixel_values(canvas, method='tanh', 
+                                                     slope=add_slope)
+    
+    # return canvas
+    return canvas
+
+
+def geom_weights_from_z_pres(z_pres, p):
+    bs, max_steps = z_pres.shape
+    num_steps = z_pres.sum(1)
+    # weights = torch.distributions.Geometric(p).log_prob(
+    #                                     torch.arange(max_steps).to(p.device))
+    # weights = torch.exp(weights)
+    # breakpoint()
+    weights = ((1-p) ** (torch.arange(max_steps)).to(p.device)) * p
+    weights = weights.expand(z_pres.shape)
+
+    for i, n_stps in enumerate(num_steps):
+        if n_stps > 0:
+            weights[i, (n_stps.int()-1)] = 1 - weights[i][:n_stps.int()-1].sum()
+
+    # idx = (num_steps != 0)
+    # torch.gather(weights[idx], -1, num_steps[idx].type(torch.int64).unsqueeze(1))
+    # torch.index_select(weights[idx], 1, num_steps[idx].type(torch.int)-1)
+    # weights[idx, num_steps[idx].type(torch.int)-1] = weights[num_steps-1:].sum(1)
+    weights = weights * z_pres
+    return weights
+
+def debug_gradient(name, param, imgs, guide, generative_model, optimizer, 
+                                                    iteration, writer, args):
+    import plot, losses
+    # print the gradient
+    logging.info(f"{name} has grad norm: {param.grad.norm(2)}")
+
+    # plot reconstruction
+    with torch.no_grad():
+        plot.plot_reconstructions(imgs=imgs, 
+                                guide=guide, 
+                                generative_model=generative_model, 
+                                args=args, 
+                                writer=writer, 
+                                iteration=iteration,
+                                writer_tag='Debug',
+                                max_display=64
+                            )
+    
+    # go through single images:
+    for idx, img in enumerate(imgs):
+        img = img.unsqueeze(0)
+        optimizer.zero_grad()
+        loss_tuple = losses.get_loss_sequential(
+                                            generative_model=generative_model, 
+                                            guide=guide,
+                                            imgs=img, 
+                                            loss_type=args.loss, 
+                                            k=1,
+                                            iteration=iteration,
+                                            writer=writer,
+                                            writer_tag=f'Debug-img{idx}/')
+        loss = loss_tuple.overall_loss.mean()
+        loss.backward()
+        for n, p in guide.named_parameters():
+            # check
+            if (n == name and p.grad.norm(2) > 1e4):
+                print(f'img {idx}: {n} has grad {p.grad.norm(2)}')
+                for param_n, param in guide.named_parameters():
+                    writer.add_scalar(f"Grad_norm_debug/img{idx}/{param_n}", 
+                                                param.grad.norm(2), iteration)
+                for loss_n, l in zip(loss_tuple._fields, loss_tuple):
+                    writer.add_scalar(f"Loss_debug/img{idx}/{loss_n}/", 
+                                                l.detach().mean(), iteration)
+
+                with torch.no_grad():
+                    plot.plot_reconstructions(imgs=img, 
+                                guide=guide, 
+                                generative_model=generative_model, 
+                                args=args, 
+                                writer=writer, 
+                                writer_tag=f'Debug-img{idx}/',
+                                max_display=64,
+                            )
+                breakpoint()
+        va = 1+1
 
 def transform_z_what(z_what, z_where, z_where_type, res):
     '''Apply z_where_mtrx to z_what such that it has a similar result as
@@ -82,7 +225,8 @@ def init_z_where(z_where_type):
     '5': (scale x, y, shift x, y, rotate
     '''
     init_z_where_params = {'3': ZWhereParam(torch.tensor([.8,0,0]), 
-                                                torch.tensor([.2,.2,.2]), 3),
+                                                torch.tensor([.2,.2,.2]), 3), # AIR?
+                                                # torch.tensor([.2,1,1]), 3), # spline?
                                                 # torch.ones(3)/5, 3),
                            '4_no_rotate': ZWhereParam(torch.tensor([.3,1,0,0]),
                                                 torch.ones(4)/5, 4),
@@ -158,12 +302,8 @@ def get_baseline_posterior_path():
 
 
 def get_path_base_from_args(args):
-    if "neural" in args.model_type:
-        return f"{args.model_type}"
-    elif args.model_type == "predictive":
-        return f"{args.model_type}"
-    elif args.model_type == "maml" or args.model_type == "maml_joint":
-        return f"{args.model_type}_{args.num_inner_optim_steps}"
+    if args.save_model_name is not None:
+        return f"{args.save_model_name}"
     else:
         return f"{args.model_type}"
 
@@ -186,7 +326,8 @@ def get_save_test_img_dir(args, iteration, suffix='tst'):
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
     '''
-    return get_checkpoint_path_from_path_base(get_path_base_from_args(args), checkpoint_iteration)
+    return get_checkpoint_path_from_path_base(get_path_base_from_args(args), 
+                                              checkpoint_iteration)
 
 
 def get_checkpoint_path_from_path_base(path_base, checkpoint_iteration=-1):
@@ -207,135 +348,9 @@ transform = transforms.Compose([
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ])
 
-def init(run_args, device):        
-    if run_args.model_type == 'Base':
-        # Generative model
-        generative_model = base.GenerativeModel(
-                                ctrl_pts_per_strk=run_args.points_per_stroke,
-                                prior_dist=run_args.prior_dist,
-                                likelihood_dist=run_args.likelihood_dist,
-                                strks_per_img=run_args.strokes_per_img,
-                                res=run_args.img_res,
-                                ).to(device)
-
-        # Guide
-        guide = base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
-                                dist=run_args.inference_dist,
-                                net_type=run_args.inference_net_architecture,
-                                strks_per_img=run_args.strokes_per_img,
-                                img_dim=[1, run_args.img_res, run_args.img_res],
-                                ).to(device)
-
-    elif run_args.model_type == 'Sequential':
-        if run_args.prior_dist == "Sequential":
-            run_args.execution_guided = True
-        generative_model = sequential.GenerativeModel(
-                                max_strks=run_args.strokes_per_img,
-                                pts_per_strk=run_args.points_per_stroke,
-                                z_where_type=run_args.z_where_type,
-                                res=run_args.img_res,
-                                execution_guided=run_args.execution_guided,
-                                transform_z_what=run_args.transform_z_what,
-                                input_dependent_param=\
-                                        run_args.input_dependent_render_param,
-                                prior_dist=run_args.prior_dist,
-                                ).to(device)
-        guide = sequential.Guide(
-                                max_strks=run_args.strokes_per_img,
-                                pts_per_strk=run_args.points_per_stroke,
-                                z_where_type=run_args.z_where_type,
-                                img_dim=[1, run_args.img_res, run_args.img_res],
-                                execution_guided=run_args.execution_guided,
-                                transform_z_what=run_args.transform_z_what,
-                                input_dependent_param=\
-                                        run_args.input_dependent_render_param,
-                                exec_guid_type=run_args.exec_guid_type,
-                                prior_dist=run_args.prior_dist,
-                                target_in_pos=run_args.target_in_pos,
-                                feature_extractor_sharing=\
-                                            run_args.feature_extractor_sharing,
-                                ).to(device)
-    elif run_args.model_type == 'AIR':
-        run_args.z_where_type = '3'
-        run_args.lr, run_args.bl_lr = 1e-4, 1e-3
-        generative_model = air.GenerativeModel(
-                                max_strks=run_args.strokes_per_img,
-                                res=run_args.img_res,
-                                z_where_type=run_args.z_where_type,
-                                execution_guided=run_args.execution_guided,
-                                transform_z_what=run_args.transform_z_what,
-                                z_what_dim=run_args.z_dim,
-                        ).to(device)
-        guide = air.Guide(
-                        max_strks=run_args.strokes_per_img,
-                        img_dim=[1, run_args.img_res, run_args.img_res],
-                        z_where_type=run_args.z_where_type,
-                        execution_guided=run_args.execution_guided,
-                        feature_extractor_sharing=\
-                                            run_args.feature_extractor_sharing,
-                        z_what_dim=run_args.z_dim,
-                        ).to(device)
-    elif run_args.model_type == 'VAE':
-        generative_model = vae.GenerativeModel(
-                                res=run_args.img_res,
-                                z_dim=run_args.z_dim,
-                                ).to(device)
-        guide = vae.Guide(
-                        img_dim=[1, run_args.img_res, run_args.img_res],
-                        z_dim=run_args.z_dim,
-                        ).to(device)
-    else:
-        raise NotImplementedError
-    # Model tuple
-    model = (generative_model, guide)
-
-    # Optimizer
-    # parameters = guide.parameters()
-    if run_args.model_type == 'AIR':
-        air_parameters = itertools.chain(guide.air_params(), 
-                                         generative_model.parameters())
-        optimizer = torch.optim.Adam([
-            {
-                'params': air_parameters, 
-                'lr': run_args.lr,
-                'weight_decay': run_args.weight_decay
-            },
-            {
-                'params': guide.baseline_params(),
-                'lr': run_args.bl_lr,
-                'weight_decay': run_args.weight_decay,
-            }
-        ])
-    elif run_args.model_type == 'Sequential':
-        
-        if run_args.execution_guided:
-            air_parameters = itertools.chain(guide.air_params(), 
-                                             guide.internal_decoder.parameters(),
-                                             generative_model.parameters())
-        else:
-            air_parameters = itertools.chain(guide.air_params(), 
-                                             generative_model.parameters())
-        optimizer = torch.optim.Adam([
-            {
-                'params': air_parameters, 
-                'lr': run_args.lr,
-                'weight_decay': run_args.weight_decay
-            },
-            {
-                'params': guide.baseline_params(),
-                'lr': run_args.bl_lr,
-                'weight_decay': run_args.weight_decay,
-            }
-        ]) 
-    else:
-        parameters = itertools.chain(guide.parameters(), 
-                                     generative_model.parameters())
-        optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
-
-    # Stats
-    stats = Stats([], [], [], [])
-
+def init(run_args, device):  
     # Data
+    # breakpoint()
     if run_args.dataset == 'omniglot':
         data_loader = omniglot_dataset.init_training_data_loader(
                                                 run_args.data_dir, 
@@ -345,7 +360,7 @@ def init(run_args, device):
                                                 mode="original",
                                                 one_substroke='angle',
                                                 use_interpolate=20)
-    elif run_args.dataset == 'mnist':
+    elif run_args.dataset == 'MNIST' or run_args.dataset == 'mnist':
         # Training and Testing dataset
         res = run_args.img_res
 
@@ -397,25 +412,27 @@ def init(run_args, device):
 
         # Test dataset
         # tst_dataset = datasets.MNIST(root='./data', train=False,
-        tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
-                        transform=transforms.Compose([
-                            # transforms.RandomRotation(30, fill=(0,)),
-                            transforms.Resize([res,res], antialias=True),
-                            transforms.ToTensor(),
-                            #transforms.Normalize((0.1307,), (0.3081,))
-                        ]),
-                        download=True)
-
-        # to only use a subset
-        # idx = torch.logical_or(tst_dataset.targets == 1, tst_dataset.targets == 7)
-        # idx = tst_dataset.targets == 1
-        # tst_dataset.targets = tst_dataset.targets[idx]
-        # tst_dataset.data= tst_dataset.data[idx]
-
-        test_loader = DataLoader(tst_dataset,
-                batch_size=run_args.batch_size, shuffle=True, num_workers=4
-        )
-        
+        # tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
+        #                 transform=transforms.Compose([
+        #                     # transforms.RandomRotation(30, fill=(0,)),
+        #                     transforms.Resize([res,res], antialias=True),
+        #                     transforms.ToTensor(),
+        #                     #transforms.Normalize((0.1307,), (0.3081,))
+        #                 ]),
+        #                 download=True)
+        # test_loader = DataLoader(tst_dataset,
+        #         batch_size=run_args.batch_size, shuffle=True, num_workers=4
+        # )
+        if run_args.model_type == 'MWS':
+            from models.mws import handwritten_characters as mws
+            train_loader = mws.data.get_data_loader(trn_dataset.data/255,
+                                                    run_args.batch_size,
+                                                    run_args.device, ids=True)
+            valid_loader = mws.data.get_data_loader(val_dataset.data/255,
+                                                    run_args.batch_size, 
+                                                    run_args.device, 
+                                                    id_offset=len(trn_dataset),
+                                                    ids=True)
         data_loader = train_loader, valid_loader
     elif run_args.dataset == 'generative_model':
         # train and test dataloader
@@ -434,6 +451,181 @@ def init(run_args, device):
                    ])), None)
     else:
         raise NotImplementedError
+      
+    if run_args.model_type == 'Base':
+        # Generative model
+        generative_model = base.GenerativeModel(
+                                ctrl_pts_per_strk=run_args.points_per_stroke,
+                                prior_dist=run_args.prior_dist,
+                                likelihood_dist=run_args.likelihood_dist,
+                                strks_per_img=run_args.strokes_per_img,
+                                res=run_args.img_res,
+                                ).to(device)
+
+        # Guide
+        guide = base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
+                                dist=run_args.inference_dist,
+                                net_type=run_args.inference_net_architecture,
+                                strks_per_img=run_args.strokes_per_img,
+                                img_dim=[1, run_args.img_res, run_args.img_res],
+                                ).to(device)
+
+    elif run_args.model_type == 'Sequential':
+        assert run_args.execution_guided == (not run_args.no_strk_tanh),\
+            "execution_guided should be used in accordance with strk_tanh norm"
+        generative_model = sequential.GenerativeModel(
+                    max_strks=run_args.strokes_per_img,
+                    pts_per_strk=run_args.points_per_stroke,
+                    z_where_type=run_args.z_where_type,
+                    res=run_args.img_res,
+                    execution_guided=run_args.execution_guided,
+                    transform_z_what=run_args.transform_z_what,
+                    input_dependent_param=run_args.input_dependent_render_param,
+                    prior_dist=run_args.prior_dist,
+                    num_mlp_layers=run_args.num_mlp_layers,
+                    maxnorm=not run_args.no_maxnorm,
+                    strk_tanh=not run_args.no_strk_tanh,
+                    constrain_param=not run_args.constrain_sample,
+                    spline_decoder=not run_args.no_spline_renderer,
+                    render_method=run_args.render_method,
+                    intermediate_likelihood=run_args.intermediate_likelihood,
+                                    ).to(device)
+        guide = sequential.Guide(
+                    max_strks=run_args.strokes_per_img,
+                    pts_per_strk=run_args.points_per_stroke,
+                    z_where_type=run_args.z_where_type,
+                    img_dim=[1, run_args.img_res, run_args.img_res],
+                    execution_guided=run_args.execution_guided,
+                    transform_z_what=run_args.transform_z_what,
+                    input_dependent_param=run_args.input_dependent_render_param,
+                    exec_guid_type=run_args.exec_guid_type,
+                    prior_dist=run_args.prior_dist,
+                    target_in_pos=run_args.target_in_pos,
+                    feature_extractor_sharing=run_args.feature_extractor_sharing,
+                    num_mlp_layers=run_args.num_mlp_layers,
+                    num_bl_layers=run_args.num_baseline_layers,
+                    bl_mlp_hid_dim=run_args.bl_mlp_hid_dim,
+                    bl_rnn_hid_dim=run_args.bl_rnn_hid_dim,
+                    maxnorm=not run_args.no_maxnorm,
+                    strk_tanh=not run_args.no_strk_tanh,
+                    z_what_in_pos=run_args.z_what_in_pos,
+                    constrain_param=not run_args.constrain_sample,
+                    render_method=run_args.render_method,
+                    intermediate_likelihood=run_args.intermediate_likelihood,
+                                ).to(device)
+    elif run_args.model_type == 'AIR':
+        run_args.z_where_type = '3'
+        generative_model = air.GenerativeModel(
+                                max_strks=run_args.strokes_per_img,
+                                res=run_args.img_res,
+                                z_where_type=run_args.z_where_type,
+                                execution_guided=run_args.execution_guided,
+                                z_what_dim=run_args.z_dim,
+                                prior_dist=run_args.prior_dist,
+                        ).to(device)
+        guide = air.Guide(
+                        max_strks=run_args.strokes_per_img,
+                        img_dim=[1, run_args.img_res, run_args.img_res],
+                        z_where_type=run_args.z_where_type,
+                        execution_guided=run_args.execution_guided,
+                        exec_guid_type=run_args.exec_guid_type,
+                        feature_extractor_sharing=\
+                                            run_args.feature_extractor_sharing,
+                        z_what_dim=run_args.z_dim,
+                        z_what_in_pos=run_args.z_what_in_pos,
+                        prior_dist=run_args.prior_dist,
+                        target_in_pos=run_args.target_in_pos,
+                        ).to(device)
+    elif run_args.model_type == 'VAE':
+        generative_model = vae.GenerativeModel(
+                                res=run_args.img_res,
+                                z_dim=run_args.z_dim,
+                                ).to(device)
+        guide = vae.Guide(
+                        img_dim=[1, run_args.img_res, run_args.img_res],
+                        z_dim=run_args.z_dim,
+                        ).to(device)
+    elif run_args.model_type == 'MWS':
+        from models.mws import handwritten_characters as mws
+        mws_args = mws.run.get_args_parser().parse_args([
+                                            '--img_res', str(run_args.img_res)
+        ])
+        res = run_args.img_res
+        mws_args.num_rows, mws_args.num_cols = res, res
+        # mws_args.num_train_data = len(trn_dataset)
+        mws_args.num_train_data = len(trn_dataset)
+        run_args.num_particles = mws_args.num_particles
+        generative_model, guide, optimizer, memory, stats = \
+                                        mws.util.init(mws_args, device)
+
+    else:
+        raise NotImplementedError
+    # Model tuple
+    if run_args.model_type == 'MWS':
+        model = (generative_model, guide, memory) 
+    else:
+        model = (generative_model, guide)
+
+    # Optimizer
+    # parameters = guide.parameters()
+    if run_args.model_type == 'AIR':
+        air_parameters = itertools.chain(guide.air_params(), 
+                                         generative_model.parameters()
+                                         )
+        optimizer = torch.optim.Adam([
+            {
+                'params': air_parameters, 
+                'lr': run_args.lr,
+                'weight_decay': run_args.weight_decay
+            },
+            {
+                'params': guide.baseline_params(),
+                'lr': run_args.bl_lr,
+                'weight_decay': run_args.weight_decay,
+            }
+        ])
+    elif run_args.model_type == 'Sequential':
+        train_style_mlp = True
+        if run_args.execution_guided or run_args.prior_dist == 'Sequential':
+            if train_style_mlp:
+                air_parameters = itertools.chain(
+                                             guide.air_params(), 
+                                             guide.internal_decoder.parameters(),
+                                             generative_model.parameters())
+            else:
+                air_parameters = itertools.chain(
+                                             guide.no_style_mlp_air_parameters(), 
+                                             guide.internal_decoder.parameters(),
+                                             generative_model.parameters())
+        else:
+            if train_style_mlp:
+                air_parameters = itertools.chain(guide.air_params(), 
+                                                generative_model.parameters())
+            else:
+                air_parameters = itertools.chain(
+                                            guide.no_style_mlp_air_parameters(),
+                                            generative_model.parameters())
+        optimizer = torch.optim.Adam([
+            {
+                'params': air_parameters, 
+                'lr': run_args.lr,
+                'weight_decay': run_args.weight_decay
+            },
+            {
+                'params': guide.baseline_params(),
+                'lr': run_args.bl_lr,
+                'weight_decay': run_args.weight_decay,
+            }
+        ]) 
+    else:
+        parameters = itertools.chain(guide.parameters(), 
+                                     generative_model.parameters())
+        optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
+
+    # Stats
+    if run_args.model_type != 'MWS':
+        stats = Stats([], [], [], [])
+
 
     return model, optimizer, stats, data_loader
 
@@ -441,34 +633,13 @@ def init(run_args, device):
 def save_checkpoint(path, model, optimizer, stats, run_args=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-    if run_args.model_type == "predictive":
-        predictive_model = model
-        torch.save(
-            {
-                "predictive_model_state_dict": predictive_model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "stats": stats,
-                "run_args": run_args,
-            },
-            path,
-        )
-    elif run_args.model_type == "maml" or run_args.model_type == "maml_joint":
-        generative_model = model
-        torch.save(
-            {
-                "generative_model_state_dict": generative_model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "stats": stats,
-                "run_args": run_args,
-            },
-            path,
-        )
-    elif run_args.model_type == 'sequential' or run_args.model_type == 'base':
-        generative_model, guide = model
+    if run_args.model_type == 'MWS':
+        generative_model, guide, memory = model
         torch.save(
             {
                 "generative_model_state_dict": generative_model.state_dict(),
                 "guide_state_dict": guide.state_dict(),
+                "memory": memory,
                 "optimizer_state_dict": optimizer.state_dict(),
                 "stats": stats,
                 "run_args": run_args,
@@ -479,9 +650,7 @@ def save_checkpoint(path, model, optimizer, stats, run_args=None):
         generative_model, guide = model
         torch.save(
             {
-                "generative_model_state_dict": None
-                if run_args.model_type == "interpretable"
-                else generative_model.state_dict(),
+                "generative_model_state_dict": generative_model.state_dict(),
                 "guide_state_dict": guide.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "stats": stats,
@@ -497,31 +666,18 @@ def load_checkpoint(path, device):
     run_args = checkpoint["run_args"]
     model, optimizer, stats, data_loader = init(run_args, device)
 
-    if run_args.model_type == 'sequential':
-        generative_model, guide = model
-
-        generative_model.load_state_dict(
-                                    checkpoint["generative_model_state_dict"])
-        guide.load_state_dict(checkpoint['guide_state_dict'])
-        model = (generative_model, guide)
-        
-    elif run_args.model_type == "predictive":
-        predictive_model = model
-
-        predictive_model.load_state_dict(checkpoint["predictive_model_state_dict"])
-
-        model = predictive_model
-    elif run_args.model_type == "maml" or run_args.model_type == "maml_joint":
-        generative_model = model
+    if run_args.model_type == 'MWS':
+        generative_model, guide, memory = model
 
         generative_model.load_state_dict(checkpoint["generative_model_state_dict"])
+        guide.load_state_dict(checkpoint["guide_state_dict"])
+        memory = checkpoint["memory"]
 
-        model = generative_model
+        model = generative_model, guide, memory
     else:
         generative_model, guide = model
 
-        if run_args.model_type != "interpretable":
-            generative_model.load_state_dict(checkpoint["generative_model_state_dict"])
+        generative_model.load_state_dict(checkpoint["generative_model_state_dict"])
         guide.load_state_dict(checkpoint["guide_state_dict"])
 
         model = (generative_model, guide)
@@ -782,11 +938,13 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     thetas of shape [batch_size, 4 (shift x, y; scale; angle)]. <-deprecated format
     # todo make capatible with base model stn
     # todo constraint the scale, shift parameters
-    z_where_type:
-        '3': (scale, shift x, y)
-        '4_rotate': (scale, shift x, y, rotate) or 
-        '4_no_rotate': (scale x, y, shift x, y)
-        '5': (scale x, y, shift x, y, rotate)
+    Args:
+        thetas [bs, z_where_dim]
+        z_where_type::str:
+            '3': (scale, shift x, y)
+            '4_rotate': (scale, shift x, y, rotate) or 
+            '4_no_rotate': (scale x, y, shift x, y)
+            '5': (scale x, y, shift x, y, rotate)
     '''
     if center is None:
         center = torch.zeros_like(thetas[:, :2])

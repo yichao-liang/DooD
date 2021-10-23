@@ -1,7 +1,10 @@
+from pprint import pprint
+
 import util
 import train
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
+from models import base, sequential, air, vae# , mws
 
 def main(args):
     # Cuda
@@ -12,37 +15,106 @@ def main(args):
     util.set_seed(args.seed)
 
     # Write will output to ./log
-    writer = SummaryWriter(log_dir=f"./log/{args.model_type}")
+    # When doing sweep evaluation
+    writer = SummaryWriter(log_dir=f"./log/sweep/{args.save_model_name}")
+
+    # When doing hyperop
+    # writer = SummaryWriter(log_dir=f"./log/AIR_hyperop/" + 
+    # writer = SummaryWriter(log_dir=f"./log/test/" + 
+    #                             f"name={args.save_model_name}-" + 
+    #                             f"intr_ll={args.intermediate_likelihood}-" + 
+    #                             f"constrain_sample={args.constrain_sample}-" +
+    #                             f"z_where={args.z_where_type}-" + 
+    #                             f"bl_lr={args.bl_lr}-" +
+    #                             f"n_lyr={args.num_baseline_layers}-" +
+    #                             f"mlp_h_dim={args.bl_mlp_hid_dim}-" + 
+    #                             f"rnn_h_dim={args.bl_rnn_hid_dim}-" + 
+    #                             f"maxnorm={str(not args.no_maxnorm)}-" + 
+    #                             f"strk_tanh={str(not args.no_strk_tanh)}-" + 
+    #                             f"render={args.render_method}")
+    # writer = SummaryWriter(log_dir=f"./log/AIR_hyperop_debug/name={args.save_model_name}-constrain_sample={args.constrain_sample}-z_where={args.z_where_type}-bl_lr={args.bl_lr}-n_lyr={args.num_baseline_layers}-mlp_h_dim={args.bl_mlp_hid_dim}-rnn_h_dim={args.bl_rnn_hid_dim}-maxnorm={str(not args.no_maxnorm)}-strk_tanh={str(not args.no_strk_tanh)}-render={args.render_method}")
 
     # initialize models, optimizer, stats, data
     checkpoint_path = util.get_checkpoint_path(args)
+    num_iterations = args.num_iterations
     if not (args.continue_training and Path(checkpoint_path).exists()):
         util.logging.info("Training from scratch")
         model, optimizer, stats, data_loader = util.init(args, device)
     else:
         model, optimizer, stats, data_loader, args = util.load_checkpoint(
                                                     checkpoint_path, device)
+    args.num_iterations = num_iterations
 
     # train
+    if args.model_type == 'MWS':
+        import models.mws.handwritten_characters as mws
+        generative_model, guide, memory = model
+        mws_args = mws.run.get_args_parser().parse_args([])
+
+        if not Path(checkpoint_path).is_file():
+            mws.train.train_sleep(
+                                generative_model,
+                                guide,
+                                min(500, 
+                                  mws_args.batch_size * mws_args.num_particles),
+                                mws_args.pretrain_iterations,
+                                mws_args.log_interval
+                                )
+
     train.train(model, optimizer, stats, data_loader, args, writer)
+
+        # algorithm_params =  {
+        # "test_num_particles": mws_args.test_num_particles,
+        # "num_iterations": mws_args.num_iterations,
+        # "log_interval": mws_args.log_interval,
+        # "test_interval": mws_args.test_interval,
+        # "save_interval": mws_args.save_interval,
+        # "checkpoint_path": checkpoint_path,
+        # "num_particles": mws_args.num_particles,
+        # "memory_size": mws_args.memory_size,
+        # }
+        # mws.train.train(
+        #     'mws',
+        #     generative_model,
+        #     guide,
+        #     memory,
+        #     data_loader[0],
+        #     data_loader[1],
+        #     optimizer,
+        #     algorithm_params,
+        #     stats,
+        #     run_args=args,
+        #     writer=writer,
+        # )
+
 
 def get_args_parser():
     import argparse
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=2)
+    parser.add_argument("--seed", default=4)
 
     # Model
+    parser.add_argument("--save_model_name", 
+        default="full-test", 
+        type=str, help='name for ckpt dir')
     parser.add_argument(
         "--model-type",
-        default="Sequential", 
-        # default="AIR", 
+        default="Sequential", # Spline latent representation
+        # default="AIR",        # Distribution latent representation    
         # default="VAE", 
         # default="Base", 
-        choices=['Base', 'Sequential', 'AIR', 'VAE'],
+        choices=['Base', 'Sequential', 'AIR', 'VAE', 'MWS'],
         type=str,
-        help=" "
+        help='''Sequential has spline latent representation; AIR has distributed 
+        representation'''
+    )
+    parser.add_argument(
+        '--render_method', type=str,
+        default='base',
+        choices=['bounded', 'base'],
+        help='method for Bezier renderer',
     )
     parser.add_argument(
         "--prior_dist",
@@ -61,8 +133,8 @@ def get_args_parser():
     )
     parser.add_argument(
         "--target_in_pos",
-        default='RNN',
-        # default='MLP',
+        # default='RNN',
+        default='MLP',
         type=str,
         choices=['RNN', 'MLP'],
         help='''Only used when `prior_dist` = Independent and `execution_guided`
@@ -96,22 +168,18 @@ def get_args_parser():
     )
     parser.add_argument(
         "--strokes_per_img",
-        default=2,
+        default=4,
         type=int,
         help="Maximum number of strokes per image"
     )
-    parser.add_argument(
-        "--points-per-stroke",
-        default=5,
-        type=int,
+    parser.add_argument("--points-per-stroke", default=5, type=int,
         help="Number of control points per stroke curve."
     )
     parser.add_argument(
         "--z_where_type",
         default='4_rotate',
         # default='3',
-        type=str,
-        choices=['3', '4_rotate', '4_no_rotate', '5'],
+        type=str, choices=['3', '4_rotate', '4_no_rotate', '5'],
         help='''
         "3": (scale, shift x, y)
         "4_rotate": (scale, shift x, y, rotate)
@@ -121,22 +189,18 @@ def get_args_parser():
     parser.add_argument(
         "--input_dependent_render_param",
         # default=False,
-        default=True,
-        type=bool,
-        help="",
+        default=True, type=bool, help="",
     )
     parser.add_argument(
-        "--execution_guided",
-        default=False,
+        '-eg', "--execution_guided",
+        action='store_true', 
         # default=True,
-        type=bool,
-        help=" "
+        help="if not declared, False"
     )
     parser.add_argument(
         '--exec_guid_type',
         # default='canvas_so_far',
-        default='canvas',
-        choices=['residual', 'canvas', 'target+residual'],
+        default='canvas', choices=['residual', 'canvas', 'target+residual'], 
         type=str,
         help="""Only useful is --execution_guided = True. 
         Residual: only uses the difference between the target and canvas-so-far;
@@ -158,20 +222,54 @@ def get_args_parser():
         The advantage of sharing is more training data but it may also result in
         is being less stable as the input can be quite differert.'''
     )
+    parser.add_argument("--z_what_in_pos", 
+        default='z_what_rnn',
+        # default='z_where_rnn',
+        type=str,
+        help='Whether to input prev.z_what to z_where_rnn or z_what_rnn')
+    parser.add_argument("--z_dim", default=10, type=int, 
+        help="Only for VAE/AIR")
     parser.add_argument(
-        "--z_dim",
-        default=50,
-        type=int,
-        help="Only for VAE and AIR"
+        '--num_mlp_layers', default=2, type=int,
+        help="num mlp layers for style_mlp and z_what_mlp, and their prior nets"
+    )
+    parser.add_argument(
+        '-cs', '--constrain_sample',
+        action='store_true',
+        help='''if not specified then False; then the distribution parameters 
+        will be constrained'''
+    )
+    parser.add_argument(
+        '--no_spline_renderer',
+        action='store_true',
+        help='if specified then False'
+    )
+    parser.add_argument(
+        '--intermediate_likelihood',
+        type=str,
+        default=None,
+        choices=[None, 'Mean', 'Geom'],
+        help='''Which intermediate likelihood to use for computing the final
+        likelihood'''
     )
 
+    # Baseline network
+    parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
+    parser.add_argument('--bl_mlp_hid_dim', default=256, type=int, help='')
+    parser.add_argument('--bl_rnn_hid_dim', default=256, type=int, help='')
+    parser.add_argument('--no_maxnorm', action='store_true', 
+                                     help='if specified then True.')
+    parser.add_argument('--no_strk_tanh', action='store_true', 
+                                     help='if specified then True.')
+    # parser.add_argument('--maxnorm', default=True, type=bool,
+    #                                  help='if not specified then True.')
+
     # Optimization
-    parser.add_argument("--continue-training", action="store_true", help=" ")
-    parser.add_argument("--num-iterations", default=1000000, type=int, help=" ")
+    parser.add_argument("--continue_training", action="store_true", help=" ")
+    parser.add_argument("--num-iterations", default=50000, type=int, help=" ")
     parser.add_argument("--bl_lr", default=1e-3, type=float, help='''
     1e-3 worked for Sequential though has collapse for vrnn; 
-    1e-3 is suggested for AIR
-    ''')
+    1e-3 is suggested for AIR''')
     parser.add_argument("--lr", default=1e-3, type=float, help='''
     1e-3 worked for VAE, Base, Sequential
     1e-4 is suggested for AIR
@@ -180,20 +278,16 @@ def get_args_parser():
     parser.add_argument("--log-interval", default=50, type=int, help=" ")
     parser.add_argument("--save-interval", default=1000, type=int, help=" ")
     # Loss
-    parser.add_argument(
-        "--loss",
-        default="elbo",
-        choices=['elbo','l1','nll'],
-        type=str,
-        help=" ",
+    parser.add_argument("--loss", default="elbo", choices=['elbo','l1','nll'], 
+        type=str, help=" ",
     )
 
     # Dataset
     parser.add_argument("--dataset",
                     # default="multimnist",
-                    default='mnist',
+                    default='MNIST',
                     # default="generative_model",
-                    choices=['mnist', 'omniglot', 'generative_model', 
+                    choices=['MNIST', 'omniglot', 'generative_model', 
                     'multimnist'],
                     type=str, help=" ")
     parser.add_argument("--data-dir", 
@@ -210,4 +304,5 @@ def get_args_parser():
 if __name__ == "__main__":
     parser = get_args_parser()
     args = parser.parse_args()
+    pprint(vars(args))
     main(args)

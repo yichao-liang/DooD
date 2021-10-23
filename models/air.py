@@ -1,10 +1,12 @@
 '''
-Attend, Infer, Repeat-pr_wr model
+Attend, Infer, Repeat model
+Sequential model with distributed z_what latent variables
 '''
 import pdb
 from collections import namedtuple
 
 import numpy as np
+from numpy import prod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +15,7 @@ from einops import rearrange
 from kornia.morphology import dilation, erosion
 
 import util
+from models.air_mlp import *
 
 # latent variable tuple
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
@@ -21,6 +24,7 @@ GuideState = namedtuple('GuideState', 'h_l h_c bl_h z_pres z_where z_what')
 GenState = namedtuple('GenState', 'h_l h_c z_pres z_where z_what')
 GuideReturn = namedtuple('GuideReturn', ['z_smpl', 
                                          'z_lprb', 
+                                         'z_prior',
                                          'mask_prev',
                                          'baseline_value', 
                                          'z_pms',
@@ -33,34 +37,50 @@ class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, res=28, z_where_type='3',
                                                     execution_guided=False, 
                                                     transform_z_what=True,
-                                                    hidden_dim=200,
-                                                    z_what_dim=50):
+                                                    hidden_dim=256,
+                                                    z_what_dim=50,
+                                                    prior_dist='Independent',
+                                                    ):
         super().__init__()
         self.max_strks = max_strks
         self.execution_guided=execution_guided
+        self.h_dim = hidden_dim
 
         # Prior parameters
-        
-        # z_what
+        self.prior_dist = prior_dist
         self.z_what_dim = z_what_dim
-        self.register_buffer("z_what_loc", torch.zeros(z_what_dim))
-        self.register_buffer("z_what_std", torch.ones(z_what_dim))
-
-        # z_pres
-        self.register_buffer("z_pres_prob", torch.zeros(self.max_strks)+.5)
-
-        # z_where: default '3'
         self.z_where_type = z_where_type
         z_where_loc, z_where_std, self.z_where_dim = util.init_z_where(
-                                                            self.z_where_type)
-        self.register_buffer("z_where_loc", z_where_loc.expand(self.max_strks, 
-                                                            self.z_where_dim))
-        self.register_buffer("z_where_std", z_where_std.expand(self.max_strks,
-                                                            self.z_where_dim))
+                                                                self.z_where_type)
+        if prior_dist == 'Independent':
+            self.register_buffer("z_what_loc", torch.zeros(z_what_dim))
+            self.register_buffer("z_what_std", torch.ones(z_what_dim))
+
+            # z_pres
+            self.register_buffer("z_pres_prob", torch.zeros(self.max_strks)+.5)
+
+            # z_where: default '3'
+            self.register_buffer("z_where_loc", z_where_loc.expand(self.max_strks, 
+                                                                self.z_where_dim))
+            self.register_buffer("z_where_std", z_where_std.expand(self.max_strks,
+                                                                self.z_where_dim))
+        elif prior_dist == 'Sequential':
+            self.gen_style_mlp = PresWhereMLP(
+                                                in_dim=self.h_dim,
+                                                z_where_type=z_where_type,
+                                                z_where_dim=self.z_where_dim,
+                                                )
+            # self.renderer_param_mlp = RendererParamMLP(in_dim=self.h_dim,)
+            self.gen_zhwat_mlp = WhatMLP(
+                                                in_dim=self.h_dim,
+                                                z_what_dim=self.z_what_dim,
+                                                hid_dim=hidden_dim,
+                                                num_layers=2)
+
         
         # img
-        self.register_buffer("imgs_dist_std", torch.ones(1, res, res) / 3)
-        
+        self.imgs_dist_std = torch.nn.Parameter(torch.ones(1, res, res), 
+                                                            requires_grad=True)        
         # Decoder
         self.decoder = Decoder(z_what_dim=z_what_dim, 
                                 img_dim=[1, res, res],
@@ -70,45 +90,79 @@ class GenerativeModel(nn.Module):
         # Image renderer, and its parameters
         self.res = res
 
-    def control_points_dist(self, bs=[1, 3]):
+    def get_imgs_dist_std(self):
+        # return F.softplus(self.imgs_dist_std) + 1e-6
+        return util.constrain_parameter(self.imgs_dist_std, min=.01, max=1)
+
+    def control_points_dist(self, h_c=None, bs=[1, 3]):
         '''(z_what Prior) Batched control points distribution
         Return: dist of
             bs: [bs, max_strks]
         '''
-        loc, std = self.z_what_loc, self.z_what_std
+        if self.prior_dist == "Sequential" and h_c is not None:
+            loc, std = self.gen_zhwat_mlp(h_c.view(prod(bs), -1))
+            # [bs, pts_per_strk, 2]
+            loc = loc.view([*bs, self.z_what_dim])
+            std = std.view([*bs, self.z_what_dim])
+            self.z_what_loc = loc.expand(*bs, self.z_what_dim)
+            self.z_what_std = std.expand(*bs, self.z_what_dim)
+        elif self.prior_dist == "Independent":
+            loc, std = self.z_what_loc.expand(*bs, self.z_what_dim), \
+                       self.z_what_std.expand(*bs, self.z_what_dim)
+        else:
+            raise NotImplementedError
 
         dist =  Independent(
-                    Normal(loc, std), reinterpreted_batch_ndims=1).expand(bs)
+                    Normal(loc, std), reinterpreted_batch_ndims=1)
 
         assert (dist.event_shape == torch.Size([self.z_what_dim]) and 
                 dist.batch_shape == torch.Size([*bs]))
         return dist
         
-    def presence_dist(self, bs=[1, 3]):
+    def presence_dist(self, h_l=None, bs=[1, 3]):
         '''(z_pres Prior) Batched presence distribution 
         Return: dist of
             bs [bs]
         '''
-        z_pres_p = self.z_pres_prob
+        if self.prior_dist == "Sequential" and h_l is not None:
+            z_pres_p, _, _ = self.gen_style_mlp(h_l.view(prod(bs), -1))
+            z_pres_p = z_pres_p.squeeze(-1)
+            self.z_pres_p = z_pres_p
+        elif self.prior_dist == "Independent":
+            z_pres_p = self.z_pres_prob.expand(*bs)
+        else:
+            raise NotImplementedError
         
         dist = Independent(
-            Bernoulli(z_pres_p), reinterpreted_batch_ndims=0,
-        ).expand(bs)
+            Bernoulli(z_pres_p.view(*bs)), reinterpreted_batch_ndims=0,
+        )
 
         assert (dist.event_shape == torch.Size([]) and 
                 dist.batch_shape == torch.Size([*bs]))
         return dist
 
-    def transformation_dist(self, bs=[1, 3]):
+    def transformation_dist(self, h_l=None, bs=[1, 3]):
         '''(z_where Prior) Batched transformation distribution
-        Return: dist of
-            bs [bs]
+        Args:
+            bs [ptcs, bs]
+            h_l [ptcs, bs, h_dim]: hidden-states for computing sequential prior 
+            dist event_shape [max_strks, z_where_dim (3-5)]        
         '''
-        loc, std = self.z_where_loc, self.z_where_std
+        if self.prior_dist == "Sequential" and h_l is not None:
+            _, loc, std = self.gen_style_mlp(h_l.view(prod(bs), -1))
+            loc, std = loc.squeeze(-1), std.squeeze(-1)
+            self.z_where_loc = loc
+            self.z_where_std = std
+        elif self.prior_dist == "Independent":
+            loc, std = self.z_where_loc.expand(*bs, self.z_where_dim), \
+                       self.z_where_std.expand(*bs, self.z_where_dim)
+        else:
+            raise NotImplementedError
 
         dist = Independent(
-            Normal(loc, std), reinterpreted_batch_ndims=1,
-        ).expand(bs)
+            Normal(loc.view(*bs, -1), std.view(*bs, -1)), 
+                    reinterpreted_batch_ndims=1,
+        )
         
         assert (dist.event_shape == torch.Size([self.z_where_dim]) and 
                 dist.batch_shape == torch.Size([*bs]))
@@ -130,50 +184,52 @@ class GenerativeModel(nn.Module):
             imgs_dist_loc = self.renders_imgs(latents)
         else:
             imgs_dist_loc = canvas
-        bs = imgs_dist_loc.shape[0]
 
-        dist = Independent(Laplace(imgs_dist_loc, self.imgs_dist_std), 
+        ptcs, bs = shp = imgs_dist_loc.shape[:2]
+
+        imgs_dist_std = self.get_imgs_dist_std()
+        dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
                             reinterpreted_batch_ndims=3)
+
         assert (dist.event_shape == torch.Size([1, self.res, self.res]) and 
-                dist.batch_shape == torch.Size([bs]))
+                dist.batch_shape == torch.Size([*shp]))
         return dist
 
     def renders_imgs(self, latents):
         '''Batched img rendering
         Args:
             latents: 
-                z_pres: [bs, n_strks] 
-                z_what: [bs, n_strks, z_what_dim]
-                z_where:[bs, n_strks, z_where_dim]
+                z_pres: [ptcs, bs, n_strks] 
+                z_what: [ptcs, bs, n_strks, z_what_dim]
+                z_where:[ptcs, bs, n_strks, z_where_dim]
         Return:
-            images: [bs, 1 (channel), H, W]
+            images: [ptcs, bs, 1 (channel), H, W]
         '''
         z_pres, z_what, z_where = latents
-        bs, n_strks = z_pres.shape
+        ptcs, bs, n_strks, z_what_dim = z_what.shape
+        shp = z_pres.shape[:2]
         
         # Get rendered image: [bs, n_strk, n_channel (1), H, W]
-        imgs = self.decoder(z_what)  
-        imgs = imgs * z_pres[:, :, None, None, None]
+        imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))  
+        imgs = imgs * z_pres.view(prod(shp), -1)[:, :, None, None, None]
 
         # reshape image for further processing
-        imgs = imgs.view(bs*n_strks, 1, self.res, self.res)
+        imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
 
         # Get affine matrix: [bs * n_strk, 2, 3]
         z_where_mtrx = util.get_affine_matrix_from_param(
-                                z_where.view(bs*n_strks, -1), 
+                                z_where.view(ptcs*bs*n_strks, -1), 
                                 self.z_where_type)
         imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
         # max normalized so each image has pixel values [0, 1]
         # [bs*n_strk, n_channel (1), H, W]
-        # imgs = util.normalize_pixel_values(imgs, method="maxnorm",)
 
         # Change back to [bs, n_strk, n_channel (1), H, W]
-        imgs = imgs.view(bs, n_strks, 1, self.res, self.res)
+        imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
 
         # Change to [bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(1) 
-        # imgs = util.normalize_pixel_values(imgs, method="maxnorm") # maxnorm doesn' work
         imgs = util.normalize_pixel_values(imgs, method="tanh", slope=0.6) # tanh works
 
 
@@ -181,8 +237,7 @@ class GenerativeModel(nn.Module):
             assert not imgs.isnan().any()
         except:
             breakpoint()
-        # assert imgs.max() <= 1.
-        return imgs
+        return imgs.view(*shp, 1, self.res, self.res)
 
     def renders_glimpses(self, z_what):
         '''Get glimpse reconstruction from z_what control points
@@ -203,14 +258,13 @@ class GenerativeModel(nn.Module):
 
         return recon
 
-    def log_prob(self, latents, imgs, z_pres_mask, canvas, decoder_param=None,
-                    z_prior=None):
+    def log_prob(self, latents, imgs, z_pres_mask, canvas, z_prior=None):
         '''
         Args:
             latents: 
-                z_pres: [bs, max_strks] 
-                z_what: [bs, max_strks, z_what_dim, 2 (x, y)]
-                z_where:[bs, max_strks, z_where_dim]
+                z_pres: [ptcs, bs, max_strks] 
+                z_what: [ptcs, bs, max_strks, z_what_dim, 2 (x, y)]
+                z_where:[ptcs, bs, max_strks, z_where_dim]
             imgs: [bs, 1, res, res]
             z_pres_mask: [bs, max_strks]
             canvas: [bs, 1, res, res] the renders from guide's internal decoder
@@ -220,13 +274,18 @@ class GenerativeModel(nn.Module):
             Joint log probability
         '''
         z_pres, z_what, z_where = latents
-        shape = imgs.shape[:-3]
+        ptcs, _ = shape = z_pres.shape[:2]
+        img_shape = imgs.shape[-3:]
+        imgs = imgs.unsqueeze(0).repeat(ptcs, 1, 1, 1, 1)
         bs = torch.Size([*shape, self.max_strks])
 
         # assuming z_pres here are in the right format, i.e. no 1s following 0s
         # log_prob output: [bs, max_strokes]
         # z_pres_mask: [bs, max_strokes]
-        log_prior =  ZLogProb(
+        if z_prior is not None and z_prior[0] is not None:
+            log_prior = z_prior
+        else:
+            log_prior =  ZLogProb(
                     z_pres=(self.presence_dist(bs=bs).log_prob(z_pres) * 
                                                                z_pres_mask),
                     z_what=(self.control_points_dist(bs=bs).log_prob(z_what) * 
@@ -238,8 +297,9 @@ class GenerativeModel(nn.Module):
         # Likelihood
         # self.sigma = decoder_param.sigma
         # self.tanh_norm_slope_stroke = decoder_param.slope[0]
-        log_likelihood = self.img_dist(latents=latents, 
-                                       canvas=canvas).log_prob(imgs)
+        img_dist = self.img_dist(latents=latents, 
+                                       canvas=canvas)
+        log_likelihood = img_dist.log_prob(imgs)
         return log_prior, log_likelihood
 
     def sample(self, canvas, hs, latents, bs=[1]):
@@ -256,6 +316,18 @@ class GenerativeModel(nn.Module):
 
         return imgs, latents
 
+    def decoder_named_params(self):
+        for n, p in self.named_parameters():
+            if n.split(".")[0] == 'decoder':
+                yield n, p
+
+    def no_img_dist_named_params(self):
+        for n, p in self.named_parameters():
+            if n in ['imgs_dist_std']:
+                continue
+            else:
+                yield n, p
+
 class Guide(nn.Module):
     def __init__(self, max_strks=2, img_dim=[1,28,28],
                                             hidden_dim=256, 
@@ -263,7 +335,12 @@ class Guide(nn.Module):
                                             execution_guided=False,
                                             exec_guid_type=None,
                                             z_what_dim=50,
-                                            feature_extractor_sharing=True):
+                                            feature_extractor_sharing=True,
+                                            z_what_in_pos='z_where_rnn',
+                                            prior_dist='Independent',
+                                            target_in_pos="RNN",
+                                            intermediate_likelihood=None,
+                                            ):
         super().__init__()
         # Parameters
         self.max_strks = max_strks
@@ -274,42 +351,63 @@ class Guide(nn.Module):
         self.z_what_dim = z_what_dim
         self.z_where_type = z_where_type
         self.z_where_dim = util.init_z_where(self.z_where_type).dim
+        self.z_what_in_pos = z_what_in_pos
+        self.intr_ll = intermediate_likelihood
 
         # Internal renderer
         self.execution_guided = execution_guided
         self.exec_guid_type = exec_guid_type
-        self.target_in_pos = 'RNN'
+        self.prior_dist = prior_dist
+        self.target_in_pos = target_in_pos
+        # if prior_dist == "Independent":
+        #     # If Independent, we have the option to input the target img to the
+        #     # {style, what}_RNN or the {style, what}_MLP
+        #     self.target_in_pos = 'RNN'
+        # else:
+        #     self.target_in_pos = 'MLP'
 
-        if self.execution_guided:
+        if self.execution_guided or self.prior_dist == 'Sequential':
             self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
                                             z_what_dim=self.z_what_dim,
                                             max_strks=self.max_strks,
                                             res=img_dim[-1],
-                                            execution_guided=execution_guided)
+                                            execution_guided=execution_guided,
+                                            prior_dist=self.prior_dist,
+                                            )
         # Inference networks
         # Module 1: front_cnn and pr_wr_rnn
         self.feature_extractor_sharing = feature_extractor_sharing
-        # self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
-        # self.feature_extractor_out_dim = 256
-        # self.img_feature_extractor = util.init_cnn(
-        #                                     n_in_channels=1,
-        #                                     n_mid_channels=16,#32, 
-        #                                     n_out_channels=32,#64,
-        #                                     cnn_out_dim=self.cnn_out_dim,
-        #                                     mlp_out_dim=
-    #                                         self.feature_extractor_out_dim,
-        #                                     mlp_hidden_dim=256,
-        #                                     num_mlp_layers=1)
-        self.cnn_out_dim = 2500 if self.img_dim[-1] == 50 else 784
-        self.feature_extractor_out_dim = 2500 if self.img_dim[-1] == 50 else 784
-        self.img_feature_extractor = lambda x: torch.reshape(x, (x.shape[0], -1)
-                                                            )
+        self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
+        self.feature_extractor_out_dim = 256
+        self.img_feature_extractor = util.init_cnn(
+                                            n_in_channels=1,
+                                            n_mid_channels=16,#32, 
+                                            n_out_channels=32,#64,
+                                            cnn_out_dim=self.cnn_out_dim,
+                                            mlp_out_dim=
+                                            self.feature_extractor_out_dim,
+                                            mlp_hidden_dim=256,
+                                            num_mlp_layers=1)
+        # self.cnn_out_dim = 2500 if self.img_dim[-1] == 50 else 784
+        # self.feature_extractor_out_dim = 2500 if self.img_dim[-1] == 50 else 784
+        # self.img_feature_extractor = lambda x: torch.reshape(x, (x.shape[0], -1)
+        #                                                     )
 
-        self.pr_wr_rnn_in_dim = (self.feature_extractor_out_dim + 
-                                    self.z_pres_dim + 
-                                    self.z_where_dim + 
-                                    self.z_what_dim)
+        # pres, where rnn
+        # self.pr_wr_rnn_in_dim = (self.feature_extractor_out_dim + 
+        #                                 self.z_pres_dim + 
+        #                                 self.z_where_dim)
+        self.pr_wr_rnn_in_dim = self.z_pres_dim + self.z_where_dim
+        # Target image
+        if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
+            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+        # Canvas
+        if self.execution_guided:
+            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+        # z_what
+        if self.z_what_in_pos == 'z_where_rnn':
+            self.pr_wr_rnn_in_dim += self.z_what_dim
 
         self.pr_wr_rnn_hid_dim = 256
         self.pr_wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
@@ -317,7 +415,16 @@ class Guide(nn.Module):
 
         # pr_wr_mlp:
         #   rnn hidden state -> (z_pres, z_where dist parameters)
+        # self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
         self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
+        # if (self.prior_dist == 'Sequential' or
+        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')
+        #    ):
+        if self.target_in_pos == 'MLP':
+            # Add target_img dim
+            self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
+        if self.prior_dist == 'Sequential':
+            self.style_mlp_in = 'h+target'
 
         self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
@@ -325,13 +432,37 @@ class Guide(nn.Module):
 
         # Module 2: z_what_cnn, z_what_rnn, z_what_mlp
         # stn transformed image -> (`z_what_dim` control points)
-        self.z_what_rnn_in_dim = (self.feature_extractor_out_dim)
+        # self.z_what_rnn_in_dim = (self.feature_extractor_out_dim)
+        # if self.z_what_in_pos == 'z_what_rnn':
+        #     self.z_what_rnn_in_dim += self.z_what_dim
+        self.z_what_rnn_in_dim = self.z_what_dim
+
+        # Target (transformed)
+        # if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
+        if self.target_in_pos == "RNN":
+            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+
+        # Canvas
+        # If prior_dist == 'Independent' and self.execution_guided then the 
+        # canvas is only used for the style net and not z_what net.
+        if self.prior_dist == 'Sequential' and self.execution_guided:
+            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+
+        # minus z_what
+        if self.z_what_in_pos == 'z_where_rnn':
+            self.z_what_rnn_in_dim -= self.z_what_dim
 
         self.z_what_rnn_hid_dim = 256
         self.z_what_rnn = torch.nn.GRUCell(self.z_what_rnn_in_dim, 
                                             self.z_what_rnn_hid_dim)
 
+        # z_what MLP
         self.what_mlp_in_dim = self.z_what_rnn_hid_dim
+
+        # if (self.prior_dist == 'Sequential' or 
+        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')):
+        if self.target_in_pos == 'MLP':
+            self.what_mlp_in_dim += self.feature_extractor_out_dim
         self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
                                   z_what_dim=self.z_what_dim,
                                   hid_dim=hidden_dim,
@@ -339,8 +470,13 @@ class Guide(nn.Module):
 
         # Module 3: Baseline (bl) rnn and regressor
         self.bl_hid_dim = 256
-        self.bl_rnn = torch.nn.GRUCell((self.pr_wr_rnn_in_dim),
-                                        self.bl_hid_dim)
+        self.bl_in_dim = (self.feature_extractor_out_dim  + 
+                          self.z_pres_dim + 
+                          self.z_where_dim +
+                          self.z_what_dim)
+        if self.execution_guided:
+            self.bl_in_dim += self.feature_extractor_out_dim
+        self.bl_rnn = torch.nn.GRUCell(self.bl_in_dim, self.bl_hid_dim)
         self.bl_regressor = nn.Sequential(
             nn.Linear(self.bl_hid_dim, 256),
             nn.ReLU(),
@@ -348,10 +484,11 @@ class Guide(nn.Module):
         )
         
 
-    def forward(self, imgs):
+    def forward(self, imgs, num_particles=1):
         '''
         Args: 
             img: [bs, 1, H, W]
+            num_particles: int
         Returns:
             latents:
                 z_pres:
@@ -367,61 +504,85 @@ class Guide(nn.Module):
                 z_where_dist:
         '''
         bs = imgs.size(0)
+        ptcs = num_particles
+        shp = [ptcs, bs]
+        img_dim = imgs.shape[1:]
+
+        imgs = imgs.unsqueeze(0).repeat(ptcs, 1, 1, 1, 1)
+
         (state, baseline_value, mask_prev, 
          z_pres_pms, z_where_pms, z_what_pms,
          z_pres_smpl, z_where_smpl, z_what_smpl, 
          z_pres_lprb, z_where_lprb, z_what_lprb,
-         canvas, residual) = self.initialize_state(imgs)
+         z_pres_prir, z_where_prir, z_what_prir, 
+         canvas, residual) = self.initialize_state(imgs, ptcs)
 
         for t in range(self.max_strks):
             # following the online example
-            mask_prev[:, t] = state.z_pres.squeeze()
+            mask_prev[:, :, t] = state.z_pres.squeeze()
 
             # Do one inference step and save results
             result = self.inference_step(state, imgs, canvas, residual)
             state = result['state']
-            assert (state.z_pres.shape == torch.Size([bs, 1]) and
+            assert (state.z_pres.shape == torch.Size([ptcs, bs, 1]) and
                     state.z_what.shape == 
-                            torch.Size([bs, self.z_what_dim]) and
+                            torch.Size([ptcs, bs, self.z_what_dim]) and
                     state.z_where.shape == 
-                            torch.Size([bs, self.z_where_dim]))
+                            torch.Size([ptcs, bs, self.z_where_dim]))
 
             # Update and store the information
             # z_pres: [bs, 1]
-            z_pres_smpl[:, t] = state.z_pres.squeeze(-1)
+            z_pres_smpl[:, :, t] = state.z_pres.squeeze(-1)
             # z_what: [bs, z_what_dim, 2];
-            z_what_smpl[:, t] = state.z_what
+            z_what_smpl[:, :, t] = state.z_what
             # z_where: [bs, z_where_dim]
-            z_where_smpl[:, t] = state.z_where
+            z_where_smpl[:, :, t] = state.z_where
 
-            assert (result['z_pres_pms'].shape == 
-                                              torch.Size([bs, 1]))
-            #    and  result['z_what_pms'].shape == 
-            #             torch.Size([bs, self.z_what_dim, 2, 2]) and
-            #         result['z_where_pms'].shape == 
-            #                 torch.Size([bs, self.z_where_dim, 2]))
-            z_pres_pms[:, t] = result['z_pres_pms'].squeeze(-1)
-            z_what_pms[:, t] = result['z_what_pms']
-            z_where_pms[:, t] = result['z_where_pms']
+            assert (result['z_pres_pms'].shape == torch.Size([ptcs, bs, 1])
+                and  result['z_what_pms'].shape == 
+                        torch.Size([ptcs, bs, self.z_what_dim, 2]) 
+                and  result['z_where_pms'].shape == 
+                            torch.Size([ptcs, bs, self.z_where_dim, 2]))
 
-            assert (result['z_pres_lprb'].shape == torch.Size([bs, 1]) and
-                    result['z_what_lprb'].shape == torch.Size([bs, 1]) and
-                    result['z_where_lprb'].shape == torch.Size([bs, 1]))
-            z_pres_lprb[:, t] = result['z_pres_lprb'].squeeze(-1)
-            z_what_lprb[:, t] = result['z_what_lprb'].squeeze(-1)
-            z_where_lprb[:, t] = result['z_where_lprb'].squeeze(-1)
-            baseline_value[:, t] = result['baseline_value'].squeeze(-1)
+            z_pres_pms[:, :, t] = result['z_pres_pms'].squeeze(-1)
+            z_what_pms[:, :, t] = result['z_what_pms']
+            z_where_pms[:, :, t] = result['z_where_pms']
+
+            assert (result['z_pres_lprb'].shape == torch.Size([ptcs, bs, 1]) and
+                    result['z_what_lprb'].shape == torch.Size([ptcs, bs, 1]) and
+                    result['z_where_lprb'].shape == torch.Size([ptcs, bs, 1]))
+            z_pres_lprb[:, :, t] = result['z_pres_lprb'].squeeze(-1)
+            z_what_lprb[:, :, t] = result['z_what_lprb'].squeeze(-1)
+            z_where_lprb[:, :, t] = result['z_where_lprb'].squeeze(-1)
+            baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
 
             # Update the canvas
             if self.execution_guided:
                 canvas_step = self.internal_decoder.renders_imgs((
-                                                z_pres_smpl[:, t:t+1].clone(),
-                                                z_what_smpl[:, t:t+1],
-                                                z_where_smpl[:, t:t+1]))
+                                            z_pres_smpl[:, :, t:t+1].clone(),
+                                            z_what_smpl[:, :, t:t+1],
+                                            z_where_smpl[:, :, t:t+1]))
+                canvas_step = canvas_step.view(*shp, *img_dim)
                 canvas = canvas + canvas_step
                 if self.exec_guid_type == "residual":
                     # compute the residual
                     residual = torch.clamp(imgs - canvas, min=0.)
+
+            # Calculate the prior with the hidden states.
+            if self.prior_dist == 'Sequential':
+                h_l, h_c = state.h_l, state.h_c
+                z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(
+                                        h_l, [*shp]
+                                        ).log_prob(z_pres_smpl[:, :, t].clone()
+                                        ) * mask_prev[:, :, t].clone()
+                z_where_prir[:, :, t] = self.internal_decoder.transformation_dist(
+                                        h_l.clone(), [*shp]
+                                        ).log_prob(z_where_smpl[:, :, t].clone()
+                                        ) * z_pres_smpl[:, :, t].clone()
+                z_what_prir[:, :, t] = self.internal_decoder.control_points_dist(
+                                        h_c.clone(), [*shp]
+                                        ).log_prob(z_what_smpl[:, :, t].clone()
+                                        ) * z_pres_smpl[:, :, t].clone()
 
         # todo 1: init the distributions which can be returned; can be useful
         data = GuideReturn(z_smpl=ZSample(
@@ -440,6 +601,10 @@ class Guide(nn.Module):
                            mask_prev=mask_prev,
                            canvas=canvas,
                            residual=residual,
+                           z_prior=ZLogProb(
+                               z_pres=z_pres_prir,
+                               z_what=z_what_prir,
+                               z_where=z_where_prir),
                            )    
         return data
         
@@ -448,17 +613,23 @@ class Guide(nn.Module):
         step latent distribution
         Args:
             p_state::GuideState
-            imgs [bs, 1, res, res]
-            canvas [bs, 1, res, res] or None
-            residual [bs, 1, res, res]
+            imgs [ptcs, bs, 1, res, res]
+            canvas [ptcs, bs, 1, res, res] or None
+            residual [ptcs, bs, 1, res, res]
         '''
-        bs = imgs.size(0)
+        ptcs, bs = shp = imgs.shape[:2]
+        img_dim = imgs.shape[2:]
 
         # embed image
-        img_embed = self.img_feature_extractor(imgs)
+        img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim)
+                                                                ).view(*shp, -1)
+        canvas_embed = self.img_feature_extractor(
+                            canvas.view(prod(shp), *img_dim)).view(*shp, -1) \
+                            if canvas is not None else None
 
         # Predict z_pres, z_where from target and canvas
         pr_wr_mlp_in, pr_wr_rnn_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
+                                                                canvas_embed,
                                                                 residual, 
                                                                 p_state)
         (z_pres, 
@@ -466,25 +637,36 @@ class Guide(nn.Module):
          z_pres_lprb, 
          z_where_lprb, 
          z_pres_p, 
-         z_where_pms)  = self.process_z_l(pr_wr_mlp_in, p_state)
+         z_where_pms)  = self.get_z_l(pr_wr_mlp_in, p_state)
 
 
         # Get spatial transformed "crop" from input image
         trans_imgs = util.spatial_transform(
-                                    imgs, 
+                                    imgs.view(prod(shp), *img_dim), 
                                     util.get_affine_matrix_from_param(
-                                                z_where, 
+                                            z_where.view(prod(shp), -1), 
                                                 z_where_type=self.z_where_type))
-        
-        z_what_mlp_in, h_c = self.get_z_what_mlp_in(trans_imgs, p_state)
-        z_what, z_what_lprb, z_what_pms = self.process_z_c(z_what_mlp_in, 
+        z_what_mlp_in, h_c = self.get_z_what_mlp_in(
+                    trans_imgs.view(*shp, *img_dim), 
+                    canvas_embed.view(*shp, -1) if canvas is not None else None,
+                    p_state)
+        z_what, z_what_lprb, z_what_pms = self.get_z_c(z_what_mlp_in, 
                                                             p_state, z_pres)
 
         # Compute baseline for z_pres
         # depending on previous latent variables only
-        bl_h = self.bl_rnn(pr_wr_rnn_in.detach(), p_state.bl_h)
-        baseline_value = self.bl_regressor(bl_h).squeeze() # shape (B,)
-        baseline_value = baseline_value * p_state.z_pres.squeeze()
+        bl_input = [
+                    img_embed.detach().view(prod(shp), -1), 
+                    p_state.z_pres.detach().view(prod(shp), -1), 
+                    p_state.z_where.detach().view(prod(shp), -1), 
+                    p_state.z_what.detach().view(prod(shp), -1)
+                    ]
+        if self.execution_guided:
+            bl_input.append(canvas_embed.detach().view(prod(shp), -1)) 
+        bl_input = torch.cat(bl_input, dim=1)
+        bl_h = self.bl_rnn(bl_input.detach(), p_state.bl_h.view(prod(shp), -1))
+        baseline_value = self.bl_regressor(bl_h) # shape (B,)
+        baseline_value = baseline_value.view(*shp, -1) * p_state.z_pres
         
         new_state = GuideState(
             z_pres=z_pres,
@@ -510,48 +692,81 @@ class Guide(nn.Module):
         }
         return out
 
-    def get_pr_wr_mlp_in(self, img_embed, residual, p_state):
+    def get_pr_wr_mlp_in(self, img_embed, canvas_embed, residual, p_state):
         '''Get the input for `pr_wr_mlp` from the current img and p_state
         Args:
-            img_embed [bs, embed_dim]
-            canvas_embed [bs, 1, res, res] if self.execution_guided or None 
+            img_embed [ptcs, bs, embed_dim]
+            canvas_embed [ptcs, bs, 1, res, res] if self.execution_guided or None 
             p_state GuideState
         Return:
-            pr_wr_mlp_in [bs, pr_wr_mlp_in_dim]
-            pr_wr_rnn_in [bs, pr_wr_rnn_in_dim]
+            pr_wr_mlp_in [ptcs, bs, pr_wr_mlp_in_dim]
+            pr_wr_rnn_in [ptcs, bs, pr_wr_rnn_in_dim]
         '''
-        bs = img_embed.shape[0]
-        if self.execution_guided:
-            # This is not exactly the same as before, previously we would 
-            # concat the img and canvas and get 1 embedding.
+        ptcs, bs = shp = img_embed.shape[:2]
+        if self.exec_guid_type == 'residual':
+            residual_embed = self.img_feature_extractor(residual.view(prod(shp), 
+                                1, self.res, self.res)).view(prod(shp), -1)
 
-            if self.exec_guid_type == 'residual':
-                residual_embed = self.img_feature_extractor(residual
-                                                            ).view(bs, -1)
-                rnn_input = torch.cat([residual_embed, 
-                            p_state.z_pres, p_state.z_where, p_state.z_what], 
-                            dim=1)         
-            else: raise NotImplementedError                                   
-        else:
-            rnn_input = torch.cat([img_embed, p_state.z_pres, p_state.z_where, 
-                                                        p_state.z_what], dim=1)
+        # style RNN input
+        rnn_in = [p_state.z_pres.view(prod(shp), -1), 
+                  p_state.z_where.view(prod(shp), -1)]
+
+        # Append prev.z
+        if self.z_what_in_pos == 'z_where_rnn':
+            rnn_in.append(p_state.z_what.view(prod(shp), -1))
+
+        # canvas
+        if (self.execution_guided and self.exec_guid_type == 'canvas'):
+            rnn_in.append(canvas_embed.view(prod(shp), -1)) 
+
+        # Append target/residual
+        # target / residual
+        if (self.prior_dist == 'Independent' and self.target_in_pos == 'RNN' and
+            self.execution_guided and self.exec_guid_type == 'residual'):
+            rnn_in.append(residual_embed.view(prod(shp), -1))
+        elif self.prior_dist == 'Independent' and self.target_in_pos == 'RNN':
+            rnn_in.append(img_embed.view(prod(shp), -1))
+        rnn_in = torch.cat(rnn_in, dim=1)
+
         # Get the new h_l
-        h_l = self.pr_wr_rnn(rnn_input, p_state.h_l)
-        pr_wr_mlp_in = h_l
-        return pr_wr_mlp_in, rnn_input, h_l
+        h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
+        
+        # Style MLP input
+        pr_wr_mlp_in = [h_l]
 
-    def process_z_l(self, pr_wr_mlp_in, p_state):
+        # target / residual
+        if self.target_in_pos == "MLP" and self.style_mlp_in == 'h+target':
+            pr_wr_mlp_in.append(img_embed.view(prod(shp), -1))
+        elif self.target_in_pos == "MLP" and self.style_mlp_in == 'h+residual':
+            pr_wr_mlp_in.append(residual_embed.view(prod(shp), -1))
+        pr_wr_mlp_in = torch.cat(pr_wr_mlp_in, dim=1)
+
+        return pr_wr_mlp_in.view(*shp, -1), rnn_in.view(*shp, -1), \
+               h_l.view(*shp, -1)
+
+    def get_z_l(self, pr_wr_mlp_in, p_state):
         """Predict z_pres and z_where from `pr_wr_mlp_in`
         Args:
-            pr_wr_mlp_in [bs, in_dim]: input based on input types
+            pr_wr_mlp_in [ptcs, bs, in_dim]: input based on input types
             p_state: GuideState
         Return:
-
+            z_pres [ptcs, bs, 1]
+            z_where [ptcs, bs, z_where_dim]
+            z_pres_lprb [ptcs, bs, 1]
+            z_where_lprb [ptcs, bs, 1]
+            z_pres_p [ptcs, bs, 1]
+            z_where_pms
+                z_where_loc [ptcs, bs, z_where_dim]
+                z_where_scale [ptcs, bs, z_where_dim]
         """
-        bs = pr_wr_mlp_in.shape[0]
+        ptcs, bs = shp = pr_wr_mlp_in.shape[:2]
 
         # Predict presence and location from h
-        z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(pr_wr_mlp_in)
+        z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(
+                                            pr_wr_mlp_in.view(prod(shp), -1))
+        z_pres_p = z_pres_p.view(*shp, -1)
+        z_where_loc = z_where_loc.view(*shp, -1)
+        z_where_scale = z_where_scale.view(*shp, -1)
         # If previous z_pres is 0, force z_pres to 0
         z_pres_p = z_pres_p * p_state.z_pres
 
@@ -560,11 +775,11 @@ class Guide(nn.Module):
         z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
 
         # Sample z_pres
-        assert z_pres_p.shape == torch.Size([bs, 1])
+        assert z_pres_p.shape == torch.Size([*shp, 1])
         z_pres_post = Independent(Bernoulli(z_pres_p), 
                                         reinterpreted_batch_ndims=1)
         assert (z_pres_post.event_shape == torch.Size([1]) and
-                z_pres_post.batch_shape == torch.Size([bs]))
+                z_pres_post.batch_shape == torch.Size([*shp]))
         z_pres = z_pres_post.sample()
 
         # If previous z_pres is 0, this z_pres should also be 0.
@@ -577,47 +792,87 @@ class Guide(nn.Module):
         # Mask with p_state.z_pres instead of z_pres. 
         # Keep if prev == 1, curr == 0 or 1; remove if prev == 0
         z_pres_lprb = z_pres_post.log_prob(z_pres).unsqueeze(-1) * p_state.z_pres
-        assert z_pres_lprb.shape == torch.Size([bs, 1])
+        assert z_pres_lprb.shape == torch.Size([*shp, 1])
         
         # Sample z_where, get log_prob
-        assert z_where_loc.shape == torch.Size([bs, self.z_where_dim])
+        assert z_where_loc.shape == torch.Size([*shp, self.z_where_dim])
         z_where_post = Independent(Normal(z_where_loc, z_where_scale),
                                                     reinterpreted_batch_ndims=1)
         assert (z_where_post.event_shape == torch.Size([self.z_where_dim]) and
-                z_where_post.batch_shape == torch.Size([bs]))        
+                z_where_post.batch_shape == torch.Size([*shp]))        
 
         z_where = z_where_post.rsample()
         z_where_lprb = z_where_post.log_prob(z_where).unsqueeze(-1) * z_pres
-        assert z_where_lprb.shape == torch.Size([bs, 1])
-        # z_where_lprb = z_where_lprb.squeeze()
+        assert z_where_lprb.shape == torch.Size([*shp, 1])
 
         return (z_pres, z_where, z_pres_lprb, z_where_lprb, z_pres_p, 
                 (z_where_loc, z_where_scale))
 
-    def get_z_what_mlp_in(self, trans_imgs, p_state):
+    def get_z_what_mlp_in(self, trans_imgs, canvas_embed, p_state):
         '''Get the input for the z_what_mlp
+        Args:
+            trans_imgs: [ptcs, bs, *img_dim]
+            canvas_embed: [ptcs, bs, em_dim]
+            p_state
+        Return:
+            z_what_mlp_in: [ptcs, bs, in_dim]
+            h_c: [ptcs, bs, in_dim]
         '''
         # Sample z_what, get log_prob
-        bs = trans_imgs.shape[0]
-        # [bs, z_what_dim, 2, 1]
-            
-        z_what_rnn_in = self.img_feature_extractor(trans_imgs) 
-        h_c = self.z_what_rnn(z_what_rnn_in, p_state.h_c)
-        mlp_in = h_c
-        
-        return mlp_in, h_c
+        ptcs, bs = shp = trans_imgs.shape[:2]
+        img_dim = trans_imgs.shape[2:]
 
-    def process_z_c(self, z_what_mlp_in, p_state, z_pres):
-        bs = z_what_mlp_in.shape[0]
-        z_what_loc, z_what_scale = self.z_what_mlp(z_what_mlp_in)
-        # [bs, z_dim]
-        z_what_loc = z_what_loc.view([bs, self.z_what_dim])
-        z_what_scale = z_what_scale.view([bs, self.z_what_dim])
+        trans_embed = self.img_feature_extractor(trans_imgs.view(prod(shp), 
+                                                                *img_dim))
             
-        z_what_post = Independent(Normal(z_what_loc, z_what_scale), 
+        z_what_rnn_in = []
+        # prev.z_what
+        if self.z_what_in_pos == 'z_what_rnn':
+            z_what_rnn_in.append(p_state.z_what.view(prod(shp), -1))
+
+        # Canvas
+        if (self.prior_dist == 'Sequential' and self.execution_guided and 
+           self.exec_guid_type == 'canvas'):
+            z_what_rnn_in.append(canvas_embed.view(prod(shp), -1))
+        
+        # Target
+        if self.target_in_pos == 'RNN':
+            z_what_rnn_in.append(trans_embed.view(prod(shp), -1))
+        
+        z_what_rnn_in = torch.cat(z_what_rnn_in, dim=1)
+        h_c = self.z_what_rnn(z_what_rnn_in, p_state.h_c.view(prod(shp), -1))
+        
+        # z_what MLP input
+        z_what_mlp_in = [h_c]
+        if self.target_in_pos == 'MLP':
+            z_what_mlp_in.append(trans_embed.view(prod(shp), -1))
+        z_what_mlp_in = torch.cat(z_what_mlp_in, dim=1)
+        
+        return z_what_mlp_in.view(*shp, -1), h_c.view(*shp, -1)
+
+    def get_z_c(self, z_what_mlp_in, p_state, z_pres):
+        '''
+        Args:
+            zwhat_mlp_in [ptcs, bs, mlp_in_dim]
+            z_pres [ptcs, bs, 1]
+            ptcs::int
+        Return:
+            z_what [ptcs, bs, pts_per_strk, 2]
+            z_what_lprb [ptcs, bs, 1]
+            z_what_loc = [ptcs, bs, pts_per_strk, 2]
+            z_what_std = [ptcs, bs, pts_per_strk, 2]
+        '''
+        ptcs, bs = shp = z_what_mlp_in.shape[:2]
+        z_what_loc, z_what_std = self.z_what_mlp(z_what_mlp_in.view(prod(shp), -1))
+
+        # [bs, z_dim]
+        z_what_loc = z_what_loc.view([*shp, self.z_what_dim])
+        z_what_std = z_what_std.view([*shp, self.z_what_dim])
+            
+        z_what_post = Independent(Normal(z_what_loc, z_what_std), 
                                         reinterpreted_batch_ndims=1)
         assert (z_what_post.event_shape == torch.Size([self.z_what_dim]) and
-                z_what_post.batch_shape == torch.Size([bs]))
+                z_what_post.batch_shape == torch.Size([*shp]))
 
         # [bs, z_what_dim, 2] 
         z_what = z_what_post.rsample()
@@ -625,42 +880,80 @@ class Guide(nn.Module):
         # log_prob(z_what): [bs, 1]
         # z_pres: [bs, 1]
         z_what_lprb = z_what_post.log_prob(z_what).unsqueeze(-1) * z_pres
-        return z_what, z_what_lprb, (z_what_loc, z_what_scale)
+        return z_what, z_what_lprb, (z_what_loc, z_what_std)
 
-    def initialize_state(self, imgs):
-        bs = imgs.size(0)
+    def initialize_state(self, imgs, ptcs):
+        '''
+        Args:
+            imgs [ptcs, bs, 1, res, res]
+            ptcs::int
+        Return:
+            state::GuideState
+            baseline_value [ptcs, bs, ..]
+            mask_prev [ptcs, bs, max_strks]
+            z_pres_pms [ptcs, bs, ..]
+            z_where_pms [ptcs, bs, ..]
+            z_what_pm [ptcs, bs, ..]
+            z_pres_smpl [ptcs, bs, ..]
+            z_where_smpl [ptcs, bs, ..]
+            z_what_smpl [ptcs, bs, ..]
+            z_pres_lprb [ptcs, bs, ..]
+            z_where_lprb [ptcs, bs, ..]
+            z_what_lpr [ptcs, bs, ..]
+            z_pres_prir [ptcs, bs, ..]
+            z_where_prir [ptcs, bs, ..]
+            z_what_prir [ptcs, bs, ..]
+            sigmas [ptcs, bs, ..]
+            strk_slopes [ptcs, bs, ..]
+            canvas [ptcs, bs, ..]
+            residual [ptcs, bs, ..]
+        '''
+        ptcs, bs = imgs.shape[:2]
 
         # Init model state for performing inference
         state = GuideState(
-            h_l=torch.zeros(bs, self.pr_wr_rnn_hid_dim, device=imgs.device),
-            h_c=torch.zeros(bs, self.z_what_rnn_hid_dim, device=imgs.device),
-            bl_h=torch.zeros(bs, self.bl_hid_dim, device=imgs.device),
-            z_pres=torch.ones(bs, 1, device=imgs.device),
-            z_where=torch.zeros(bs, self.z_where_dim, device=imgs.device),
-            z_what=torch.zeros(bs, self.z_what_dim, device=imgs.device),
+            h_l=torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
+                                                            device=imgs.device),
+            h_c=torch.zeros(ptcs, bs, self.z_what_rnn_hid_dim, 
+                                                            device=imgs.device),
+            bl_h=torch.zeros(ptcs, bs, self.bl_hid_dim, device=imgs.device),
+            z_pres=torch.ones(ptcs, bs, 1, device=imgs.device),
+            z_where=torch.zeros(ptcs, bs, self.z_where_dim, device=imgs.device),
+            z_what=torch.zeros(ptcs, bs, self.z_what_dim, device=imgs.device),
         )
 
         # z samples for each step
-        z_pres_smpl = torch.ones(bs, self.max_strks, device=imgs.device)
-        z_what_smpl = torch.zeros(bs, self.max_strks, self.z_what_dim, 
+        z_pres_smpl = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
+        z_what_smpl = torch.zeros(ptcs, bs, self.max_strks, self.z_what_dim, 
                                                             device=imgs.device)
-        z_where_smpl = torch.ones(bs, self.max_strks, self.z_where_dim, 
+        z_where_smpl = torch.ones(ptcs, bs, self.max_strks, self.z_where_dim, 
                                                             device=imgs.device)
         # z distribution parameters for each step
-        z_pres_pms = torch.ones(bs, self.max_strks, device=imgs.device)
-        z_what_pms = torch.zeros(bs, self.max_strks, self.z_what_dim, 2, 
+        z_pres_pms = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
+        z_what_pms = torch.zeros(ptcs, bs, self.max_strks, self.z_what_dim, 2, 
                                                             device=imgs.device)
-        z_where_pms = torch.ones(bs, self.max_strks, self.z_where_dim, 2, 
+        z_where_pms = torch.ones(ptcs, bs, self.max_strks, self.z_where_dim, 2, 
                                                             device=imgs.device)
         # z log posterior probability (lprb) for each step
-        z_pres_lprb = torch.zeros(bs, self.max_strks, device=imgs.device)
-        z_what_lprb = torch.zeros(bs, self.max_strks, device=imgs.device)
-        z_where_lprb = torch.zeros(bs, self.max_strks, device=imgs.device)
+        z_pres_lprb = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
+        z_what_lprb = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
+        z_where_lprb = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
 
         # z log prior probability (lprb) for each step;
+        #   computed when `prior_dist` = Sequential
+        if self.prior_dist == 'Sequential':
+            z_pres_prir = torch.zeros(ptcs, bs, self.max_strks, 
+                                                            device=imgs.device)
+            z_what_prir = torch.zeros(ptcs, bs, self.max_strks, 
+                                                            device=imgs.device)
+            z_where_prir = torch.zeros(ptcs, bs, self.max_strks, 
+                                                            device=imgs.device)
+        elif self.prior_dist == 'Independent':
+            z_pres_prir, z_what_prir, z_where_prir = [None] * 3
 
         # baseline_value
-        baseline_value = torch.zeros(bs, self.max_strks, device=imgs.device)
+        baseline_value = torch.zeros(ptcs, bs, self.max_strks, 
+                                                            device=imgs.device)
 
         '''Signal mask for each step
         At time t, `mask_prev` stroes whether prev.z_pres==0, `mask_curr` 
@@ -672,14 +965,15 @@ class Guide(nn.Module):
         `mask_curr` can be used to mask out the KL of z_what, z_where, and
             reconstruction, because they are ignored since the first z_pres==0
         '''
-        mask_prev = torch.ones(bs, self.max_strks, device=imgs.device)
+        mask_prev = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
 
         if self.execution_guided:
             # if exec_guid_type == 'residual', canvas stores the difference
             # if exec_guid_type == 'canvas-so-far', canvas stores the cummulative
-            canvas = torch.zeros(bs, *self.img_dim, device=imgs.device)
+            canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
             if self.exec_guid_type == 'residual':
-                residual = torch.zeros(bs, *self.img_dim, device=imgs.device)
+                residual = torch.zeros(ptcs, bs, *self.img_dim, 
+                                                            device=imgs.device)
             else:
                 residual = None
         else:
@@ -689,12 +983,13 @@ class Guide(nn.Module):
                 z_pres_pms, z_where_pms, z_what_pms,
                 z_pres_smpl, z_where_smpl, z_what_smpl, 
                 z_pres_lprb, z_where_lprb, z_what_lprb,
+                z_pres_prir, z_where_prir, z_what_prir, 
                 canvas, residual)
 
-    def named_parameters(self, prefix='', recurse=True):
-        for n, p in super().named_parameters(prefix=prefix, recurse=recurse):
-            if n.split(".")[0] != 'internal_decoder':
-                yield n, p
+    # def named_parameters(self, prefix='', recurse=True):
+    #     for n, p in super().named_parameters(prefix=prefix, recurse=recurse):
+    #         if n.split(".")[0] != 'internal_decoder':
+    #             yield n, p
     
     def baseline_params(self):
         for n, p in self.named_parameters():
@@ -711,86 +1006,8 @@ class Guide(nn.Module):
             if n.split("_")[1] == 'what':
                 yield p
 
-class PresWhereMLP(nn.Module):
-    """
-    Infer presence and location from RNN hidden state
-    """
-    def __init__(self, in_dim, z_where_type, z_where_dim):
-        nn.Module.__init__(self)
-        self.z_where_dim = z_where_dim
-        self.type = z_where_type
-        self.seq = nn.Sequential(
-                nn.Linear(in_dim, 256),
-                nn.ReLU(),
-                nn.Linear(256, 1 + z_where_dim * 2),
-            )
-    
-    def forward(self, h):
-        # todo make capacible with other z_where_types
-        z = self.seq(h)
-        z_pres_p = torch.sigmoid(z[:, :1])
-        # z_pres_p = util.constrain_parameter(z[:, :1], min=0, max=1.) + 1e-6
-        if self.type == '3':
-            # z_where_loc_scale = z[:, 1:2]
-            # z_where_loc_shift = z[:, 2:4]
-            z_where_loc = z[:, 1:4]
-            z_where_scale = F.softplus(z[:, 4:])
-        # elif self.type == '4_rotate':
-        #     z_where_scale_loc = util.constrain_parameter(z[:, 1:2], min=0, 
-        #                                                                 max=1)
-        #     z_where_shift_loc = util.constrain_parameter(z[:, 2:4], min=-1, 
-        #                                                                 max=1)
-        #     z_where_ang_loc = util.constrain_parameter(z[:, 4:5], min=-45, 
-        #                                                                 max=45)
-        #     z_where_loc = torch.cat(
-        #         [z_where_scale_loc, z_where_shift_loc, z_where_ang_loc], dim=1)
-                
-        #     z_where_scale = F.softplus(z[:, 5:9]) + 1e-6
-        #     return z_pres_p, z_where_loc, z_where_scale
 
-        else: 
-            raise NotImplementedError
-        return z_pres_p, z_where_loc, z_where_scale
-    
-
-class WhatMLP(nn.Module):
-    def __init__(self, in_dim=256, z_what_dim=50, hid_dim=512, num_layers=2):
-        super().__init__()
-        self.z_what_dim = z_what_dim
-        self.out_dim = z_what_dim * 2
-        self.mlp = util.init_mlp(in_dim=in_dim, 
-                                out_dim=self.out_dim,
-                                hidden_dim=hid_dim,
-                                num_layers=num_layers)
-    def forward(self, x):
-        # out = constrain_parameter(self.mlp(x), min=.3, max=.7)
-        out = self.mlp(x)
-        z_what_loc = F.tanh(out[:, 0:self.z_what_dim])
-        z_what_scale = F.softplus(out[:, self.z_what_dim:]) + 1e-6
-        # out = torch.cat([z_what_loc, z_what_scale])
-        # out = torch.sigmoid(out)
-        # z_what_loc = out[:, 0:(int(self.out_dim/2))]
-        # z_what_scale = out[:, (int(self.out_dim/2)):] + 1e-6
-        return z_what_loc, z_what_scale
-
-class Decoder(nn.Module):
-    def __init__(self, z_what_dim=50, 
-                       img_dim=[1, 50, 50], 
-                       hidden_dim=256, 
-                       num_layers=2,
-                       bias=-2.0):
-        super().__init__()
-        self.img_dim = img_dim
-        self.z_what_dim = z_what_dim
-        self.out_dim = np.prod(img_dim)
-        self.net = util.init_mlp(in_dim=z_what_dim,
-                                 out_dim=self.out_dim, 
-                                 hidden_dim=hidden_dim, 
-                                 num_layers=num_layers)
-        self.bias = bias
-    
-    def forward(self, z_what):
-        out = self.net(z_what)
-        out_loc = torch.sigmoid(out + self.bias
-                                        ).view(*z_what.shape[:2], *self.img_dim)
-        return out_loc
+    def non_decoder_named_params(self):
+        for n, p in self.named_parameters():
+            if n.split(".")[1] != 'internal_decoder':
+                yield n, p

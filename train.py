@@ -3,30 +3,53 @@ import numpy as np
 import torch
 from torchvision.utils import save_image, make_grid
 from torch.utils.tensorboard import SummaryWriter
+from torchvision import transforms
 
 import util
 import plot
 import losses
 import test
-from models import base, sequential 
+from models import base, sequential
+from models.mws.handwritten_characters.losses import get_mws_loss
 
-def train(model, optimizer, stats, data_loader, args, writer):
+
+def train(model, optimizer, stats, data_loader, args, writer, dataset_name=None):
 
     checkpoint_path = util.get_checkpoint_path(args)
-    num_iterations_so_far = len(stats.trn_losses)
-    num_epochs_so_far = len(stats.tst_losses)
+    if args.model_type == 'MWS':
+        num_iterations_so_far = len(stats.theta_losses)
+        num_epochs_so_far = 0
+    else:
+        num_iterations_so_far = len(stats.trn_losses)
+        num_epochs_so_far = len(stats.tst_losses)
     iteration = num_iterations_so_far
     epoch = num_epochs_so_far
 
-    generative_model, guide = model
+    if args.model_type != 'MWS':
+        generative_model, guide = model
+    else:
+        mws_transform = transforms.Resize([args.img_res, args.img_res], 
+                                            antialias=True)
+        generative_model, guide, memory = model
+        if memory is not None:
+            util.logging.info(
+            f"Size of MWS's memory of shape {memory.shape}: "
+            f"{memory.element_size() * memory.nelement() / 1e6:.2f} MB"
+            )
     guide.train()
     generative_model.train()
     train_loader, test_loader = data_loader
     data_size = len(train_loader.dataset)
     
     # For ploting first
-    imgs, _ = next(iter(train_loader))
+    imgs, target = next(iter(train_loader))
+    if args.model_type == 'MWS':
+        obs_id = imgs.type(torch.int64)            
+        imgs = mws_transform(target)
     imgs = util.transform(imgs.to(args.device))
+    if dataset_name is not None and dataset_name == "Omniglot":
+        imgs = 1 - imgs
+
     while iteration < args.num_iterations:
 
         # Log training reconstruction in Tensorboard
@@ -37,9 +60,19 @@ def train(model, optimizer, stats, data_loader, args, writer):
                                       args=args, 
                                       writer=writer, 
                                       epoch=epoch,
-                                      is_train=True)
+                                      writer_tag='Train',
+                                      dataset_name=args.dataset)
 
-        for imgs, _ in train_loader:
+        for imgs, target in train_loader:
+            # Special data processing
+            if args.model_type == 'MWS':
+                obs_id = imgs.type(torch.int64)            
+                imgs = mws_transform(target)
+
+            if dataset_name is not None and dataset_name == "Omniglot":
+                imgs = 1 - imgs
+
+            # prepare the data
             if iteration < np.inf:
                 imgs = util.transform(imgs.to(args.device))
             else:
@@ -80,101 +113,150 @@ def train(model, optimizer, stats, data_loader, args, writer):
                                             iteration=iteration,
                                             writer=writer,
                     )
+                elif args.model_type == 'MWS':
+                    (
+                    loss,
+                    theta_loss,
+                    phi_loss,
+                    prior_loss,
+                    accuracy,
+                    novel_proportion,
+                    new_map,
+                                        ) = get_mws_loss(
+                                            generative_model,
+                                            guide,
+                                            memory,
+                                            imgs.squeeze(1).round(),
+                                            obs_id,
+                                            args.num_particles,
+                                            )
+                    names = ["neg_elbo", "theta_loss", "phi_loss", "prior_loss",
+                            "accuracy", "novel_proportion", "new_map"]
+                    loss_list = [loss, theta_loss, phi_loss, prior_loss, accuracy, 
+                                novel_proportion, new_map]
                 else:
                     raise NotImplementedError
 
-                loss = loss_tuple.overall_loss.mean()
+                if args.model_type != 'MWS':
+                    loss = loss_tuple.overall_loss.mean()
+
                 loss.backward()
 
             # Constrain the baseline gradients
-            # for "independent" prior
-            # torch.nn.utils.clip_grad_norm_(guide.parameters(), max_norm=1e4)
-            # for "sequential" prior
             # torch.nn.utils.clip_grad_norm_(guide.parameters(), max_norm=1e5)
-            # torch.nn.utils.clip_grad_norm_(guide.get_baseline_params(), 
-            #                                max_norm=1e6)
                 
             # Log loss, gradients and some parameters
-            for n, l in zip(loss_tuple._fields, loss_tuple):
-                writer.add_scalar("Train curves/"+n, l.detach().mean(), iteration)
+            if args.model_type == 'MWS':
+                for n, l in zip(names, loss_list):
+                    if l is not None:
+                        writer.add_scalar("Train curves/"+n, l, iteration)
+            else:
+                for n, l in zip(loss_tuple._fields, loss_tuple):
+                    writer.add_scalar("Train curves/"+n, l.detach().mean(), 
+                                                                    iteration)
+            # Check for nans gradients, parameters
             if args.model_type == 'Sequential' and args.prior_dist == 'Sequential':
                 named_params = itertools.chain(
                             guide.named_parameters(), 
                             guide.internal_decoder.no_img_dist_named_params(),
                             generative_model.img_dist_named_params())
+            elif args.model_type in ['AIR']:
+                if not args.execution_guided and args.prior_dist == 'Sequential':
+                    named_params = itertools.chain(
+                                    guide.non_decoder_named_params(),
+                                    generative_model.no_img_dist_named_params()
+                                                ) 
+                elif args.execution_guided or args.prior_dist == 'Sequential':
+                    named_params = itertools.chain(
+                                        # guide.non_decoder_named_params(),
+                                        # guide.non_decoder_named_params(),
+                                        # generative_model.decoder_named_params()
+                                                )
+                elif args.prior_dist == 'Independent':
+                    named_params = itertools.chain(guide.named_parameters(),
+                                            generative_model.named_parameters()) 
+                elif not args.execution_guided:
+                    named_params = itertools.chain(
+                                        guide.non_decoder_named_params(),
+                                        generative_model.decoder_named_params())
+                else:
+                    named_params = itertools.chain(
+                                            guide.named_parameters(),
+                                            generative_model.named_parameters())
+            elif args.model_type in ['VAE']:
+                named_params = itertools.chain(
+                                        guide.named_parameters(),
+                                        generative_model.named_parameters())
             else:
                 named_params = guide.named_parameters()
             
-            writer.add_scalars("Gradient Norm", {f"Grad/{n}":
-                                        p.grad.norm(2) for n, p in 
-                                        named_params}, 
-                                        iteration)
-            if args.model_type in ['Sequential', 'Base']:
-                if generative_model.input_dependent_param:
-                    # writer.add_histogram("Parameters/gen.sigma",
-                    #                         generative_model.sigma, iteration)
-                    # writer.add_histogram("Parameters/tanh.norm.slope",
-                    #             generative_model.tanh_norm_slope, iteration)
-                    # if args.model_type == 'sequential':
-                    #     writer.add_histogram("Parameters/tanh.norm.slope.per_stroke",
-                    #     generative_model.tanh_norm_slope_stroke, iteration)
-                    pass
-                else:
-                    # writer.add_histogram("Parameters/gen.sigma", 
-                    #                 generative_model.get_sigma(),iteration)
-                    # writer.add_histogram("Parameters/tanh.norm.slope",
-                    #             generative_model.get_tanh_slope(), iteration)
-                    # writer.add_histogram("Parameters/imgs_dist.std",
-                    #             generative_model.get_imgs_dist_std(), iteration)
-                    # if args.model_type == 'Sequential':
-                    #     writer.add_scalar("Parameters/tanh.norm.slope.per_stroke",
-                    #     generative_model.get_tanh_slope_strk().mean(), iteration)
-                    pass
-            elif args.model_type in ['VAE', 'AIR']:
-                writer.add_scalars("Gradient Norm", {f"Grad/{n}":
-                            p.grad.norm(2) for n, p in 
-                            itertools.chain(generative_model.named_parameters()
-                            )}, 
-                            iteration)
-            # Check for nans
-            if args.model_type in ["VAE", "AIR", "Base"]:
-                params = itertools.chain(
-                                        generative_model.named_parameters(), 
-                                        guide.named_parameters())
-            elif args.model_type in ['Sequential']:
-                if args.execution_guided:
-                    params = itertools.chain(
-                            guide.named_parameters(),
-                            guide.internal_decoder.no_img_dist_named_params(),
-                            generative_model.img_dist_named_params()
-                                        )
-                else:
-                    params = itertools.chain(
-                            guide.named_parameters(),
-                            generative_model.learnable_named_parameters()
-                                        )
-            for name, parameter in params:
-                # print(f"{name} has norm: {parameter.norm(1)}")
-                # print(f"{name}.grad has norm: {parameter.grad.norm(2)}")
-                # mod the grad
+            for name, parameter in named_params:
                 try:
+                    writer.add_scalar(f"Grad_norm/{name}", parameter.grad.norm(2), 
+                                                                    iteration)
+                    # if (name == 'style_mlp.seq.linear_modules.2.weight' and
+                    #     (parameter.grad.norm(2) > 6e4)):
+                    #     print(f'{name} has grad_norm = {parameter.grad.norm(2)}')
+                    #     util.debug_gradient(name, parameter, imgs, 
+                    #                         guide, generative_model, optimizer,
+                    #                         iteration, writer, args)
+
                     if torch.isnan(parameter).any() or torch.isnan(parameter.grad).any():
                         print(f"{name}.grad has {parameter.grad.isnan().sum()}/{np.prod(parameter.shape)} nan parameters")
                         breakpoint()
-                except:
+                except Exception as e:
+                    print(e)
                     breakpoint()
 
             optimizer.step()
 
             # Record stats
-            stats.trn_losses.append(loss.item())
+            if args.model_type != 'MWS':
+                stats.trn_losses.append(loss.item())
+            else:
+                stats.theta_losses.append(theta_loss)
+                stats.phi_losses.append(phi_loss)
+                stats.prior_losses.append(prior_loss)
+                if accuracy is not None:
+                    stats.accuracies.append(accuracy)
+                if novel_proportion is not None:
+                    stats.novel_proportions.append(novel_proportion)
+                if new_map is not None:
+                    stats.new_maps.append(new_map)
             
             # Log
             if iteration % args.log_interval == 0:
-                util.logging.info(f"Iteration {iteration} | Loss = {stats.trn_losses[-1]:.3f}")
+                if args.model_type == 'MWS':
+                    util.logging.info(
+                        "it. {}/{} | prior loss = {:.2f} | theta loss = {:.2f} | "
+                        "phi loss = {:.2f} | accuracy = {}% | novel = {}% | new map = {}% "
+                        "| last log_p = {} | last kl = {} | GPU memory = {:.2f} MB".format(
+                            iteration,
+                            args.num_iterations,
+                            prior_loss,
+                            theta_loss,
+                            phi_loss,
+                            accuracy * 100 if accuracy is not None else None,
+                            novel_proportion * 100 if novel_proportion is not None else None,
+                            new_map * 100 if new_map is not None else None,
+                            "N/A" if len(stats.log_ps) == 0 else stats.log_ps[-1],
+                            "N/A" if len(stats.kls) == 0 else stats.kls[-1],
+                            (
+                                torch.cuda.max_memory_allocated(device=args.device) / 1e6
+                                if args.device.type == "cuda"
+                                else 0
+                            ),
+                        )
+                    )
+                else:
+                    util.logging.info(f"Iteration {iteration} | Loss = {stats.trn_losses[-1]:.3f}")
+
 
             # Make a model tuple
-            model = generative_model, guide
+            if args.model_type == 'MWS':
+                model = generative_model, guide, memory
+            else:
+                model = generative_model, guide
 
             # Save Checkpoint
             if iteration % args.save_interval == 0 or iteration == \
@@ -208,10 +290,29 @@ def train(model, optimizer, stats, data_loader, args, writer):
         if test_loader:
             test_model(model, stats, test_loader, args, epoch=epoch, writer=writer)
     writer.close()
+    # save iteration.pt
+    util.save_checkpoint(
+        util.get_checkpoint_path(args, 
+        checkpoint_iteration=iteration),
+        model,
+        optimizer,
+        stats,
+        run_args=args,
+    )
+    # save latest.pt
+    util.save_checkpoint(
+        util.get_checkpoint_path(args),
+        model,
+        optimizer,
+        stats,
+        run_args=args,
+    )
+
     return model
 
 def test_model(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
                                                                 writer=None):
     with torch.no_grad():
         test.marginal_likelihoods(model, stats, test_loader, args, 
-                                            save_imgs_dir, epoch, writer, k=1)
+                                            save_imgs_dir, epoch, writer, k=1,
+                                            dataset_name=args.dataset)

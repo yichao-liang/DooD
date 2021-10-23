@@ -5,6 +5,7 @@ import pdb
 from collections import namedtuple
 
 import numpy as np
+from numpy import prod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,22 +54,26 @@ class GenerativeModel(nn.Module):
         '''Batched `Likelihood distribution` of `image` conditioned on `latent
         parameters`.
         Args:
-            latents: [bs, z_dim]
+            latents: [ptcs, bs, z_dim]
         Return:
             Dist over images: [bs, 1 (channel), H, W]
         '''
-        imgs_dist_loc, imgs_dist_std = self.decoder(latents)
-        bs = imgs_dist_loc.shape[0]
+        ptcs, bs = shp = latents.shape[:2]
+        imgs_dist_loc, imgs_dist_std = self.decoder(latents.view(prod(shp), -1))
+        imgs_dist_loc, imgs_dist_std =  (imgs_dist_loc.view(*shp, 1, self.res, 
+                                                                    self.res), 
+                                        imgs_dist_std.view(*shp, 1, self.res, 
+                                                                    self.res))
         dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
                             reinterpreted_batch_ndims=3)
         assert (dist.event_shape == torch.Size([1, self.res, self.res]) and 
-                dist.batch_shape == torch.Size([bs]))
+                dist.batch_shape == torch.Size([*shp]))
         return dist
 
     def log_prob(self, latents, imgs):
         '''
         Args:
-            latents: [bs, z_dim]
+            latents: [ptcs, bs, z_dim]
             imgs: [bs, 1, res, res]
         Return:
             Joint log probability
@@ -100,13 +105,14 @@ class Guide(nn.Module):
                                   hid_dim=self.hidden_dim,
                                   num_layers=2)
 
-    def forward(self, imgs):
+    def forward(self, imgs, num_particles=1):
         '''
         Args: 
             img: [bs, 1, H, W]
         Returns:
             data: GuideReturn
         '''
+        ptcs = num_particles
         bs = imgs.size(0)
 
         z_loc, z_std = self.encoder(imgs.view(bs, -1))
@@ -120,10 +126,9 @@ class Guide(nn.Module):
                 z_post.batch_shape == torch.Size([bs]))
 
         # [bs, z_dim, 2] 
-        z = z_post.rsample()
+        z = z_post.rsample([ptcs])
 
-        # log_prob(z): [bs, 1]
-        # z_pres: [bs, 1]
+        # log_prob(z): [ptcs, bs]
         z_lprb = z_post.log_prob(z)
 
         data = GuideReturn(z_smpl=z,
