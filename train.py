@@ -290,23 +290,24 @@ def train(model, optimizer, stats, data_loader, args, writer, dataset_name=None)
         if test_loader:
             test_model(model, stats, test_loader, args, epoch=epoch, writer=writer)
     writer.close()
+
     # save iteration.pt
-    util.save_checkpoint(
-        util.get_checkpoint_path(args, 
-        checkpoint_iteration=iteration),
-        model,
-        optimizer,
-        stats,
-        run_args=args,
-    )
-    # save latest.pt
-    util.save_checkpoint(
-        util.get_checkpoint_path(args),
-        model,
-        optimizer,
-        stats,
-        run_args=args,
-    )
+    # util.save_checkpoint(
+    #     util.get_checkpoint_path(args, 
+    #     checkpoint_iteration=iteration),
+    #     model,
+    #     optimizer,
+    #     stats,
+    #     run_args=args,
+    # )
+    # # save latest.pt
+    # util.save_checkpoint(
+    #     util.get_checkpoint_path(args),
+    #     model,
+    #     optimizer,
+    #     stats,
+    #     run_args=args,
+    # )
 
     return model
 

@@ -402,9 +402,9 @@ def init_dataloader(res, dataset, batch_size=64):
     import random
     random.seed(0)
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=4)
+                                                            num_workers=8)
     test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=4)
+                                                            num_workers=8)
     
     return train_loader, test_loader
 
@@ -509,12 +509,12 @@ if __name__ == "__main__":
 
     # Choose the dataset to test on
     marginal_likelihood_test_datasets = [
-                    #  "MNIST",
+                     "MNIST",
                     #  "KMNIST", 
                     #  "Quickdraw",
                     #  "EMNIST", 
                     #  "QMNIST", 
-                     "Omniglot", 
+                    #  "Omniglot", 
                      ]
 
     clf_test_datasets = [
@@ -543,19 +543,19 @@ if __name__ == "__main__":
         print(f"===> Begin testing on {dataset} dataset")
 
         # Evaluate marginal likelihood
-        # train_loader, test_loader = init_dataloader(res, dataset, batch_size=2)
-        # print(f"===> Begin Marginal Likelihood testing on {dataset}")
-        # marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-        #                     args=trn_args, save_imgs_dir=None, epoch=None, 
-        #                     writer=writer, 
-        #                     k=1, # used for debug why the signs are different
-        #                     # k=400, # use for current results
-        #                     train_loader=None, optimizer=None,
-        #                     # train_loader=train_loader, optimizer=optimizer,
-        #                     dataset_name=dataset,
-        #                     only_marginal_likelihood_evaluation=True,
-        #                     only_reconstruction=False)
-        # print(f"===> Done elbo_evalution on {dataset}\n")
+        train_loader, test_loader = init_dataloader(res, dataset, batch_size=2)
+        print(f"===> Begin Marginal Likelihood testing on {dataset}")
+        marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+                            args=trn_args, save_imgs_dir=None, epoch=None, 
+                            writer=writer, 
+                            k=1, # used for debug why the signs are different
+                            # k=400, # use for current results
+                            train_loader=None, optimizer=None,
+                            # train_loader=train_loader, optimizer=optimizer,
+                            dataset_name=dataset,
+                            only_marginal_likelihood_evaluation=True,
+                            only_reconstruction=False)
+        print(f"===> Done elbo_evalution on {dataset}\n")
         
         train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
         print(f"===> Begin Reconstruction testing on {dataset}")

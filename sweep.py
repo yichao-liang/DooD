@@ -108,7 +108,7 @@ if __name__ == '__main__':
     # all_exp_args['VAE'] = models_2_cmd['VAE']
     all_exp_args['AIR10'] = models_2_cmd['AIR']
 
-    # # Full model
+    # Full model
     all_exp_args['Full'] = args_from_kw_list(full_config) + [
                                                         '--constrain_sample']
 
@@ -138,16 +138,16 @@ if __name__ == '__main__':
     all_exp_args['Full-sequential_prior'] = all_exp_args['Full-sequential_prior'
                                             ] + ['--constrain_sample']
 
-    # # MWS
+    # MWS
     all_exp_args['MWS'] = models_2_cmd['MWS']
 
     for n, args in all_exp_args.items():
-        # print(f"==> Begin training the '{n}' model")
-        # args.extend(['--save_model_name', n])
-        # subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
-        # print(f"==> Done training {n}\n")
+        print(f"==> Begin training the '{n}' model")
+        args.extend(['--save_model_name', n])
+        subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
+        print(f"==> Done training {n}\n")
 
-        print(f"==> Begin evaluating the '{n}' model")
-        ckpt_path = util.get_checkpoint_path_from_path_base(n, -1)
-        subprocess.run(['python', 'test.py', '--save_model_name', n])
-        print(f"==> Done evaluating the '{n}' model\n\n")
+        # print(f"==> Begin evaluating the '{n}' model")
+        # ckpt_path = util.get_checkpoint_path_from_path_base(n, -1)
+        # subprocess.run(['python', 'test.py', '--save_model_name', n])
+        # print(f"==> Done evaluating the '{n}' model\n\n")

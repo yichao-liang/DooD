@@ -16,7 +16,7 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/sweep/{args.save_model_name}")
+    writer = SummaryWriter(log_dir=f"./log/debug/{args.save_model_name}")
 
     # When doing hyperop
     # writer = SummaryWriter(log_dir=f"./log/AIR_hyperop/" + 
@@ -266,7 +266,7 @@ def get_args_parser():
 
     # Optimization
     parser.add_argument("--continue_training", action="store_true", help=" ")
-    parser.add_argument("--num-iterations", default=50000, type=int, help=" ")
+    parser.add_argument("--num-iterations", default=10000, type=int, help=" ")
     parser.add_argument("--bl_lr", default=1e-3, type=float, help='''
     1e-3 worked for Sequential though has collapse for vrnn; 
     1e-3 is suggested for AIR''')

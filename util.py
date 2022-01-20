@@ -20,7 +20,7 @@ from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
 from models import base, sequential, air, vae#, mws
-from data.omniglot_dataset.omniglot_dataset import TrainingDataset
+# from data.omniglot_dataset.omniglot_dataset import TrainingDataset
 from data import synthetic, multimnist
 
 logging.basicConfig(
@@ -398,14 +398,14 @@ def init(run_args, device):
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
-                                num_workers=4,
+                                num_workers=8,
                                 shuffle=True,
                                 # sampler=trn_sampler
                                 )
 
         valid_loader = DataLoader(val_dataset,
                                 batch_size=run_args.batch_size,
-                                num_workers=4,
+                                num_workers=8,
                                 shuffle=True,
                                 # sampler=val_sampler
                                 )
