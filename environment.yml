@@ -1,0 +1,17 @@
+name: glot
+channels:
+  - defaults
+dependencies:
+  - tensorboard
+  - jupyterlab
+  - torchvision
+  - pytorch
+  - cudatoolkit=11.3
+  - torchaudio
+  - kornia
+  - tqdm
+  - matplotlib
+  - scikit-image
+  - line_profiler
+  - seaborn
+prefix: /om2/user/ycliang/miniconda3/envs/glot
