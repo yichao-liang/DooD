@@ -4,6 +4,7 @@ Sequential model with distributed z_what latent variables
 '''
 import pdb
 from collections import namedtuple
+import itertools
 
 import numpy as np
 from numpy import prod
@@ -33,6 +34,13 @@ GuideReturn = namedtuple('GuideReturn', ['z_smpl',
 GenReturn = namedtuple('GenReturn', ['z_smpl',
                                      'canvas'])
 
+def schedule_model_parameters(gen, guide, iteration, args):
+    # schdule the success prob of z_pres distribution
+    p = util.anneal_weight(init_val=0.99, final_val=args.final_bern,
+                           cur_ite=iteration, anneal_step=1e5)
+    gen.z_pres_prob = torch.zeros(args.strokes_per_img).cuda() + p
+        
+    
 class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, res=28, z_where_type='3',
                                                     execution_guided=False, 
@@ -242,19 +250,19 @@ class GenerativeModel(nn.Module):
     def renders_glimpses(self, z_what):
         '''Get glimpse reconstruction from z_what control points
         Args:
-            z_what: [bs, n_strk, n_strks, 2]
+            z_what: [ptcs, bs, n_strk, z_what_dim]
         Return:
-            recon: [bs, n_strks, 1, res, res]
+            recon: [ptcs, bs, n_strks, 1, res, res]
         '''
-        assert len(z_what.shape) == 3, \
+        assert len(z_what.shape) == 4, \
                                     f"z_what shape: {z_what.shape} isn't right"
-        bs, n_strks, z_what_dim = z_what.shape[:3]
+        ptcs, bs, n_strks, z_what_dim = z_what.shape
         res = self.res
         # Get rendered image: [bs, n_strk, n_channel (1), H, W]
-        recon = self.decoder(z_what)
-        recon = recon.view(bs*n_strks, 1, self.res, self.res)
+        recon = self.decoder(z_what.view(ptcs*bs, n_strks, z_what_dim))
+        recon = recon.view(ptcs*bs*n_strks, 1, self.res, self.res)
         # recon = util.normalize_pixel_values(recon, method="maxnorm",)
-        recon = recon.view(bs, n_strks, 1, self.res, self.res)
+        recon = recon.view(ptcs, bs, n_strks, 1, self.res, self.res)
 
         return recon
 
@@ -275,7 +283,6 @@ class GenerativeModel(nn.Module):
         '''
         z_pres, z_what, z_where = latents
         ptcs, _ = shape = z_pres.shape[:2]
-        img_shape = imgs.shape[-3:]
         imgs = imgs.unsqueeze(0).repeat(ptcs, 1, 1, 1, 1)
         bs = torch.Size([*shape, self.max_strks])
 
@@ -287,18 +294,17 @@ class GenerativeModel(nn.Module):
         else:
             log_prior =  ZLogProb(
                     z_pres=(self.presence_dist(bs=bs).log_prob(z_pres) * 
-                                                               z_pres_mask),
+                        z_pres_mask),
                     z_what=(self.control_points_dist(bs=bs).log_prob(z_what) * 
-                                                               z_pres),
-                    z_where=(self.transformation_dist(bs=bs).log_prob(z_where) * 
-                                                               z_pres),
+                        z_pres),
+                    z_where=(self.transformation_dist(bs=bs).log_prob(z_where)* 
+                        z_pres),
                     )
 
         # Likelihood
         # self.sigma = decoder_param.sigma
         # self.tanh_norm_slope_stroke = decoder_param.slope[0]
-        img_dist = self.img_dist(latents=latents, 
-                                       canvas=canvas)
+        img_dist = self.img_dist(latents=latents, canvas=canvas)
         log_likelihood = img_dist.log_prob(imgs)
         return log_prior, log_likelihood
 
@@ -575,14 +581,16 @@ class Guide(nn.Module):
                                         h_l, [*shp]
                                         ).log_prob(z_pres_smpl[:, :, t].clone()
                                         ) * mask_prev[:, :, t].clone()
-                z_where_prir[:, :, t] = self.internal_decoder.transformation_dist(
+                z_where_prir[:, :, t] = (self.internal_decoder
+                                        .transformation_dist(
                                         h_l.clone(), [*shp]
                                         ).log_prob(z_where_smpl[:, :, t].clone()
-                                        ) * z_pres_smpl[:, :, t].clone()
-                z_what_prir[:, :, t] = self.internal_decoder.control_points_dist(
+                                        ) * z_pres_smpl[:, :, t].clone())
+                z_what_prir[:, :, t] = (self.internal_decoder
+                                        .control_points_dist(
                                         h_c.clone(), [*shp]
                                         ).log_prob(z_what_smpl[:, :, t].clone()
-                                        ) * z_pres_smpl[:, :, t].clone()
+                                        ) * z_pres_smpl[:, :, t].clone())
 
         # todo 1: init the distributions which can be returned; can be useful
         data = GuideReturn(z_smpl=ZSample(

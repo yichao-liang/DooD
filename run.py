@@ -4,7 +4,7 @@ import util
 import train
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
-from models import base, sequential, air, vae# , mws
+from models import base, ssp, air, vae# , mws
 
 def main(args):
     # Cuda
@@ -16,11 +16,10 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/debug/{args.save_model_name}")
+    writer = SummaryWriter(log_dir=f"./log/debug_full-seq_beta/{args.save_model_name}")
 
     # When doing hyperop
-    # writer = SummaryWriter(log_dir=f"./log/AIR_hyperop/" + 
-    # writer = SummaryWriter(log_dir=f"./log/test/" + 
+    # writer = SummaryWriter(log_dir=f"./log/hyperop/" + 
     #                             f"name={args.save_model_name}-" + 
     #                             f"intr_ll={args.intermediate_likelihood}-" + 
     #                             f"constrain_sample={args.constrain_sample}-" +
@@ -32,7 +31,6 @@ def main(args):
     #                             f"maxnorm={str(not args.no_maxnorm)}-" + 
     #                             f"strk_tanh={str(not args.no_strk_tanh)}-" + 
     #                             f"render={args.render_method}")
-    # writer = SummaryWriter(log_dir=f"./log/AIR_hyperop_debug/name={args.save_model_name}-constrain_sample={args.constrain_sample}-z_where={args.z_where_type}-bl_lr={args.bl_lr}-n_lyr={args.num_baseline_layers}-mlp_h_dim={args.bl_mlp_hid_dim}-rnn_h_dim={args.bl_rnn_hid_dim}-maxnorm={str(not args.no_maxnorm)}-strk_tanh={str(not args.no_strk_tanh)}-render={args.render_method}")
 
     # initialize models, optimizer, stats, data
     checkpoint_path = util.get_checkpoint_path(args)
@@ -93,7 +91,7 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--seed", default=4)
+    parser.add_argument("--seed", default=10)
 
     # Model
     parser.add_argument("--save_model_name", 
@@ -112,7 +110,7 @@ def get_args_parser():
     )
     parser.add_argument(
         '--render_method', type=str,
-        default='base',
+        default='bounded',
         choices=['bounded', 'base'],
         help='method for Bezier renderer',
     )
@@ -242,7 +240,7 @@ def get_args_parser():
     parser.add_argument(
         '--no_spline_renderer',
         action='store_true',
-        help='if specified then False'
+        help='if not specified then False'
     )
     parser.add_argument(
         '--intermediate_likelihood',
@@ -251,6 +249,11 @@ def get_args_parser():
         choices=[None, 'Mean', 'Geom'],
         help='''Which intermediate likelihood to use for computing the final
         likelihood'''
+    )
+    parser.add_argument(
+        '--dependent_prior',
+        action='store_true',
+        help='if specified then True'
     )
 
     # Baseline network
@@ -266,7 +269,7 @@ def get_args_parser():
 
     # Optimization
     parser.add_argument("--continue_training", action="store_true", help=" ")
-    parser.add_argument("--num-iterations", default=10000, type=int, help=" ")
+    parser.add_argument("--num-iterations", default=500000, type=int, help=" ")
     parser.add_argument("--bl_lr", default=1e-3, type=float, help='''
     1e-3 worked for Sequential though has collapse for vrnn; 
     1e-3 is suggested for AIR''')
@@ -298,6 +301,16 @@ def get_args_parser():
     # 128, the model stops learning anything quite often (in "1, 7").
     parser.add_argument("--batch-size", default=64, type=int, help=" ")
     parser.add_argument("--img_res", default=50, type=int, help=" ")
+    parser.add_argument("--beta", default=1, type=float, 
+                        help="beta term as in beta-VAE")
+    parser.add_argument("--final_bern", default=.5, type=float, 
+                        help="Minimal value for the z_pres Bern param")
+    parser.add_argument("--anneal_lr", action='store_true',
+        help='if not specified then False')
+    parser.add_argument("--increase_beta", action='store_true',
+        help='if not specified then False')
+    parser.add_argument("--final_beta", default=1, type=float, 
+                        help="Minimal value for the beta")
 
     return parser
 

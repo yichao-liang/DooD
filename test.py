@@ -13,6 +13,7 @@ from torchvision.utils import save_image, make_grid
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 from PIL import Image
+import pandas as pd
 
 
 import util, plot, losses, train
@@ -50,6 +51,18 @@ def marginal_likelihoods(model, stats, test_loader, args, save_imgs_dir=None,
         generative_model, guide, memory = model
     else:
         generative_model, guide = model
+        
+    dataset_derived_std = True
+    if dataset_derived_std:
+        # use dataset derived std for evaluating marginal likelihood
+        ds = test_loader.dataset
+        if dataset_name is not None and dataset_name == "Omniglot":
+            ds = torch.stack([1- img for img, _ in ds], dim=0)
+        else:
+            ds = torch.stack([img for img, _ in ds], dim=0)
+        ds_std = torch.std(ds,dim=0)
+        generative_model.imgs_dist_std = torch.nn.Parameter(ds_std.cuda())
+
     generative_model.eval(); guide.eval()
 
     with torch.no_grad():
@@ -154,6 +167,25 @@ def marginal_likelihoods(model, stats, test_loader, args, save_imgs_dir=None,
                                     dataset_name=dataset_name,
                                     )
 
+        log_to_file = True
+        if log_to_file:
+            if os.path.exists("eval_result.csv"):
+                print("File exist.") 
+                eval_df = pd.read_csv('eval_result.csv', header=0, index_col=0)
+                print(eval_df)
+            else:
+                eval_df = pd.DataFrame()
+            if args.model_type != 'MWS':
+                mll = loss_tuple.neg_elbo.detach().cpu().numpy()
+            else:
+                mll = loss_tuple[0].mean().detach().cpu().numpy()
+            eval_df = eval_df.append({
+                "Model_name": args.save_model_name,
+                "dataset": dataset_name,
+                "num_samples": k,
+                "marginal likelihood": mll,
+            }, ignore_index=True)
+            eval_df.to_csv("./eval_result.csv")
         writer.flush()
 
 def classification_evaluation(guide, args, writer, dataset, model_tag=None,
@@ -402,9 +434,9 @@ def init_dataloader(res, dataset, batch_size=64):
     import random
     random.seed(0)
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=8)
+                                                            num_workers=4)
     test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=8)
+                                                            num_workers=4)
     
     return train_loader, test_loader
 
@@ -509,12 +541,12 @@ if __name__ == "__main__":
 
     # Choose the dataset to test on
     marginal_likelihood_test_datasets = [
+                     "Quickdraw",
                      "MNIST",
-                    #  "KMNIST", 
-                    #  "Quickdraw",
-                    #  "EMNIST", 
-                    #  "QMNIST", 
-                    #  "Omniglot", 
+                     "KMNIST", 
+                     "EMNIST", 
+                     "QMNIST", 
+                     "Omniglot", 
                      ]
 
     clf_test_datasets = [
@@ -548,8 +580,8 @@ if __name__ == "__main__":
         marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
                             args=trn_args, save_imgs_dir=None, epoch=None, 
                             writer=writer, 
-                            k=1, # used for debug why the signs are different
-                            # k=400, # use for current results
+                            # k=1, # used for debug why the signs are different
+                            k=3, # use for current results
                             train_loader=None, optimizer=None,
                             # train_loader=train_loader, optimizer=optimizer,
                             dataset_name=dataset,
@@ -557,17 +589,17 @@ if __name__ == "__main__":
                             only_reconstruction=False)
         print(f"===> Done elbo_evalution on {dataset}\n")
         
-        train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
-        print(f"===> Begin Reconstruction testing on {dataset}")
-        trn_args.save_model_name = args.save_model_name
-        marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-                            args=trn_args, save_imgs_dir=None, epoch=None, 
-                            writer=writer, k=1,
-                            train_loader=None, optimizer=None,
-                            dataset_name=dataset, 
-                            only_marginal_likelihood_evaluation=False,
-                            only_reconstruction=True)
-        print(f"===> Done Reconstruction on {dataset}\n")
+        # train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
+        # print(f"===> Begin Reconstruction testing on {dataset}")
+        # trn_args.save_model_name = args.save_model_name
+        # marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+        #                     args=trn_args, save_imgs_dir=None, epoch=None, 
+        #                     writer=writer, k=1,
+        #                     train_loader=None, optimizer=None,
+        #                     dataset_name=dataset, 
+        #                     only_marginal_likelihood_evaluation=False,
+        #                     only_reconstruction=True)
+        # print(f"===> Done Reconstruction on {dataset}\n")
 
         # Evaluate classification
         # if dataset in clf_test_datasets:

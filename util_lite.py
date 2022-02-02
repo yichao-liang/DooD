@@ -19,7 +19,7 @@ from torchvision.utils import save_image
 from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
 
-from models import base, ssp, air, vae#, mws
+from models import base, sequential, air, vae#, mws
 # from data.omniglot_dataset.omniglot_dataset import TrainingDataset
 from data import synthetic, multimnist
 
@@ -31,26 +31,6 @@ logging.basicConfig(
 )
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
-
-def heat_weight(init_val, final_val, cur_ite, heat_step, init_ite=0):
-    '''
-    heat_step::int: ite where the heat stop
-    init_ite::int: ite where the heat start
-    '''
-    ite = max((cur_ite - init_ite), 0)
-    val = final_val + (init_val - final_val) * (1 - ite/(heat_step-init_ite))
-    heat_weight = min(final_val, val)
-    return heat_weight
-
-def anneal_weight(init_val, final_val, cur_ite, anneal_step, init_ite=0):
-    '''
-    anneal_step::int: ite where the anneal stop
-    init_ite::int: ite where the anneal start
-    '''
-    ite = max((cur_ite - init_ite), 0)
-    val = final_val + (init_val - final_val) * (1 - ite/anneal_step)
-    anneal_weight = max(final_val, val)
-    return anneal_weight
 
 def sampling_gauss_noise(base_tensor, var):
     out = base_tensor + torch.empty_like(base_tensor).normal_(
@@ -119,22 +99,19 @@ def character_conditioned_sampling(n_samples, guide_out, decoder):
 
 
 def geom_weights_from_z_pres(z_pres, p):
-    '''
-    Args:
-        z_pres [bs, n_steps] (Assuming the ptcs dim has been reshaped to bs)
-    '''
     bs, max_steps = z_pres.shape
     num_steps = z_pres.sum(1)
     # weights = torch.distributions.Geometric(p).log_prob(
     #                                     torch.arange(max_steps).to(p.device))
     # weights = torch.exp(weights)
+    # breakpoint()
     weights = ((1-p) ** (torch.arange(max_steps)).to(p.device)) * p
-    weights = weights.expand(z_pres.shape).clone()
+    weights = weights.expand(z_pres.shape)
 
     for i, n_stps in enumerate(num_steps):
         if n_stps > 0:
-            cnt = n_stps.int()-1
-            weights[i, cnt] = 1 - weights[i][:cnt].sum()
+            weights[i, (n_stps.int()-1)] = 1 - weights[i][:n_stps.int()-1].sum()
+
     # idx = (num_steps != 0)
     # torch.gather(weights[idx], -1, num_steps[idx].type(torch.int64).unsqueeze(1))
     # torch.index_select(weights[idx], 1, num_steps[idx].type(torch.int)-1)
@@ -254,7 +231,7 @@ def init_z_where(z_where_type):
                            '4_no_rotate': ZWhereParam(torch.tensor([.3,1,0,0]),
                                                 torch.ones(4)/5, 4),
                            '4_rotate': ZWhereParam(
-                                                torch.tensor([.8,0,0,0]),
+                                                torch.tensor([.5,0,0,0]),
                                                 torch.tensor([0.2,1,1,1]), 4),
                                                 # torch.ones(4)/5, 4),
                            '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
@@ -295,7 +272,8 @@ def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
             if type(slope) == float:
                 img = torch.tanh(img/slope)
             elif len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
-                assert (len(img.shape) - len(slope.shape) == 3) 
+                assert (len(img.shape) == 4 and len(slope.shape) == 1) or\
+                       (len(img.shape) == 5 and len(slope.shape) == 2)
                 slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
                 # img_ = torch.tanh(img/slope)
                 # if execution guided
@@ -482,7 +460,7 @@ def init(run_args, device):
                                 likelihood_dist=run_args.likelihood_dist,
                                 strks_per_img=run_args.strokes_per_img,
                                 res=run_args.img_res,
-                                ).to(device)
+                                )
 
         # Guide
         guide = base.Guide(ctrl_pts_per_strk=run_args.points_per_stroke,
@@ -490,13 +468,12 @@ def init(run_args, device):
                                 net_type=run_args.inference_net_architecture,
                                 strks_per_img=run_args.strokes_per_img,
                                 img_dim=[1, run_args.img_res, run_args.img_res],
-                                ).to(device)
+                                )
 
     elif run_args.model_type == 'Sequential':
-        assert ((run_args.execution_guided == (not run_args.no_strk_tanh)) or
-                not run_args.execution_guided),\
+        assert run_args.execution_guided == (not run_args.no_strk_tanh),\
             "execution_guided should be used in accordance with strk_tanh norm"
-        generative_model = ssp.GenerativeModel(
+        model = sequential.SplineModel(
                     max_strks=run_args.strokes_per_img,
                     pts_per_strk=run_args.points_per_stroke,
                     z_where_type=run_args.z_where_type,
@@ -505,74 +482,46 @@ def init(run_args, device):
                     transform_z_what=run_args.transform_z_what,
                     input_dependent_param=run_args.input_dependent_render_param,
                     prior_dist=run_args.prior_dist,
-                    num_mlp_layers=run_args.num_mlp_layers,
                     maxnorm=not run_args.no_maxnorm,
                     strk_tanh=not run_args.no_strk_tanh,
                     constrain_param=not run_args.constrain_sample,
                     spline_decoder=not run_args.no_spline_renderer,
                     render_method=run_args.render_method,
                     intermediate_likelihood=run_args.intermediate_likelihood,
-                    # comment out for eval old models
-                    # dependent_prior=run_args.dependent_prior
-                                    ).to(device)
-        guide = ssp.Guide(
-                    max_strks=run_args.strokes_per_img,
-                    pts_per_strk=run_args.points_per_stroke,
-                    z_where_type=run_args.z_where_type,
                     img_dim=[1, run_args.img_res, run_args.img_res],
-                    execution_guided=run_args.execution_guided,
-                    transform_z_what=run_args.transform_z_what,
-                    input_dependent_param=run_args.input_dependent_render_param,
                     exec_guid_type=run_args.exec_guid_type,
-                    prior_dist=run_args.prior_dist,
                     target_in_pos=run_args.target_in_pos,
                     feature_extractor_sharing=run_args.feature_extractor_sharing,
                     num_mlp_layers=run_args.num_mlp_layers,
                     num_bl_layers=run_args.num_baseline_layers,
                     bl_mlp_hid_dim=run_args.bl_mlp_hid_dim,
                     bl_rnn_hid_dim=run_args.bl_rnn_hid_dim,
-                    maxnorm=not run_args.no_maxnorm,
-                    strk_tanh=not run_args.no_strk_tanh,
-                    z_what_in_pos=run_args.z_what_in_pos,
-                    constrain_param=not run_args.constrain_sample,
-                    render_method=run_args.render_method,
-                    intermediate_likelihood=run_args.intermediate_likelihood,
-                    # comment out for eval old models
-                    # dependent_prior=run_args.dependent_prior,
-                    spline_decoder=not run_args.no_spline_renderer,
-                                ).to(device)
+                                    )
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
-        generative_model = air.GenerativeModel(
-                                max_strks=run_args.strokes_per_img,
-                                res=run_args.img_res,
-                                z_where_type=run_args.z_where_type,
-                                execution_guided=run_args.execution_guided,
-                                z_what_dim=run_args.z_dim,
-                                prior_dist=run_args.prior_dist,
-                        ).to(device)
-        guide = air.Guide(
+        model = air.AIR(
                         max_strks=run_args.strokes_per_img,
-                        img_dim=[1, run_args.img_res, run_args.img_res],
+                        res=run_args.img_res,
                         z_where_type=run_args.z_where_type,
                         execution_guided=run_args.execution_guided,
+                        z_what_dim=run_args.z_dim,
+                        prior_dist=run_args.prior_dist,
+                        img_dim=[1, run_args.img_res, run_args.img_res],
                         exec_guid_type=run_args.exec_guid_type,
                         feature_extractor_sharing=\
                                             run_args.feature_extractor_sharing,
-                        z_what_dim=run_args.z_dim,
                         z_what_in_pos=run_args.z_what_in_pos,
-                        prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
-                        ).to(device)
+                    )
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(
                                 res=run_args.img_res,
                                 z_dim=run_args.z_dim,
-                                ).to(device)
+                                )
         guide = vae.Guide(
                         img_dim=[1, run_args.img_res, run_args.img_res],
                         z_dim=run_args.z_dim,
-                        ).to(device)
+                        )
     elif run_args.model_type == 'MWS':
         from models.mws import handwritten_characters as mws
         mws_args = mws.run.get_args_parser().parse_args([
@@ -591,72 +540,31 @@ def init(run_args, device):
     # Model tuple
     if run_args.model_type == 'MWS':
         model = (generative_model, guide, memory) 
-    else:
-        model = (generative_model, guide)
 
     # Optimizer
-    optimizer = init_optimizer(run_args, model)
-
-    # Stats
-    if run_args.model_type != 'MWS':
-        stats = Stats([], [], [], [])
-
-
-    return model, optimizer, stats, data_loader
-
-def init_optimizer(run_args, model):
-    # Model tuple
-    if run_args.model_type == 'MWS':
-        (generative_model, guide, _) = model
-    else:
-        (generative_model, guide) = model
-
     # parameters = guide.parameters()
     if run_args.model_type == 'AIR':
-        air_parameters = itertools.chain(guide.air_params(), 
-                                         generative_model.parameters()
-                                         )
         optimizer = torch.optim.Adam([
             {
-                'params': air_parameters, 
+                'params': model.air_parameters(), 
                 'lr': run_args.lr,
                 'weight_decay': run_args.weight_decay
             },
             {
-                'params': guide.baseline_params(),
+                'params': model.baseline_params(),
                 'lr': run_args.bl_lr,
                 'weight_decay': run_args.weight_decay,
             }
         ])
     elif run_args.model_type == 'Sequential':
-        train_style_mlp = True
-        if run_args.execution_guided or run_args.prior_dist == 'Sequential':
-            if train_style_mlp:
-                air_parameters = itertools.chain(
-                                             guide.air_params(), 
-                                             guide.internal_decoder.parameters(),
-                                             generative_model.parameters())
-            else:
-                air_parameters = itertools.chain(
-                                             guide.no_style_mlp_air_parameters(), 
-                                             guide.internal_decoder.parameters(),
-                                             generative_model.parameters())
-        else:
-            if train_style_mlp:
-                air_parameters = itertools.chain(guide.air_params(), 
-                                                generative_model.parameters())
-            else:
-                air_parameters = itertools.chain(
-                                            guide.no_style_mlp_air_parameters(),
-                                            generative_model.parameters())
         optimizer = torch.optim.Adam([
             {
-                'params': air_parameters, 
+                'params': model.air_params(), 
                 'lr': run_args.lr,
                 'weight_decay': run_args.weight_decay
             },
             {
-                'params': guide.baseline_params(),
+                'params': model.baseline_params(),
                 'lr': run_args.bl_lr,
                 'weight_decay': run_args.weight_decay,
             }
@@ -665,8 +573,14 @@ def init_optimizer(run_args, model):
         parameters = itertools.chain(guide.parameters(), 
                                      generative_model.parameters())
         optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
-        
-    return optimizer
+
+    # Stats
+    if run_args.model_type != 'MWS':
+        stats = Stats([], [], [], [])
+
+
+    return model, optimizer, stats, data_loader
+
 
 def save_checkpoint(path, model, optimizer, stats, run_args=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -700,11 +614,7 @@ def save_checkpoint(path, model, optimizer, stats, run_args=None):
 
 
 def load_checkpoint(path, device):
-    try:
-        checkpoint = torch.load(path, map_location=device)
-    except Exception as e:
-        print(e)
-        print(f"failed loading {path}")
+    checkpoint = torch.load(path, map_location=device)
     run_args = checkpoint["run_args"]
     model, optimizer, stats, data_loader = init(run_args, device)
 
@@ -787,7 +697,6 @@ def load_baseline_posterior(path, device):
 
 
 def set_seed(seed):
-    seed = int(seed)
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -992,40 +901,17 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     if center is None:
         center = torch.zeros_like(thetas[:, :2])
     if z_where_type=='4_rotate':
-        bs = thetas.shape[0]
-        # new
-        # rotate
+        scale = thetas[:, 0:1].expand(-1, 2)
+        translations = thetas[:, 1:3]
         angle = thetas[:, 3]
-        angle_cos, angle_sin = (torch.cos(torch.deg2rad(angle)),\
-                                torch.sin(torch.deg2rad(angle)))
-        affine_matrix = torch.stack([angle_cos, -angle_sin, torch.empty_like(angle), 
-                                     angle_sin, angle_cos, torch.empty_like(angle)], 
-                                     dim=0).T.view(-1,2,3)
-        # scale
-        affine_matrix *= thetas[:, 0].unsqueeze(-1).unsqueeze(-1)  
-        # translate
-        affine_matrix[:, :, 2] = thetas[:, 1:3] 
-        return affine_matrix
-
-        # old
-        # scale = thetas[:, 0:1].expand(-1, 2)
-        # translations = thetas[:, 1:3]
-        # angle = thetas[:, 3]
     elif z_where_type == '4_no_rotate':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
         angle = torch.zeros_like(thetas[:, 0])
     elif z_where_type == '3':
-        bs = thetas.shape[0]
-        affine_matrix = torch.eye(2,3).unsqueeze(0).expand(bs,2,3).to(thetas.device)
-        # scale
-        affine_matrix = affine_matrix * thetas[:, 0].unsqueeze(-1).unsqueeze(-1)  
-        # translate
-        affine_matrix[:, :, 2] = thetas[:, 1:3] 
-        # scale = thetas[:, 0:1].expand(-1, 2)
-        # translations = thetas[:, 1:3]
-        # angle = torch.zeros_like(thetas[:, 0]) 
-        return affine_matrix
+        scale = thetas[:, 0:1].expand(-1, 2)
+        translations = thetas[:, 1:3]
+        angle = torch.zeros_like(thetas[:, 0]) 
     elif z_where_type == '5':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]

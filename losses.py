@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from util import incremental_average
+from models.air import ZLogProb
 
 BaseLoss = namedtuple('BaseLoss', ['overall_loss', 
                                    'neg_log_prior',
@@ -21,14 +22,16 @@ SequentialLoss = namedtuple('SequentialLoss', ['overall_loss',
                                                 'log_posterior'])
 
 def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
-                                    iteration=0, writer=None, writer_tag=None):
+                            iteration=0, writer=None, writer_tag=None, beta=1):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
         k (int): the number of samples to compute to compute the loss.
+        beta (float): beta term as in beta-VAE
     '''
     # Guide output
     guide_out = guide(imgs, k)
+    
     # wheater to mask current value based on prev.z_pres; more doc in model
     latents, log_post, bl_value, mask_prev, canvas, z_prior = (
         guide_out.z_smpl, guide_out.z_lprb, guide_out.baseline_value, 
@@ -44,6 +47,12 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         generative_model.tanh_norm_slope = \
                                     guide_out.decoder_param.slope[1][:, :, -1]
     
+    # multi by beta
+    # log_post_ = {}
+    # for i, z in enumerate(log_post._fields):
+    #     log_post_[z] = log_post[i] * beta
+    # log_post = ZLogProb(**log_post_)
+
     # Posterior log probability: [batch_size, max_strks] (before summing)
     log_post_z = torch.cat(
                         [prob.sum(-1, keepdim=True) for prob in log_post], 
@@ -59,61 +68,77 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                                                     canvas=canvas,
                                                     z_prior=z_prior)
 
+    # multiply by beta
+    # log_prior_ = {}
+    # for i, z in enumerate(log_prior._fields):
+    #     log_prior_[z] = log_prior[i] * beta
+    # log_prior = ZLogProb(**log_prior_)
+
     # z_pres_prior_lprb, z_what_post_lprb, z_where_post_lprb = log_prior
     log_prior_z = torch.cat(
                         [prob.sum(-1, keepdim=True) for prob in 
                             log_prior], dim=-1).sum(-1)
     generative_joint_log_prob = (log_likelihood + log_prior_z)
 
-    if loss_type == 'elbo':
-        # Compute ELBO: [bs, ]
-        elbo = - log_post_z + generative_joint_log_prob
-        assert elbo.shape == torch.Size([k, *imgs.shape[:-3]])
+    # Compute ELBO: [bs, ]
+    elbo = - log_post_z + generative_joint_log_prob
+    assert elbo.shape == torch.Size([k, *imgs.shape[:-3]])
 
-        # bl_target size: [batch_size, max_strks]
-        # sum_{i=t}^T [ KL[i] - log p(x | z) ] 
-        # =sum_{i=t}^T [ log_post - log_prior - log p(x | z)]
-        # for all steps up to (and including) the first z_pres=0
-        # (flip -> cumsum -> flip) so that it cumulate on to the left
-        bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
-                        for prob in log_post], dim=-1).sum(-1)
-        bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
-                        for prob in log_prior], dim=-1).sum(-1)
-            # this is like -ELBO
-        bl_target = bl_target - log_likelihood[:, :, None]
-        bl_target = (bl_target * mask_prev)
+    # bl_target size: [batch_size, max_strks]
+    # sum_{i=t}^T [ KL[i] - log p(x | z) ] 
+    # =sum_{i=t}^T [ log_post - log_prior - log p(x | z)]
+    # for all steps up to (and including) the first z_pres=0
+    # (flip -> cumsum -> flip) so that it cumulate on to the left
 
-        # The "REINFORCE"  term in the gradient is: [bs,]; 
-        # bl)target is the negative elbo
-        # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
-        # (bl_target - bl_value) * gradient[z_pres_likelihood]
-        neg_reinforce_term = (bl_target - bl_value).detach()*log_post.z_pres
-        neg_reinforce_term = neg_reinforce_term * mask_prev
-        neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
+    # multiply by beta
+    log_post_ = {}
+    for i, z in enumerate(log_post._fields):
+        log_post_[z] = log_post[i] * beta
+    log_post = ZLogProb(**log_post_)
+    
+    log_prior_ = {}
+    for i, z in enumerate(log_prior._fields):
+        log_prior_[z] = log_prior[i] * beta
+    log_prior = ZLogProb(**log_prior_)
+    
 
-        # [bs, ]
-        # Q: shouldn't reinforce be negative? 
-        # A: it's already negative from (KL - likelihood)
-        model_loss = neg_reinforce_term - elbo
+    bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+                    for prob in log_post], dim=-1).sum(-1)
+    bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+                    for prob in log_prior], dim=-1).sum(-1)
+    # this is like -ELBO
+    bl_target = bl_target - log_likelihood[:, :, None]
+    bl_target = (bl_target * mask_prev)
 
-        # MSE as baseline loss: [bs, n_strks]
-        # div by img_dim and clip grad works for independent prior
-        # but not for sequential
-        baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
-                            reduction='none')
-        baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
-        baseline_loss = baseline_loss.sum(2)
+    # The "REINFORCE"  term in the gradient is: [bs,]; 
+    # bl_target is the negative elbo
+    # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
+    # (bl_target - bl_value) * gradient[z_pres_likelihood]
+    neg_reinforce_term = (bl_target - bl_value).detach()*log_post.z_pres
+    neg_reinforce_term = neg_reinforce_term * mask_prev
+    neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
 
-        loss = model_loss + baseline_loss # [bs, ]
+    # [bs, ]
+    # Q: shouldn't reinforce be negative? 
+    # A: it's already negative from (KL - likelihood)
+    model_loss = neg_reinforce_term - elbo
 
-    else:
-        raise NotImplementedError 
+    # MSE as baseline loss: [bs, n_strks]
+    # div by img_dim and clip grad works for independent prior
+    # but not for sequential
+    baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
+                        reduction='none')
+    baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
+    baseline_loss = baseline_loss.sum(2)
+
+    loss = model_loss + baseline_loss # [bs, ]
 
     # Log the scale parameters
     if writer is not None:
         with torch.no_grad():
             if writer_tag is None:
                 writer_tag = ''
+            writer.add_scalar(f"{writer_tag}Train curves/beta", beta, iteration)
             # loss
             for n, log_prob in zip(log_post._fields, log_post):
                 writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
@@ -256,7 +281,8 @@ def get_loss_base(generative_model, guide, imgs, loss="nll"):
 def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
                                                     iteration=0, 
                                                     writer=None,
-                                                    writer_tag=None):
+                                                    writer_tag=None,
+                                                    beta=1):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -269,11 +295,17 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
     latents, log_post, bl_value, mask_prev, canvas, z_prior = (
         guide_out.z_smpl, guide_out.z_lprb, guide_out.baseline_value, 
         guide_out.mask_prev, guide_out.canvas, guide_out.z_prior)
-
+    
+    # multi by beta
+    log_post_ = {}
+    for i, z in enumerate(log_post._fields):
+        log_post_[z] = log_post[i] * beta
+    log_post = ZLogProb(**log_post_)
+    
     # Posterior log probability: [batch_size, max_strks] (before summing)
     log_post_z = torch.cat(
-                        [prob.sum(-1, keepdim=True) for prob in 
-                                            log_post], dim=-1).sum(-1)
+                        [prob.sum(-1, keepdim=True) for prob in log_post], 
+                        dim=-1).sum(-1)
 
     # Prior and Likelihood probability
     # Prior: [batch_size, max_strks]
@@ -286,53 +318,56 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
                                                 z_prior=z_prior,
                                                 )
 
+    # multiply by beta
+    log_prior_ = {}
+    for i, z in enumerate(log_prior._fields):
+        log_prior_[z] = log_prior[i] * beta
+    log_prior = ZLogProb(**log_prior_)
+
     # z_pres_prior_lprb, z_what_post_lprb, z_where_post_lprb = log_prior
     log_prior_z = torch.cat(
                         [prob.sum(-1, keepdim=True) for prob in 
                             log_prior], dim=-1).sum(-1)
     generative_joint_log_prob = (log_likelihood + log_prior_z)
 
-    if loss_type == 'elbo':
-        # Compute ELBO: [bs, ]
-        elbo = - log_post_z + generative_joint_log_prob
+    # Compute ELBO: [bs, ]
+    elbo = - log_post_z + generative_joint_log_prob
 
-        # bl_target size: [batch_size, max_strks]
-        # sum_{i=t}^T [ KL[i] - log p(x | z) ] 
-        # =sum_{i=t}^T [ log_post - log_prior - log p(x | z)]
-        # for all steps up to (and including) the first z_pres=0
-        # (flip -> cumsum -> flip) so that it cumulate on to the left
-        bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1
-                ).unsqueeze(-1) for prob in log_post], dim=-1).sum(-1)
-        bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1
-                ).unsqueeze(-1) for prob in log_prior], dim=-1).sum(-1)
-            # this is like -ELBO
-        bl_target = bl_target - log_likelihood[:, :, None]
-        bl_target = (bl_target * mask_prev)
+    # bl_target size: [batch_size, max_strks]
+    # sum_{i=t}^T [ KL[i] - log p(x | z) ] 
+    # =sum_{i=t}^T [ log_post - log_prior - log p(x | z)]
+    # for all steps up to (and including) the first z_pres=0
+    # (flip -> cumsum -> flip) so that it cumulate on to the left
+    bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1
+            ).unsqueeze(-1) for prob in log_post], dim=-1).sum(-1)
+    bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1
+            ).unsqueeze(-1) for prob in log_prior], dim=-1).sum(-1)
+        # this is like -ELBO
+    bl_target = bl_target - log_likelihood[:, :, None]
+    bl_target = (bl_target * mask_prev)
 
-        # The "REINFORCE"  term in the gradient is: [bs,]; 
-        # bl)target is the negative elbo
-        # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
-        # (bl_target - bl_value) * gradient[z_pres_likelihood]
-        neg_reinforce_term = (bl_target - bl_value).detach() * log_post.z_pres
-        neg_reinforce_term = neg_reinforce_term * mask_prev
-        neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
+    # The "REINFORCE"  term in the gradient is: [bs,]; 
+    # bl)target is the negative elbo
+    # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
+    # (bl_target - bl_value) * gradient[z_pres_likelihood]
+    neg_reinforce_term = (bl_target - bl_value).detach() * log_post.z_pres
+    neg_reinforce_term = neg_reinforce_term * mask_prev
+    neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
 
-        # [bs, ]
-        # Q: shouldn't reinforce be negative? 
-        # A: it's already negative from (KL - likelihood)
-        model_loss = neg_reinforce_term - elbo
+    # [bs, ]
+    # Q: shouldn't reinforce be negative? 
+    # A: it's already negative from (KL - likelihood)
+    model_loss = neg_reinforce_term - elbo
 
-        # MSE as baseline loss: [bs, n_strks]
-        # div by img_dim and clip grad works for independent prior
-        # but not for sequential
-        baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
-                            reduction='none')
-        baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
-        baseline_loss = baseline_loss.sum(2)
+    # MSE as baseline loss: [bs, n_strks]
+    # div by img_dim and clip grad works for independent prior
+    # but not for sequential
+    baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
+                        reduction='none')
+    baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
+    baseline_loss = baseline_loss.sum(2)
 
-        loss = model_loss + baseline_loss # [bs, ]
-    else:
-        raise NotImplementedError 
+    loss = model_loss + baseline_loss # [bs, ]
     
     if writer is not None:
         with torch.no_grad():

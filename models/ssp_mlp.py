@@ -107,10 +107,18 @@ class PresWhereMLP(nn.Module):
         self.constrain_param = constrain_param
 
         if z_where_type == '4_rotate':
+            # has minimal constrain
             self.seq.linear_modules[-1].weight.data.zero_()
             # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+
+            # AIR constrain
+            # self.seq.linear_modules[-1].weight.data.zero_()
+            # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+            # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+            #     [4, 1,0,0,0, 1,1,1,1], dtype=torch.float)) 
+            pass
         elif z_where_type == '3':
             self.seq.linear_modules[-1].weight.data.zero_()
             # [pres, loc:scale,shift, std:scale,shift
@@ -122,20 +130,16 @@ class PresWhereMLP(nn.Module):
     def forward(self, h):
         # todo make capacible with other z_where_types
         z = self.seq(h)
-
         z_pres_p = z[:, :1]
-        z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, max=1-(1e-12))
-
         z_where_std = z[:, self.z_where_dim+1:] # '4' 5:9; '3': 4:7
         z_where_loc = z[:, 1:self.z_where_dim+1] # '4' 1:5 ; '3' 1:4
-        if self.constrain_param:
-            z_where_loc = constrain_z_where(z_where_type=self.type,
-                                            z_where_loc=z_where_loc)
-        else:
-            z_where_loc = constrain_z_where(z_where_type=self.type,
-                                            z_where_loc=z_where_loc)
-        z_where_std = util.constrain_parameter(z_where_std, min=1e-6, max=1)
-        # z_where_std = util.constrain_parameter(z_where_std, min=0.01, max=1)
+        
+        z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, max=1-(1e-12))
+
+        # has minimal constrain
+        z_where_loc = constrain_z_where(z_where_type=self.type,
+                                        z_where_loc=z_where_loc)
+        z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
 
         return z_pres_p, z_where_loc, z_where_std
 
@@ -152,18 +156,14 @@ class WhatMLP(nn.Module):
     def forward(self, x):
         # out = constrain_parameter(self.mlp(x), min=.3, max=.7)
         out = self.mlp(x)
-        # z_what_loc = torch.sigmoid(out[:, 0:(int(self.out_dim/2))])
-        # z_what_scale = F.softplus(out[:, (int(self.out_dim/2)):]) + 1e-6
-
         z_what_loc = out[:, 0:(int(self.out_dim/2))]
-        if self.constrain_param:
-            z_what_loc = constrain_z_what(z_what_loc)
-        else:
-            z_what_loc = constrain_z_what(z_what_loc)
-
         z_what_std = out[:, (int(self.out_dim/2)):]
-        z_what_std = torch.sigmoid(z_what_std) + 1e-6
-        # z_what_std = util.constrain_parameter(z_what_std, min=0.01, max=1) 
+
+        z_what_loc = constrain_z_what(z_what_loc)
+
+        # has minimal constrain (no constrain previously)
+        z_what_std = torch.sigmoid(z_what_std) + 1e-9
+
         return z_what_loc, z_what_std
 
 
@@ -204,110 +204,3 @@ class WhatPriorMLP(WhatMLP):
                     [0] * pts_per_strk * 2 +
                     [-1.386] * pts_per_strk * 2, dtype=torch.float)) # sigmoid
                     # [-1.50777] * pts_per_strk * 2, dtype=torch.float)) # softplus
-
-# class WhatPriorMLP(nn.Module):
-#     def __init__(self, in_dim=256, pts_per_strk=5, hid_dim=256, num_layers=1,
-#     constrain_param=False):
-#         super().__init__()
-#         self.out_dim = pts_per_strk * 2 * 2
-#         self.constrain_param = constrain_param
-#         self.mlp = util.init_mlp(in_dim=in_dim, 
-#                             out_dim=self.out_dim,
-#                             hidden_dim=hid_dim,
-#                             num_layers=num_layers)
-#         self.mlp.linear_modules[-1].weight.data.zero_()
-#         self.mlp.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-#                     [0] * pts_per_strk * 2 +
-#                     [-1.386] * pts_per_strk * 2, dtype=torch.float)) # sigmoid
-#                     # [-1.50777] * pts_per_strk * 2, dtype=torch.float)) # softplus
-
-#     def forward(self, x):
-#         # out = constrain_parameter(self.mlp(x), min=.3, max=.7)
-#         out = self.mlp(x)
-#         # z_what_loc = torch.sigmoid(out[:, 0:(int(self.out_dim/2))])
-#         # z_what_scale = F.softplus(out[:, (int(self.out_dim/2)):]) + 1e-6
-#         if self.constrain_param:
-#             out = torch.sigmoid(out)
-#         z_what_loc = out[:, 0:(int(self.out_dim/2))]
-#         z_what_scale = out[:, (int(self.out_dim/2)):] + 1e-6
-#         return z_what_loc, z_what_scale
-# class PresWherePriorMLP(nn.Module):
-#     """
-#     Infer presence and location from RNN hidden state
-#     """
-#     def __init__(self, in_dim, z_where_type, z_where_dim, hidden_dim, num_layers,
-#         constrain_param=False):
-#         nn.Module.__init__(self)
-#         self.z_where_dim = z_where_dim
-#         self.type = z_where_type
-#         self.seq = util.init_mlp(in_dim=in_dim, 
-#                                  out_dim=1 + z_where_dim * 2,
-#                                  hidden_dim=hidden_dim,
-#                                  num_layers=num_layers)                
-#         self.constrain_param = constrain_param
-
-#         if z_where_type == '4_rotate':
-#             # Initialize the weight/bias with identity transformation
-#             self.seq.linear_modules[-1].weight.data.zero_()
-#             # [pres, scale_loc, shift_loc, rot_loc, scale_std, shift_std, rot_std
-#             #  10  , 4 for normal digits
-#             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-#                 [4, 4,0,0,0, 0,0,0,0], dtype=torch.float)) 
-#         elif z_where_type == '3':
-#             # Initialize the weight/bias with identity transformation
-#             self.seq.linear_modules[-1].weight.data.zero_()
-#             # [pres, scale_loc, shift_loc, scale_std, shift_std
-#             #  10  , 4 for normal digits
-#             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-#                 torch.tensor([4, 4,0,0, 0,0,0], dtype=torch.float))
-#         else:
-#             raise NotImplementedError
-
-#     def forward(self, h, gen=False):
-#         '''
-#         Args:
-#             gen: whether it's in Generation model or just evaluating priors.
-#         '''
-#         # todo make capacible with other z_where_types
-#         z = self.seq(h)
-
-#         z_pres_p = z[:, :1]
-#         z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, max=1-(1e-12))
-
-#         if self.type == '4_rotate':
-#             z_where_scale_loc = z[:, 1:2]
-#             z_where_shift_loc = z[:, 2:4]
-#             z_where_ang_loc = z[:, 4:5]
-#             z_where_std = z[:, 5:9]
-
-#             if self.constrain_param:
-#                 z_where_scale_loc = util.constrain_parameter(
-#                                         z_where_scale_loc, min=.3, max=1)
-#                 z_where_shift_loc = util.constrain_parameter(
-#                                         z_where_shift_loc, min=-.7, max=.7)
-#                 z_where_ang_loc = util.constrain_parameter(
-#                                         z_where_ang_loc, min=-45, max=45)
-#                 z_where_std = util.constrain_parameter(
-#                                         z_where_std, min=1e-6, max=1)
-
-#             z_where_loc = torch.cat([z_where_scale_loc, 
-#                                      z_where_shift_loc, 
-#                                      z_where_ang_loc], dim=1)
-#         elif self.type == '3':
-#             z_where_scale_loc = z[:, 1:2]
-#             z_where_shift_loc = z[:, 2:4]
-#             z_where_std = z[:, 4:7]
-
-#             if self.constrain_param:
-#                 z_where_scale_loc = util.constrain_parameter(
-#                                         z_where_scale_loc, min=.3, max=1)
-#                 z_where_shift_loc = util.constrain_parameter(
-#                                         z_where_shift_loc, min=-.7, max=.7)
-#                 z_where_std = util.constrain_parameter(
-#                                         z_where_std, min=1e-6, max=1)
-#             z_where_loc = torch.cat([z_where_scale_loc, 
-#                                             z_where_shift_loc], dim=1)
-#         else: 
-#             raise NotImplementedError
-
-#         return z_pres_p, z_where_loc, z_where_std

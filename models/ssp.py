@@ -1,9 +1,10 @@
 '''
-Attend, Infer, Repeat-style model
+Attend, Infer, Repeat-style Sequential Spline (SSP) model:
 Sequential model with spline z_what latent variables
 '''
 import pdb
 from collections import namedtuple
+import itertools
 
 import numpy as np
 from numpy import prod
@@ -16,7 +17,7 @@ from kornia.morphology import dilation, erosion
 
 import util
 from splinesketch.code.bezier import Bezier
-from models.sequential_mlp import *
+from models.ssp_mlp import *
 from models import air_mlp
 
 # latent variable tuple
@@ -35,29 +36,30 @@ GuideReturn = namedtuple('GuideReturn', ['z_smpl',
                                          'canvas',
                                          'residual',
                                          'z_prior',
-                                         'hidden_states'])
+                                         'hidden_states',])
 GenReturn = namedtuple('GenReturn', ['z_smpl',
                                      'canvas'])
 
 def schedule_model_parameters(gen, guide, iteration, loss, device):
     pass
 
-
 class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, pts_per_strk=5, res=28, z_where_type='3',
-                                                    execution_guided=False, 
-                                                    transform_z_what=True,
-                                                    input_dependent_param=True,
-                                                    prior_dist='Independent',
-                                                    hidden_dim=256,
-                                                    num_mlp_layers=2,
-                                                    maxnorm=True,
-                                                    strk_tanh=True,
-                                                    constrain_param=True,
-                                                    fixed_prior=True,
-                                                    spline_decoder=True,
-                                                    render_method='bounded',
-                                                    intermediate_likelihood=None,
+                                                execution_guided=False, 
+                                                transform_z_what=True,
+                                                input_dependent_param=True,
+                                                prior_dist='Independent',
+                                                hidden_dim=256,
+                                                num_mlp_layers=2,
+                                                maxnorm=True,
+                                                strk_tanh=True,
+                                                constrain_param=True,
+                                                fixed_prior=True,
+                                                spline_decoder=True,
+                                                render_method='bounded',
+                                                intermediate_likelihood=None,
+                                                dependent_prior=False,
+                                                feature_extractor_out_dim=256,
                                                     ):
         super().__init__()
         self.max_strks = max_strks
@@ -74,6 +76,7 @@ class GenerativeModel(nn.Module):
         if self.intr_ll is not None:
             assert self.execution_guided, "intermediate likelihood needs" + \
                                         "execution_guided = True"
+        self.dependent_prior = dependent_prior
 
         # Prior parameters
         self.prior_dist = prior_dist
@@ -102,7 +105,7 @@ class GenerativeModel(nn.Module):
                                 torch.ones(self.pts_per_strk, 2)/5, 
                                 requires_grad=True)
                 self.z_pres_prob = torch.nn.Parameter(
-                                torch.zeros(self.max_strks)+.5, 
+                                torch.zeros(self.max_strks)+.99, 
                                 requires_grad=True)
                 z_where_loc, z_where_std, self.z_where_dim = \
                                             util.init_z_where(self.z_where_type)
@@ -114,8 +117,12 @@ class GenerativeModel(nn.Module):
             self.h_dim = hidden_dim
             self.z_where_dim = util.init_z_where(self.z_where_type).dim
 
+            self.style_in_dim = self.h_dim
+            if self.dependent_prior: 
+                self.style_in_dim += feature_extractor_out_dim
+
             self.gen_style_mlp = PresWherePriorMLP(
-                                                in_dim=self.h_dim,
+                                                in_dim=self.style_in_dim,
                                                 z_where_type=z_where_type,
                                                 z_where_dim=self.z_where_dim,
                                                 hidden_dim=hidden_dim,
@@ -165,7 +172,7 @@ class GenerativeModel(nn.Module):
 
 
     def get_intr_ll_geo_p(self):
-        return util.constrain_parameter(self.intr_ll_geo_p, min=1e-6, 
+        return util.constrain_parameter(self.intr_ll_geo_p, min=.5, 
                                                             max=1.-1e-6)
     def get_sigma(self): 
         return util.constrain_parameter(self.sigma, min=.01, max=.04)
@@ -180,6 +187,9 @@ class GenerativeModel(nn.Module):
         
     def control_points_dist(self, h_c=None, bs=[1, 3]):
         '''(z_what Prior) Batched control points distribution
+        It can be | sequential where it has to have h_l, or
+                  | independent | with fixed prior, or
+                                | with learned prior
         Args: dist of
             bs: [ptcs, bs]
             h_c [ptcs, bs, h_dim]: hidden-states for computing sequential prior 
@@ -192,12 +202,11 @@ class GenerativeModel(nn.Module):
             loc = loc.view([*bs, self.pts_per_strk, 2])
             std = std.view([*bs, self.pts_per_strk, 2])
 
-            # if not self.constrain_param:
-            #     loc, std = constrain_z_what(loc, std)
 
         elif self.prior_dist == "Independent":
             loc, std = self.pts_loc.expand(*bs, self.pts_per_strk, 2), \
                        self.pts_std.expand(*bs, self.pts_per_strk, 2)
+
             if not self.fixed_prior:
                 loc = constrain_z_what(loc)
                 std = torch.sigmoid(std) + 1e-12
@@ -212,17 +221,26 @@ class GenerativeModel(nn.Module):
                 dist.batch_shape == torch.Size([*bs]))
         return dist
         
-    def presence_dist(self, h_l=None, bs=[1, 3]):
+    def presence_dist(self, h_l=None, bs=[1, 3], glmp_eb=None):
         '''(z_pres Prior) Batched presence distribution 
-        Args: dist of
+        It can be | sequential where it has to have h_l, or
+                  | independent | with fixed prior, or
+                                | with learned prior
+        On the other hand, it can either condition on z_what or not
+        Args:
             bs [n_particles, batch_size]
             h_l [n_particlestcs, bs, h_dim]: hidden-states for computing 
             sequential prior dist event_shape [max_strks]
+            glmp_eb [n_ptcs, bs, feature_dim]
         Return:
             dist: batch_shape=[ptcs, bs]; event_shape=[]
         '''
         if self.prior_dist == "Sequential" and h_l is not None:
-            z_pres_p, _, _ = self.gen_style_mlp(h_l.view(prod(bs), -1))
+            mlp_in = h_l.view(prod(bs), -1)
+            if glmp_eb is not None:
+                mlp_in = torch.cat([h_l.view(prod(bs), -1),
+                                       glmp_eb.view(prod(bs), -1)], dim=-1)
+            z_pres_p, _, _ = self.gen_style_mlp(mlp_in)
             z_pres_p = z_pres_p.squeeze(-1)
         elif self.prior_dist == "Independent":
             z_pres_p = self.z_pres_prob.expand(*bs)
@@ -240,34 +258,48 @@ class GenerativeModel(nn.Module):
 
         return dist
 
-    def transformation_dist(self, h_l=None, bs=[1, 3]):
-        '''(z_where Prior) Batched transformation distribution
+    def transformation_dist(self, h_l=None, bs=[1, 3], glmp_eb=None):
+        '''(z_where Prior) Batched transformation distribution.
+        It can be | sequential where it has to have h_l, or
+                  | independent | with fixed prior, or
+                                | with learned prior
+        On the other hand, it can either condition on z_what or not
         Args:
             bs [ptcs, bs]
             h_l [ptcs, bs, h_dim]: hidden-states for computing sequential prior 
             dist event_shape [max_strks, z_where_dim (3-5)]
+            glmp_eb [n_ptcs, bs, feature_dim]
+
         '''
         if self.prior_dist == "Sequential" and h_l is not None:
-            _, loc, std = self.gen_style_mlp(h_l.view(prod(bs), -1))
+            mlp_in = h_l.view(prod(bs), -1)
+            if glmp_eb is not None:
+                mlp_in = torch.cat([h_l.view(prod(bs), -1),
+                                       glmp_eb.view(prod(bs), -1)], dim=-1)
+            _, loc, std = self.gen_style_mlp(mlp_in)
             loc, std = loc.squeeze(-1), std.squeeze(-1)
             # if not self.constrain_param:
             #     loc, std = constrain_z_where(self.z_where_type, loc, std)
 
+            # added to keep prior from being to high (positive)
+            # so to use it to limit the number of steps.
+            # std = util.constrain_parameter(std, min=1e-3, max=1)
             self.z_where_loc = loc
             self.z_where_std = std
+
         elif self.prior_dist == "Independent":
             loc, std = self.z_where_loc.expand(*bs, self.z_where_dim), \
                        self.z_where_std.expand(*bs, self.z_where_dim)
             if not self.fixed_prior:
                 loc = constrain_z_where(z_where_type=self.z_where_type,
-                                        z_where_loc=loc.unsqueeze(0))
-                std = util.constrain_parameter(std, min=1e-6, max=1)
+                                        z_where_loc=loc.squeeze(0))
+                std = util.constrain_parameter(std, min=1e-6, max=1)      
         else:
             raise NotImplementedError
 
         dist = Independent(
                         Normal(loc.view(*bs, -1), std.view(*bs, -1)), 
-                                            reinterpreted_batch_ndims=1,)
+                        reinterpreted_batch_ndims=1,)
         assert (dist.event_shape == torch.Size([self.z_where_dim]) and 
                 dist.batch_shape == torch.Size([*bs]))
         return dist
@@ -291,7 +323,8 @@ class GenerativeModel(nn.Module):
                 imgs_dist_loc = canvas
             else:
                 # if intermediate likelihood, use all the canvas steps
-                imgs_dist_loc = canvas[:, 1:]
+                # From 1 to 5
+                imgs_dist_loc = canvas[:, :, 1:]
 
         ptcs, bs = shp = imgs_dist_loc.shape[:2]
         # imgs_dist_std = torch.ones_like(imgs_dist_loc) 
@@ -299,7 +332,7 @@ class GenerativeModel(nn.Module):
             imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1)
         else:
             # [bs, n_canvas, n_channel, res, res]
-            imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1)
+            imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1, 1)
 
         try:
             dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
@@ -331,18 +364,6 @@ class GenerativeModel(nn.Module):
         ptcs, bs, n_strks, pts_per_strk, _ = z_what.shape
         shp = z_pres.shape[:2]
         
-        # todo: transform the pts then render
-        # if self.transform_z_what:
-
-        #     z_where = z_where.view(bs*n_strks, -1)
-        #     z_what = z_what.view(bs*n_strks, 
-        #                                     self.pts_per_strk, 2)
-        #     transformed_z_what = util.transform_z_what(
-        #                             z_what=z_what, 
-        #                             z_where=z_where,
-        #                             z_where_type=self.z_where_type,
-        #                             res=self.res)
-
         # Get rendered image: [bs, n_strk, n_channel (1), H, W]
         if self.input_dependent_param:
             sigma = self.sigma
@@ -352,29 +373,24 @@ class GenerativeModel(nn.Module):
         if self.spline_decoder:
             # imgs [bs, n_strk, 1, res, res]
             try:
-                imgs = self.decoder(z_what.view(prod(shp), n_strks, pts_per_strk, 2), 
-                                            sigma=sigma.view(prod(shp), -1), 
-                                            keep_strk_dim=True)  
+                imgs = self.decoder(z_what.view(prod(shp), n_strks, 
+                                                pts_per_strk, 2), 
+                        sigma=sigma.view(prod(shp), -1), keep_strk_dim=True)  
             except:
                 breakpoint()
         else:
             imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))
-        try:
-            imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
-        except:
-            breakpoint()
+
+        imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
 
         # reshape image for further processing
         imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
-        if not self.transform_z_what:
-            # Get affine matrix: [bs * n_strk, 2, 3]
-            z_where_mtrx = util.get_affine_matrix_from_param(
-                                    z_where.view(ptcs*bs*n_strks, -1), 
-                                    self.z_where_type)
-            imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
-        # For small attention windows
-        # imgs = dilation(imgs, self.dilation_kernel, max_val=1.)
+        # Get affine matrix: [bs * n_strk, 2, 3]
+        z_where_mtrx = util.get_affine_matrix_from_param(
+                                z_where.view(ptcs*bs*n_strks, -1), 
+                                self.z_where_type)
+        imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
         # max normalized so each image has pixel values [0, 1]
         # size: [bs*n_strk, n_channel (1), H, W]
@@ -384,13 +400,13 @@ class GenerativeModel(nn.Module):
         # Change back to [ptcs*bs, n_strk, n_channel (1), H, W]
         imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
 
-        # Normalize per stroke
-        if self.input_dependent_param:
-            slope = self.tanh_norm_slope_stroke
-        else:
-            slope = self.get_tanh_slope_strk()
 
         if self.strk_tanh and self.spline_decoder:
+            # Normalize per stroke
+            if self.input_dependent_param:
+                slope = self.tanh_norm_slope_stroke
+            else:
+                slope = self.get_tanh_slope_strk()
             # output imgs: [prod(shp), n_strks, 1, res, res]
             imgs = util.normalize_pixel_values(imgs, 
                                             method=self.norm_pixel_method,
@@ -401,8 +417,6 @@ class GenerativeModel(nn.Module):
 
         if n_strks > 1:
             # only normalize again if there were more then 1 stroke
-            # if not self.spline_decoder:
-            #     slope = 0.6
             if self.input_dependent_param:
                 slope = self.tanh_norm_slope.squeeze().view(prod(shp))
             else:
@@ -419,31 +433,40 @@ class GenerativeModel(nn.Module):
     def renders_glimpses(self, z_what):
         '''Get glimpse reconstruction from z_what control points
         Args:
-            z_what: [bs, n_strk, n_strks, 2]
+            z_what: [ptcs, bs, n_strk, n_pts, 2]
         Return:
-            recon: [bs, n_strks, 1, res, res]
+            recon: [ptcs, bs, n_strks, 1, res, res]
         '''
-        assert len(z_what.shape) == 4, f"z_what shape: {z_what.shape} isn't right"
-        bs, n_strks, n_pts = z_what.shape[:3]
+        try:
+            assert len(z_what.shape) == 5
+        except:
+            print(f"z_what shape: {z_what.shape} isn't right")
+            breakpoint()
+        ptcs, bs, n_strks, n_pts = z_what.shape[:4]
         res = self.res
 
-        # Get rendered image: [bs, n_strk, n_channel (1), H, W]
+        # Get rendered image: [ptcs*bs, n_strk, n_channel (1), H, W]
         if self.spline_decoder:
-            recon = self.decoder(z_what, sigma=self.get_sigma(), keep_strk_dim=True)
+            recon = self.decoder(z_what.view(ptcs*bs, n_strks, n_pts, 2), 
+                                sigma=self.get_sigma().view(prod(ptcs*bs), -1), 
+                                keep_strk_dim=True)  
         else:
-            recon = self.decoder(z_what.view(bs, n_strks, -1))
-        recon = recon.view(bs*n_strks, 1, res, res)
+            recon = self.decoder(z_what.view(ptcs*bs, n_strks, -1))
+
         if self.maxnorm and self.spline_decoder:
-            recon = util.normalize_pixel_values(recon, method='maxnorm')
-        recon = recon.view(bs, n_strks, 1, res, res)
-        if self.input_dependent_param:
-            slope = self.tanh_norm_slope_stroke
-        else:
-            slope = self.get_tanh_slope_strk()
+            recon = util.normalize_pixel_values(
+                    recon.view(ptcs*bs*n_strks, 1, res, res), method='maxnorm')
+
+        recon = recon.view(ptcs, bs, n_strks, 1, res, res)
 
         if self.strk_tanh and self.spline_decoder:
+            if self.input_dependent_param:
+                slope = self.tanh_norm_slope_stroke
+            else:
+                slope = self.get_tanh_slope_strk()
             recon = util.normalize_pixel_values(recon, method='tanh', 
-                                                       slope=slope)
+                                                slope=slope
+                                        ).view(ptcs, bs, n_strks, 1, res, res)
         return recon
 
     def log_prob(self, latents, imgs, z_pres_mask, canvas, decoder_param=None,
@@ -461,6 +484,7 @@ class GenerativeModel(nn.Module):
                 sigma, slope: [bs, max_strks]
         Return:
             Joint log probability
+            log_likelihood [ptcs, bs]
         '''
         z_pres, z_what, z_where = latents
         ptcs, _ = shape = z_pres.shape[:2]
@@ -487,19 +511,25 @@ class GenerativeModel(nn.Module):
         # self.sigma = decoder_param.sigma
         # self.tanh_norm_slope_stroke = decoder_param.slope[0]
         if self.intr_ll:
-            imgs = imgs.unsqueeze(1).expand(*bs, *img_shape)
+            imgs = imgs.unsqueeze(2).expand(*bs, *img_shape)
         
         # if self.intr_ll: log_likelihood [bs, max_steps]
         # else: [bs]
         log_likelihood = self.img_dist(latents=latents, 
                                        canvas=canvas).log_prob(imgs)
 
+        # with multiple particles, we need to compute likelihood in shape
+        # [ptcs*bs, ...] and reshape back to [ptcs, bs], as different
+        # particles might have different number of steps
         if self.intr_ll is not None:
+            # reshape to [ptcs * bs, n_strks]
+            log_likelihood = log_likelihood.view(prod(shape), -1)
+            z_pres = z_pres.view(prod(shape), -1)
             num_steps = z_pres.sum(1)
             assert log_likelihood.shape == z_pres.shape
             log_likelihood = log_likelihood * z_pres
         if self.intr_ll == 'Mean':
-            log_likelihood_ = torch.zeros(shape).to(z_pres.device)
+            log_likelihood_ = torch.zeros(prod(shape)).to(z_pres.device)
             # Divide by the number of steps if the number is not 0
             log_likelihood_[num_steps != 0] = (
                                     log_likelihood[num_steps != 0] / 
@@ -507,8 +537,12 @@ class GenerativeModel(nn.Module):
                                 ).sum(1)
             log_likelihood = log_likelihood_
         elif self.intr_ll == 'Geom':
-            weights = util.geom_weights_from_z_pres(z_pres, p=self.get_intr_ll_geo_p())
-            log_likelihood = (log_likelihood * weights.exp()).sum(1)
+            weights = util.geom_weights_from_z_pres(z_pres, 
+                                                    p=self.get_intr_ll_geo_p())
+            log_likelihood = (log_likelihood * weights).sum(1)
+        if self.intr_ll is not None:
+            log_likelihood = log_likelihood.view(*shape)
+
 
         return log_prior, log_likelihood
 
@@ -761,6 +795,8 @@ class Guide(nn.Module):
                                                 constrain_param=True,
                                                 render_method='bounded',
                                                 intermediate_likelihood=None,
+                                                dependent_prior=False,
+                                                spline_decoder=True,
                                                 ):
         '''
         Args:
@@ -786,6 +822,8 @@ class Guide(nn.Module):
         if self.intr_ll is not None:
             assert execution_guided, "intermediate likelihood needs" + \
                                             "execution_guided = True"
+        self.dependent_prior = dependent_prior
+        self.spline_decoder = spline_decoder
 
         # Internal renderer
         self.execution_guided = execution_guided
@@ -813,7 +851,9 @@ class Guide(nn.Module):
                                                 maxnorm=maxnorm,
                                                 strk_tanh=strk_tanh,
                                                 constrain_param=constrain_param,
-                                                render_method=render_method
+                                                render_method=render_method,
+                                                dependent_prior=dependent_prior,
+                                                spline_decoder=spline_decoder
                                                 )
         # Inference networks
         # Module 1: front_cnn and style_rnn
@@ -878,23 +918,6 @@ class Guide(nn.Module):
             self.style_mlp_in = 'h+target'
         else:
             self.style_mlp_in = 'h+target'
-        '''
-            if (self.style_mlp_in == 'h+target' or 
-                self.style_mlp_in == 'h+residual'):
-                self.style_mlp_in_dim = (self.feature_extractor_out_dim + 
-                                            self.style_rnn_hid_dim)
-            else: raise NotImplementedError
-        elif self.prior_dist == 'Independent':
-            if self.target_in_pos == 'RNN':
-                self.style_mlp_in_dim = self.style_rnn_hid_dim
-            elif self.target_in_pos == 'MLP':
-                # If we only pass the target to the posterior inf net
-                self.style_mlp_in_dim = (self.feature_extractor_out_dim + 
-                                            self.style_rnn_hid_dim)
-            else: raise NotImplementedError
-        else:
-            raise NotImplementedError
-        '''
         self.style_mlp = PresWhereMLP(in_dim=self.style_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim,
@@ -1105,7 +1128,7 @@ class Guide(nn.Module):
                 canvas_step = self.internal_decoder.renders_imgs((
                                                 z_pres_smpl[:, :, t:t+1].clone(),
                                                 z_what_smpl[:, :, t:t+1],
-                                                z_where_smpl[:, :, t:t+1]))
+                                                z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
                     canvas = canvas + canvas_step
@@ -1114,25 +1137,34 @@ class Guide(nn.Module):
                                                 method='tanh', 
                                                 slope=add_slopes[:, :, t])
                 else:
-                    canvas_so_far = canvas[:, :, t] + canvas_step
+                    canvas_so_far = (canvas[:, :, t:t+1] +
+                                     canvas_step.unsqueeze(2))
                     canvas[:, :, t+1] = util.normalize_pixel_values(
-                                                            canvas_so_far, 
+                                                canvas_so_far, 
                                                 method='tanh',
-                                                slope=add_slopes[:, :, t:t+1])
+                                                slope=add_slopes[:, :, t:t+1]
+                                                ).squeeze(2)
                 if self.exec_guid_type == "residual":
                     # compute the residual
                     residual = torch.clamp(imgs - canvas_so_far, min=0.)
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
+                glmp_eb = None
+                if self.dependent_prior:
+                    glmps = self.internal_decoder.renders_glimpses(
+                                        state.z_what.unsqueeze(2)
+                                        ).view(prod(shp), *img_dim)
+                    glmp_eb = self.img_feature_extractor(glmps).view(*shp, -1)
+                    
                 h_l, h_c = state.h_l, state.h_c
                 h_ls[:, :, t], h_cs[:, :, t] = h_l, h_c
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(
-                                        h_l, [*shp]
+                                        h_l, [*shp], glmp_eb
                                         ).log_prob(z_pres_smpl[:, :, t].clone()
                                         ) * mask_prev[:, :, t].clone()
                 z_where_prir[:, :, t] = self.internal_decoder.transformation_dist(
-                                        h_l.clone(), [*shp]
+                                        h_l.clone(), [*shp], glmp_eb
                                         ).log_prob(z_where_smpl[:, :, t].clone()
                                         ) * z_pres_smpl[:, :, t].clone()
                 z_what_prir[:, :, t] = self.internal_decoder.control_points_dist(
@@ -1169,6 +1201,7 @@ class Guide(nn.Module):
                            )
         return data
         
+    # @profile
     def inference_step(self, p_state, imgs, canvas, residual):
 
         '''Given previous (initial) state and input image, predict the current
@@ -1329,6 +1362,7 @@ class Guide(nn.Module):
         return (style_rnn_in.view(*shp, -1), h_l.view(*shp, -1),
                 style_mlp_in.view(*shp, -1))
 
+    # @profile
     def get_z_l(self, style_mlp_in, p_state):
         """Predict z_pres and z_where from `style_mlp_in`
         Args:
@@ -1476,6 +1510,7 @@ class Guide(nn.Module):
         # bs here is actually ptcs * bs
         ptcs, bs = shp = zwhat_mlp_in.shape[:2]
         z_what_loc, z_what_std = self.z_what_mlp(zwhat_mlp_in.view(prod(shp), -1))
+
 
         # [bs, pts_per_strk, 2]
         z_what_loc = z_what_loc.view([*(shp), self.pts_per_strk, 2])

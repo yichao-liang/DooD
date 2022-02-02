@@ -27,8 +27,6 @@ class PresWhereMLP(nn.Module):
         z_pres_p = torch.sigmoid(z[:, :1])
         # z_pres_p = util.constrain_parameter(z[:, :1], min=0, max=1.) + 1e-6
         if self.type == '3':
-            # z_where_loc_scale = z[:, 1:2]
-            # z_where_loc_shift = z[:, 2:4]
             z_where_loc = z[:, 1:4]
             z_where_scale = F.softplus(z[:, 4:])
         else: 
@@ -46,14 +44,9 @@ class WhatMLP(nn.Module):
                                 hidden_dim=hid_dim,
                                 num_layers=num_layers)
     def forward(self, x):
-        # out = constrain_parameter(self.mlp(x), min=.3, max=.7)
         out = self.mlp(x)
         z_what_loc = F.tanh(out[:, 0:self.z_what_dim])
         z_what_scale = F.softplus(out[:, self.z_what_dim:]) + 1e-6
-        # out = torch.cat([z_what_loc, z_what_scale])
-        # out = torch.sigmoid(out)
-        # z_what_loc = out[:, 0:(int(self.out_dim/2))]
-        # z_what_scale = out[:, (int(self.out_dim/2)):] + 1e-6
         return z_what_loc, z_what_scale
 
 class Decoder(nn.Module):
@@ -74,6 +67,11 @@ class Decoder(nn.Module):
     
     def forward(self, z_what):
         out = self.net(z_what)
-        out_loc = torch.sigmoid(out + self.bias
+        # the one that works:
+        # out_loc = torch.sigmoid(out + self.bias
+        #                                 ).view(*z_what.shape[:2], *self.img_dim)
+
+        # exp: unnormalized
+        out_loc = F.softplus(out + self.bias
                                         ).view(*z_what.shape[:2], *self.img_dim)
         return out_loc

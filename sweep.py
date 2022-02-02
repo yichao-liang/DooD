@@ -3,9 +3,8 @@ Train all the selected models
 Test them on the test suite
 Output the results in a pdf
 '''
-from itertools import combinations
 import subprocess
-import numpy as np
+import argparse
 
 import util
 
@@ -21,13 +20,13 @@ Our model = AIR + sequential prior
 '''
 full_config = [
                 'sequential_prior',  
+                'spline_latent',  
                 'canvas',  
                 'seperated_z',
-                'spline_latent',  
             ]
 
 models_2_cmd = {
-    'VAE': [
+    'VAE': [ 
         '--model-type', 'VAE',
         '--lr', '1e-3',
     ],
@@ -53,6 +52,16 @@ models_2_cmd = {
     ],
     'MWS': [
         '--model-type', 'MWS',
+    ],
+    'AIR+seq_prir': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Sequential',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '3',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN'
     ]
 }
 
@@ -88,9 +97,9 @@ def args_from_kw_list(kw_config):
 def ablation_args():
     all_args = {}
     for ablation in full_config:
-        if ablation == 'spline_latent':
+        # if ablation == 'spline_latent':
             # skipping Full-spline_latent b/c the model didn't work
-            continue
+            # continue
         exp_config = full_config.copy()
         exp_config.remove(ablation)
         args = args_from_kw_list(exp_config)
@@ -100,53 +109,88 @@ def ablation_args():
         all_args[f"Full-{ablation}"] = args
 
     return all_args
-    
+
+def get_args_parser():
+    parser = argparse.ArgumentParser(formatter_class=
+                                        argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--seed", default=0)
+    parser.add_argument("--beta", default=1, help="beta term as in beta-VAE")
+    parser.add_argument("--final_bern", default=.5, type=float, 
+                        help="Minimal value for the z_pres Bern param")
+    parser.add_argument("--final_beta", default=1, type=float, 
+                        help="Minimal value for the beta")
+    return parser
+
 if __name__ == '__main__':
+    parser = get_args_parser()
+    run_args = parser.parse_args()
+
     all_exp_args = {}
 
     # VAE and AIR 
     # all_exp_args['VAE'] = models_2_cmd['VAE']
-    all_exp_args['AIR10'] = models_2_cmd['AIR']
+    # all_exp_args['AIR10'] = models_2_cmd['AIR']
 
-    # Full model
+    # # Full model
     all_exp_args['Full'] = args_from_kw_list(full_config) + [
                                                         '--constrain_sample']
 
-    # Full - spline
-    all_exp_args['Full-spline_decoder'] = [
-                                    '--model-type', 'Sequential',
-                                    '--prior_dist', 'Sequential',
-                                    '--strokes_per_img', '4',
-                                    '--lr', '1e-4', '--bl_lr', '1e-3',
-                                    '--z_where_type', '3',
-                                    '--execution_guided',
-                                    '--z_what_in_pos', 'z_what_rnn',
-                                    '--target_in_pos', 'MLP',
-                                    '--no_spline_renderer']
+    # # Full - spline
+    # all_exp_args['Full-spline_decoder'] = [
+    #                                 '--model-type', 'Sequential',
+    #                                 '--prior_dist', 'Sequential',
+    #                                 '--strokes_per_img', '4',
+    #                                 '--lr', '1e-4', '--bl_lr', '1e-3',
+    #                                 '--z_where_type', '3',
+    #                                 '--execution_guided',
+    #                                 '--z_what_in_pos', 'z_what_rnn',
+    #                                 '--target_in_pos', 'MLP',
+    #                                 '--no_spline_renderer']
 
-    # (Full minus 3 features except spline_latent)
-    all_exp_args['AIR+spline_latent'] = (args_from_kw_list(['spline_latent']) + 
-                                            ['--no_maxnorm', 
-                                             '--no_strk_tanh',
-                                             '--target_in_pos', 'RNN',
-                                             '--z_where_type', '3',
-                                             '--constrain_sample'])
+    # # (Full minus 3 features except spline_latent)
+    # all_exp_args['AIR+spline_latent'] = (args_from_kw_list(['spline_latent']) + 
+    #                                         ['--no_maxnorm', 
+    #                                          '--no_strk_tanh',
+    #                                          '--target_in_pos', 'RNN',
+    #                                          '--z_where_type', '3',
+    #                                          '--constrain_sample'])
 
-    # Full model ablation (Full minus 1 feature)
-    all_ablations = ablation_args()
-    all_exp_args.update(all_ablations)
-    all_exp_args['Full-sequential_prior'] = all_exp_args['Full-sequential_prior'
-                                            ] + ['--constrain_sample']
+    # # # Full model ablation (Full minus 1 feature)
+    # all_ablations = ablation_args()
+    # all_exp_args.update(all_ablations)
+    # all_exp_args['Full-sequential_prior'] = all_exp_args['Full-sequential_prior'
+    #                                         ] + ['--constrain_sample']
 
-    # MWS
-    all_exp_args['MWS'] = models_2_cmd['MWS']
+    # # # MWS
+    # all_exp_args['MWS'] = models_2_cmd['MWS']
 
+    # Not in final list: AIR+seq_prir
+    # all_exp_args['AIR+seq_prir'] = models_2_cmd['AIR+seq_prir']
+    
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
-        args.extend(['--save_model_name', n])
+        args.remove('--execution_guided')
+        args.extend(['--save_model_name', 
+                    # n + f'-dp-{run_args.seed}',
+                    #  n + f'-anl{run_args.final_val}-{run_args.seed}',
+                    #  n + f'-β1-{run_args.final_beta}-{run_args.seed}',
+                     n + f'-seq_pri_fixed-β1-{run_args.final_beta}-RE-an_lr-{run_args.seed}',
+
+                    '--seed', f'{run_args.seed}',
+                    # '--final_bern', f'{run_args.final_bern}',
+                    "--increase_beta",
+                    '--final_beta', f'{run_args.final_beta}',
+                    '--prior', "Independent",
+                    # '--dependent_prior',
+                    # '--no_maxnorm',
+                    # '--no_strk_tanh',
+                    # '--no_spline_renderer',
+                    '--num-iterations', '1000000',
+                    # '--continue_training',
+                    "--anneal_lr"
+                    ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")
-
         # print(f"==> Begin evaluating the '{n}' model")
         # ckpt_path = util.get_checkpoint_path_from_path_base(n, -1)
         # subprocess.run(['python', 'test.py', '--save_model_name', n])

@@ -88,10 +88,11 @@ def plot_reconstructions(imgs:torch.Tensor,
            generative_model.input_dependent_param:
             generative_model.sigma = guide_out.decoder_param.sigma[0]
             generative_model.tanh_norm_slope_stroke = \
-                                    guide_out.decoder_param.slope[0][0]
+                                    guide_out.decoder_param.slope[0]
             generative_model.tanh_norm_slope = \
                                     guide_out.decoder_param.slope[1][:, :, -1]
-        recon_glimpse = generative_model.renders_glimpses(latent.z_what[0])
+        recon_glimpse = generative_model.renders_glimpses(latent.z_what)
+        recon_glimpse = recon_glimpse.squeeze(0)
         if args.execution_guided:
             if guide.intr_ll is not None:
                 recon_img = guide_out.canvas[0, :, -1].expand(n,3,res,res)
@@ -154,11 +155,11 @@ def plot_reconstructions(imgs:torch.Tensor,
         if args.execution_guided:
             if args.exec_guid_type == 'canvas':
                 if guide.intr_ll is not None:
-                    cum_canvas = display_transform(guide_out.canvas[:, -1].expand(n, 3,
-                                                                    res,res))
+                    cum_canvas = display_transform(guide_out.canvas[0, :, -1
+                                                    ].expand(n, 3, res,res))
                 else:
-                    cum_canvas = display_transform(guide_out.canvas[0].expand(n, 3, res, 
-                                                                    res))
+                    cum_canvas = display_transform(guide_out.canvas[0].expand(
+                                                            n, 3, res, res))
             elif args.exec_guid_type == 'residual':
                 # just reuse the name cum_canvas; this is actually just the
                 # final residual

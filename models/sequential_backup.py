@@ -15,7 +15,7 @@ from kornia.morphology import dilation, erosion
 
 import util
 from splinesketch.code.bezier import Bezier
-from models.sequential_mlp import *
+from handwritten_characters.models.ssp_mlp import *
 from models import air_mlp
 
 # latent variable tuple
