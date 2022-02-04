@@ -169,22 +169,23 @@ if __name__ == '__main__':
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
-        args.remove('--execution_guided')
         args.extend(['--save_model_name', 
                     # n + f'-dp-{run_args.seed}',
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
-                    #  n + f'-β1-{run_args.final_beta}-{run_args.seed}',
-                     n + f'-seq_pri_fixed-β1-{run_args.final_beta}-RE-an_lr-{run_args.seed}',
+                    #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
+                    #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
+                     n + f'-seq_pri_fixed-rsd-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',
+                    # '--beta', f'{run_args.beta}',
                     "--increase_beta",
                     '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
+                    '--exec_guid_type', 'residual',
                     # '--dependent_prior',
                     # '--no_maxnorm',
                     # '--no_strk_tanh',
-                    # '--no_spline_renderer',
                     '--num-iterations', '1000000',
                     # '--continue_training',
                     "--anneal_lr"

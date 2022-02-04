@@ -880,44 +880,41 @@ class Guide(nn.Module):
         # Style RNN:
         #   (image encoding; prev_z) -> `rnn_hid_dim`-dim hidden state
         self.style_rnn_in_dim = self.z_pres_dim + self.z_where_dim
-        # Target image
-        # if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
-        #     self.style_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN':
-            self.style_rnn_in_dim += self.feature_extractor_out_dim
-        # Canvas
-        if self.execution_guided:
-            self.style_rnn_in_dim += self.feature_extractor_out_dim
+        self.style_rnn_in = []
+
         # z_what
         if self.z_what_in_pos == 'z_where_rnn':
+            self.style_rnn_in.append('z_what')
             self.style_rnn_in_dim += self.z_what_dim
-        # if (self.prior_dist == "Independent" and self.target_in_pos == "RNN" 
-        #     and self.execution_guided):
-        #     self.style_rnn_in_dim = (self.feature_extractor_out_dim*2 + 
-        #                                 self.z_pres_dim + 
-        #                                 self.z_where_dim)
-        # else:
-        #     self.style_rnn_in_dim = (self.feature_extractor_out_dim + 
-        #                                 self.z_pres_dim + 
-        #                                 self.z_where_dim)
+        # Canvas: only default in full; adding the target, residual would 
+        # make the model not able to generate from prior
+        if self.execution_guided:
+            self.style_rnn_in.append('canvas')
+            self.style_rnn_in_dim += self.feature_extractor_out_dim
+        if self.target_in_pos == 'RNN':
+            self.style_rnn_in.append('target')
+            self.style_rnn_in_dim += self.feature_extractor_out_dim
+        if self.target_in_pos == 'RNN' and self.execution_guided and \
+           self.exec_guid_type == 'residual':
+            self.style_rnn_in.append('residual')
+            self.style_rnn_in_dim += self.feature_extractor_out_dim
         
-        self.style_rnn_hid_dim = 256
+        self.style_rnn_hid_dim = hidden_dim
         self.style_rnn = torch.nn.GRUCell(self.style_rnn_in_dim, 
                                           self.style_rnn_hid_dim)
 
-        # style_mlp:
+        # Style_mlp:
         #   rnn hidden state -> (z_pres, z_where dist parameters)
+        self.style_mlp_in = ['h']
         self.style_mlp_in_dim = self.style_rnn_hid_dim
-        # if (self.prior_dist == 'Sequential' or
-        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')
-        #    ):
         if self.target_in_pos == 'MLP':
-            # Add target_img dim
+            self.style_mlp_in.append('target')
             self.style_mlp_in_dim += self.feature_extractor_out_dim
-        if self.prior_dist == 'Sequential':
-            self.style_mlp_in = 'h+target'
-        else:
-            self.style_mlp_in = 'h+target'
+        if self.target_in_pos == 'MLP' and\
+            self.execution_guided and  self.exec_guid_type == 'residual':
+            self.style_mlp_in.append('residual')
+            self.style_mlp_in_dim += self.feature_extractor_out_dim
+
         self.style_mlp = PresWhereMLP(in_dim=self.style_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim,
@@ -942,44 +939,37 @@ class Guide(nn.Module):
         # air-like
         #   rnn: prev.z_what + target
         #   mlp: h
-        self.z_what_rnn_in_dim = self.z_what_dim
+        self.z_what_rnn_in_dim = 0
+        self.z_what_rnn_in = []
 
+        if self.z_what_in_pos == 'z_what_rnn':
+            self.z_what_rnn_in.append('z_what')
+            self.z_what_rnn_in_dim += self.z_what_dim
         # Target (transformed)
-        # if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
+        if self.execution_guided:
+            self.z_what_rnn_in.append('canvas')
+            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == "RNN":
+            self.z_what_rnn_in.append('target')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-
-        # Canvas
-        # If prior_dist == 'Independent' and self.execution_guided then the 
-        # canvas is only used for the style net and not z_what net.
-        if self.prior_dist == 'Sequential' and self.execution_guided:
+        if self.target_in_pos == 'RNN' and self.execution_guided and \
+           self.exec_guid_type == 'residual':
+            self.z_what_rnn_in.append('residual')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-
-        # minus z_what
-        if self.z_what_in_pos == 'z_where_rnn':
-            self.z_what_rnn_in_dim -= self.z_what_dim
-        # self.z_what_rnn_in_dim = self.features_extractor_out_dim
-        
-        # if self.execution_guided and self.target_in_pos == 'RNN':
-        #     self.z_what_rnn_in_dim = (self.feature_extractor_out_dim*2 +
-        #                               self.z_what_dim)
-        # else:
-        #     self.z_what_rnn_in_dim = (self.feature_extractor_out_dim +
-        #                               self.z_what_dim)
-                        
-        # if self.z_what_in_pos == 'z_where_rnn':
-        #     self.z_what_rnn_in_dim -= self.z_what_dim
 
         self.z_what_rnn_hid_dim = hidden_dim
         self.z_what_rnn = torch.nn.GRUCell(self.z_what_rnn_in_dim, 
                                             self.z_what_rnn_hid_dim)
         
-        # z_what MLP
+        # z_what/content MLP
+        self.zwhat_mlp_in = ['h']
         self.what_mlp_in_dim = self.z_what_rnn_hid_dim
-
-        # if (self.prior_dist == 'Sequential' or 
-        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')):
         if self.target_in_pos == 'MLP':
+            self.zwhat_mlp_in.append('target')
+            self.what_mlp_in_dim += self.feature_extractor_out_dim
+        if self.target_in_pos == 'MLP' and \
+           self.execution_guided and self.exec_guid_type == 'residual':
+            self.zwhat_mlp_in.append('residual')
             self.what_mlp_in_dim += self.feature_extractor_out_dim
         self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
@@ -1210,25 +1200,29 @@ class Guide(nn.Module):
             p_state::GuideState
             imgs [ptcs, bs, 1, res, res]
             canvas [ptcs, bs, 1, res, res] or None
-            residual [ptcs, bs, 1, res, res]
+            residual [ptcs, bs, 1, res, res] or None
         '''
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
 
         # embed image
-        try:
-            img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim
+        img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim
                                                             )).view(*shp, -1)
-        except:
-            breakpoint()
-        canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), *img_dim
-                                                            )).view(*shp, -1) \
-                                                if canvas is not None else None
+        if canvas is not None:
+            canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), 
+                                                    *img_dim)).view(*shp, -1)
+
+            if self.exec_guid_type == 'residual':
+                residual_embed = self.img_feature_extractor(residual.view(prod(
+                                                shp), *img_dim)).view(*shp, -1)
+            else: residual_embed = None
+        else: canvas_embed = None
+
 
         # Predict z_pres, z_where from target and canvas
         style_rnn_in, h_l, style_mlp_in = self.get_style_mlp_in(img_embed, 
                                                                 canvas_embed, 
-                                                                residual, 
+                                                                residual_embed, 
                                                                 p_state)
         (z_pres, 
         z_where, 
@@ -1250,9 +1244,10 @@ class Guide(nn.Module):
                                             z_where_type=self.z_where_type))
         
         zwhat_mlp_in, h_c = self.get_zwhat_mlp_in(
-                    trans_imgs.view(*shp, *img_dim), 
-                    canvas_embed.view(*shp, -1) if canvas is not None else None, 
-                    p_state)
+                                            trans_imgs.view(*shp, *img_dim), 
+                                            canvas_embed,
+                                            residual_embed, 
+                                            p_state)
         z_what, z_what_lprb, z_what_pms = self.get_z_c(zwhat_mlp_in, 
                                                        p_state, 
                                                        z_pres)
@@ -1305,11 +1300,13 @@ class Guide(nn.Module):
         }
         return out
 
-    def get_style_mlp_in(self, img_embed, canvas_embed, residual, p_state):
+    def get_style_mlp_in(self, img_embed, canvas_embed, residual_embed, 
+                         p_state):
         '''Get the input for `style_mlp` from the current img and p_state
         Args:
             img_embed [ptcs, bs, embed_dim]
             canvas_embed [ptcs, bs, embed_dim] if self.execution_guided or None 
+            residual_embed [ptcs, bs, embed_dim]
             p_state GuideState
         Return:
             style_mlp_in [ptcs, bs, style_mlp_in_dim]
@@ -1317,45 +1314,25 @@ class Guide(nn.Module):
             style_rnn_in [ptcs, bs, style_rnn_in_dim]
         '''
         ptcs, bs = shp = img_embed.shape[:2]
-        if self.exec_guid_type == 'residual':
-            residual_embed = self.img_feature_extractor(residual.view(prod(shp), 
-                                    1, self.res, self.res)).view(prod(shp), -1)
-
         # Style RNN input
         rnn_in = [p_state.z_pres.view(prod(shp), -1), 
                   p_state.z_where.view(prod(shp), -1)]
-        # z_what
-        if self.z_what_in_pos == 'z_where_rnn':
+        if 'z_what' in self.style_rnn_in:
             rnn_in.append(p_state.z_what.view(prod(shp), -1))
-            
-        # canvas
-        if (self.execution_guided and self.exec_guid_type == 'canvas'):
+        if 'canvas' in self.style_rnn_in:
             rnn_in.append(canvas_embed.view(prod(shp), -1)) 
-
-        # target / residual
-        if (self.target_in_pos == 'RNN' and
-            self.execution_guided and self.exec_guid_type == 'residual'):
-            rnn_in.append(residual_embed.view(prod(shp), -1))
-        elif self.target_in_pos == 'RNN':
+        if 'target' in self.style_rnn_in:
             rnn_in.append(img_embed.view(prod(shp), -1))
-
-        # if (self.prior_dist == 'Independent' and self.target_in_pos == 'RNN' and
-        #     self.execution_guided and self.exec_guid_type == 'residual'):
-        #     rnn_in.append(residual_embed)
-        # elif (self.prior_dist == 'Independent' and self.target_in_pos == 'RNN' and
-        #     not self.execution_guided):
-        #     rnn_in.append(img_embed)
-        
+        if 'residual' in self.style_rnn_in:
+            rnn_in.append(residual_embed.view(prod(shp), -1))
         style_rnn_in = torch.cat(rnn_in, dim=1)
         h_l = self.style_rnn(style_rnn_in, p_state.h_l.view(prod(shp), -1))
 
         # Style MLP input
         mlp_in = [h_l]
-
-        # target / residual
-        if (self.target_in_pos == "MLP" and self.style_mlp_in == 'h+target'):
+        if 'target' in self.style_mlp_in:
             mlp_in.append(img_embed.view(prod(shp), -1))
-        elif self.target_in_pos == "MLP" and self.style_mlp_in == 'h+residual':
+        if 'residual' in self.style_mlp_in:
             mlp_in.append(residual_embed.view(prod(shp), -1))
         style_mlp_in = torch.cat(mlp_in, dim=1)
 
@@ -1446,11 +1423,13 @@ class Guide(nn.Module):
         return (z_pres, z_where, z_pres_lprb, z_where_lprb, z_pres_p, 
                 (z_where_loc, z_where_scale), sigma, strk_slope, add_slope)
 
-    def get_zwhat_mlp_in(self, trans_imgs, canvas_embed, p_state):
+    def get_zwhat_mlp_in(self, trans_imgs, canvas_embed, residual_embed, 
+                                                            p_state):
         '''Get the input for the zwhat_mlp
         Args:
             trans_imgs: [ptcs, bs, *img_dim]
             canvas_embed: [ptcs, bs, em_dim]
+            residual_embed: [ptcs, bs, em_dim]
             p_state
         Return:
             z_what_mlp_in: [ptcs, bs, in_dim]
@@ -1471,26 +1450,23 @@ class Guide(nn.Module):
             
         # z_what RNN input
         z_what_rnn_in = []
-        # prev.z_what
-        if self.z_what_in_pos == 'z_what_rnn':
+        if 'z_what' in self.z_what_rnn_in:
             z_what_rnn_in.append(p_state.z_what.view(prod(shp), -1))
-
-        # Canvas
-        if (self.prior_dist == 'Sequential' and self.execution_guided and 
-            self.exec_guid_type == 'canvas'):
+        if 'canvas' in self.z_what_rnn_in:
             z_what_rnn_in.append(canvas_embed.view(prod(shp), -1))
-        
-        # Target
-        if self.target_in_pos == 'RNN':
+        if 'target' in self.z_what_rnn_in:
             z_what_rnn_in.append(trans_embed.view(prod(shp), -1))
-        
+        if 'residual' in self.z_what_rnn_in:
+            z_what_rnn_in.append(residual_embed.view(prod(shp), -1))
         z_what_rnn_in = torch.cat(z_what_rnn_in, dim=1)
         h_c = self.z_what_rnn(z_what_rnn_in, p_state.h_c.view(prod(shp), -1))
 
         # z_what MLP input
         z_what_mlp_in = [h_c]
-        if self.target_in_pos == 'MLP':
+        if 'target' in self.zwhat_mlp_in:
             z_what_mlp_in.append(trans_embed.view(prod(shp), -1))
+        if 'residual' in self.zwhat_mlp_in:
+            z_what_mlp_in.append(residual_embed.view(prod(shp), -1))
         z_what_mlp_in = torch.cat(z_what_mlp_in, dim=1)
 
         return z_what_mlp_in.view(*shp, -1), h_c.view(*shp, -1)

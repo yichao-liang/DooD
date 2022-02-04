@@ -163,7 +163,7 @@ def plot_reconstructions(imgs:torch.Tensor,
             elif args.exec_guid_type == 'residual':
                 # just reuse the name cum_canvas; this is actually just the
                 # final residual
-                cum_canvas = display_transform(guide_out.residual.expand(n, 3, res, res))
+                cum_canvas = display_transform(guide_out.residual[0].expand(n, 3, res, res))
             else: raise NotImplementedError
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)

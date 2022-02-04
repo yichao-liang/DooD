@@ -91,15 +91,17 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     # (flip -> cumsum -> flip) so that it cumulate on to the left
 
     # multiply by beta
-    log_post_ = {}
-    for i, z in enumerate(log_post._fields):
-        log_post_[z] = log_post[i] * beta
-    log_post = ZLogProb(**log_post_)
+    # log_post_ = {}
+    # for i, z in enumerate(log_post._fields):
+    #     log_post_[z] = log_post[i] * beta
+    # log_post = ZLogProb(**log_post_)
     
-    log_prior_ = {}
-    for i, z in enumerate(log_prior._fields):
-        log_prior_[z] = log_prior[i] * beta
-    log_prior = ZLogProb(**log_prior_)
+    # log_prior_ = {}
+    # for i, z in enumerate(log_prior._fields):
+    #     log_prior_[z] = log_prior[i] * beta
+    # log_prior = ZLogProb(**log_prior_)
+    # divide by beta
+    log_likelihood = log_likelihood / beta
     
 
     bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
