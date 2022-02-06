@@ -393,7 +393,7 @@ class GenerativeModel(nn.Module):
         imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
         # max normalized so each image has pixel values [0, 1]
-        # size: [bs*n_strk, n_channel (1), H, W]
+        # size: [ptcs*bs*n_strk, n_channel (1), H, W]
         if self.maxnorm and self.spline_decoder:
             imgs = util.normalize_pixel_values(imgs, method="maxnorm",)
 
@@ -412,7 +412,13 @@ class GenerativeModel(nn.Module):
                                             method=self.norm_pixel_method,
                                             slope=slope.view(prod(shp), -1))
 
-        # Change to [bs, n_channel (1), H, W] through `sum`
+        # maxnorm again such that the max value is one
+        if self.maxnorm and self.spline_decoder:
+            imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
+            imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
+            imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
+
+        # Change to [ptcs*bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(1) 
 
         if n_strks > 1:
@@ -423,7 +429,9 @@ class GenerativeModel(nn.Module):
                 slope = self.get_tanh_slope().view(prod(shp))
             imgs = util.normalize_pixel_values(imgs, 
                             method=self.norm_pixel_method,
-                            slope=slope).view(ptcs, bs, 1, self.res, self.res)
+                            slope=slope)
+                            
+        imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
         
         assert not imgs.isnan().any()
         if self.strk_tanh or n_strks > 1:
@@ -643,6 +651,7 @@ class GenerativeModel(nn.Module):
                             z_what_smpl[:, t:t+1].unsqueeze(0),
                             z_where_smpl[:, t:t+1].unsqueeze(0))
                 canvas_step = self.renders_imgs(latents)
+                # todo: make sure the shape is correct
                 canvas = canvas + canvas_step
                 if not self.spline_decoder:
                     raise NotImplementedError
@@ -872,6 +881,7 @@ class Guide(nn.Module):
                                                 self.feature_extractor_out_dim,
                                             mlp_hidden_dim=hidden_dim,
                                             num_mlp_layers=1)
+                                            # previously 1 mlp layer
         # self.cnn_out_dim = 2500 if self.img_dim[-1] == 50 else 784
         # self.feature_extractor_out_dim = 2500 if self.img_dim[-1] == 50 else 784
         # self.img_feature_extractor = lambda x: torch.reshape(x, (x.shape[0], -1)
@@ -946,16 +956,17 @@ class Guide(nn.Module):
             self.z_what_rnn_in.append('z_what')
             self.z_what_rnn_in_dim += self.z_what_dim
         # Target (transformed)
-        if self.execution_guided:
-            self.z_what_rnn_in.append('canvas')
-            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+        # if self.execution_guided:
+        #     self.z_what_rnn_in.append('canvas')
+        #     self.z_what_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == "RNN":
             self.z_what_rnn_in.append('target')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN' and self.execution_guided and \
-           self.exec_guid_type == 'residual':
-            self.z_what_rnn_in.append('residual')
-            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+            
+        # if self.target_in_pos == 'RNN' and self.execution_guided and \
+        #    self.exec_guid_type == 'residual':
+        #     self.z_what_rnn_in.append('residual')
+        #     self.z_what_rnn_in_dim += self.feature_extractor_out_dim
 
         self.z_what_rnn_hid_dim = hidden_dim
         self.z_what_rnn = torch.nn.GRUCell(self.z_what_rnn_in_dim, 
@@ -967,10 +978,12 @@ class Guide(nn.Module):
         if self.target_in_pos == 'MLP':
             self.zwhat_mlp_in.append('target')
             self.what_mlp_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'MLP' and \
-           self.execution_guided and self.exec_guid_type == 'residual':
-            self.zwhat_mlp_in.append('residual')
-            self.what_mlp_in_dim += self.feature_extractor_out_dim
+
+        # if self.target_in_pos == 'MLP' and \
+        #    self.execution_guided and self.exec_guid_type == 'residual':
+        #     self.zwhat_mlp_in.append('residual')
+        #     self.what_mlp_in_dim += self.feature_extractor_out_dim
+
         self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
                                   hid_dim=self.z_what_rnn_hid_dim,
@@ -1116,9 +1129,9 @@ class Guide(nn.Module):
                                                 strk_slopes[:, :, t:t+1]
                 # todo
                 canvas_step = self.internal_decoder.renders_imgs((
-                                                z_pres_smpl[:, :, t:t+1].clone(),
-                                                z_what_smpl[:, :, t:t+1],
-                                                z_where_smpl[:, :, t:t+1].clone()))
+                                        z_pres_smpl[:, :, t:t+1].clone(),
+                                        z_what_smpl[:, :, t:t+1],
+                                        z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
                     canvas = canvas + canvas_step
@@ -1136,7 +1149,7 @@ class Guide(nn.Module):
                                                 ).squeeze(2)
                 if self.exec_guid_type == "residual":
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas_so_far, min=0.)
+                    residual = torch.clamp(imgs - canvas, min=0.)
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':

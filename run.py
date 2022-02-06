@@ -16,7 +16,7 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/debug_full-seq_beta/{args.save_model_name}")
+    writer = SummaryWriter(log_dir=f"./log/debug_full-seq_beta_sData/{args.save_model_name}")
 
     # When doing hyperop
     # writer = SummaryWriter(log_dir=f"./log/hyperop/" + 

@@ -105,7 +105,7 @@ def ablation_args():
         args = args_from_kw_list(exp_config)
         if ablation == 'canvas':
             args.append("--no_strk_tanh")
-        args.append("--no_maxnorm")
+        # args.append("--no_maxnorm")
         all_args[f"Full-{ablation}"] = args
 
     return all_args
@@ -149,8 +149,9 @@ if __name__ == '__main__':
 
     # # (Full minus 3 features except spline_latent)
     # all_exp_args['AIR+spline_latent'] = (args_from_kw_list(['spline_latent']) + 
-    #                                         ['--no_maxnorm', 
-    #                                          '--no_strk_tanh',
+    #                                         [
+    ##                                          '--no_maxnorm', 
+    ##                                          '--no_strk_tanh',
     #                                          '--target_in_pos', 'RNN',
     #                                          '--z_where_type', '3',
     #                                          '--constrain_sample'])
@@ -174,7 +175,8 @@ if __name__ == '__main__':
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
-                     n + f'-seq_pri_fixed-rsd-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
+                    #  n + f'_fixed_pri-smallData-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
+                     n + f'_fixed_pri-smallData-βll1-{run_args.final_beta}-RE-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',
@@ -182,13 +184,11 @@ if __name__ == '__main__':
                     "--increase_beta",
                     '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
-                    '--exec_guid_type', 'residual',
+                    # '--exec_guid_type', 'residual',
                     # '--dependent_prior',
-                    # '--no_maxnorm',
-                    # '--no_strk_tanh',
                     '--num-iterations', '1000000',
                     # '--continue_training',
-                    "--anneal_lr"
+                    # "--anneal_lr",
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")

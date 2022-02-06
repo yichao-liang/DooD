@@ -25,8 +25,8 @@ def anneal_lr(args, model, iteration):
 def increase_beta(args, model, iteration):
     if args.increase_beta:
         args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
-                                        cur_ite=iteration, heat_step=5e4,
-                                        init_ite=2e4)
+                                        cur_ite=iteration, heat_step=3e4,
+                                        init_ite=1e4)
         return args
         
 def train(model, optimizer, stats, data_loader, args, writer, 
@@ -55,7 +55,7 @@ def train(model, optimizer, stats, data_loader, args, writer,
             )
     guide.train()
     generative_model.train()
-    train_loader, test_loader = data_loader
+    train_loader, val_loader = data_loader
     
     # For ploting first
     imgs, target = next(iter(train_loader))
@@ -74,6 +74,8 @@ def train(model, optimizer, stats, data_loader, args, writer,
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset)
+            test.stroke_mll_plot(model, val_loader, args, writer, epoch)
+
         for imgs, target in train_loader:
             if args.anneal_lr:
                 args, optimizer = anneal_lr(args, model, iteration)
@@ -144,7 +146,6 @@ def train(model, optimizer, stats, data_loader, args, writer,
             if iteration % args.save_interval == 0 or iteration == \
                                                             args.num_iterations:
                 save(args, iteration, model, optimizer, stats)
-                pass
             
             # End training based on `iteration`
             iteration += 1
@@ -154,8 +155,10 @@ def train(model, optimizer, stats, data_loader, args, writer,
         writer.flush()
 
         # Test every epoch
-        # if test_loader:
-        #     test_model(model, stats, test_loader, args, epoch=epoch, writer=writer)
+        # if val_loader:
+        #     with torch.no_grad():
+        #         test_model(model, stats, val_loader, args, epoch=epoch, 
+        #                    writer=writer)
     writer.close()
     
     save(args, iteration, model, optimizer, stats)
@@ -163,10 +166,10 @@ def train(model, optimizer, stats, data_loader, args, writer,
 
 def test_model(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
                                                                 writer=None):
-    with torch.no_grad():
-        test.marginal_likelihoods(model, stats, test_loader, args, 
+    test.marginal_likelihoods(model, stats, test_loader, args, 
                                             save_imgs_dir, epoch, writer, k=1,
                                             dataset_name=args.dataset)
+    
 def get_model_named_params(args, guide, generative_model):
     '''Return the trainable parameters of the models
     '''
