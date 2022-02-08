@@ -228,7 +228,7 @@ def get_args_parser():
     parser.add_argument("--z_dim", default=10, type=int, 
         help="Only for VAE/AIR")
     parser.add_argument(
-        '--num_mlp_layers', default=2, type=int,
+        '--num_mlp_layers', default=3, type=int,
         help="num mlp layers for style_mlp and z_what_mlp, and their prior nets"
     )
     parser.add_argument(
@@ -253,7 +253,12 @@ def get_args_parser():
     parser.add_argument(
         '--dependent_prior',
         action='store_true',
-        help='if specified then True'
+        help='if specified then True',
+    )
+    parser.add_argument(
+        '--residual_pixel_count',
+        action='store_true',
+        help='if specified then True',
     )
 
     # Baseline network

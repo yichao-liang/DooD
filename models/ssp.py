@@ -412,12 +412,6 @@ class GenerativeModel(nn.Module):
                                             method=self.norm_pixel_method,
                                             slope=slope.view(prod(shp), -1))
 
-        # maxnorm again such that the max value is one
-        if self.maxnorm and self.spline_decoder:
-            imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
-            imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
-            imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
-
         # Change to [ptcs*bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(1) 
 
@@ -431,6 +425,12 @@ class GenerativeModel(nn.Module):
                             method=self.norm_pixel_method,
                             slope=slope)
                             
+        # maxnorm again such that the max value is one
+        if self.maxnorm and self.spline_decoder:
+            imgs = imgs.view(ptcs*bs, 1, self.res, self.res)
+            imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
+            # imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
+
         imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
         
         assert not imgs.isnan().any()
@@ -806,6 +806,7 @@ class Guide(nn.Module):
                                                 intermediate_likelihood=None,
                                                 dependent_prior=False,
                                                 spline_decoder=True,
+                                                residual_pixel_count=False,
                                                 ):
         '''
         Args:
@@ -924,6 +925,11 @@ class Guide(nn.Module):
             self.execution_guided and  self.exec_guid_type == 'residual':
             self.style_mlp_in.append('residual')
             self.style_mlp_in_dim += self.feature_extractor_out_dim
+        if residual_pixel_count:
+            assert self.exec_guid_type == 'residual',\
+                                "Has to have residual to use residual count"
+            self.style_mlp_in.append('residual_pixel_count')
+            self.style_mlp_in_dim += 1
 
         self.style_mlp = PresWhereMLP(in_dim=self.style_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
@@ -963,6 +969,7 @@ class Guide(nn.Module):
             self.z_what_rnn_in.append('target')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
             
+        # residual is only given to style network
         # if self.target_in_pos == 'RNN' and self.execution_guided and \
         #    self.exec_guid_type == 'residual':
         #     self.z_what_rnn_in.append('residual')
@@ -1134,12 +1141,21 @@ class Guide(nn.Module):
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
-                    canvas = canvas + canvas_step
-                    canvas = canvas_so_far = util.normalize_pixel_values(
-                                                canvas, 
-                                                method='tanh', 
-                                                slope=add_slopes[:, :, t])
+                    # only update the canvas where z_pres = 1
+                    update_mask = (z_pres_smpl[:,:,t] == 1)
+                    canvas[update_mask] = (canvas + canvas_step)[update_mask]
+                    canvas[update_mask] = util.normalize_pixel_values(
+                                            canvas, 
+                                            method='tanh', 
+                                            slope=add_slopes[:, :, t]
+                                        )[update_mask]
+                    canvas[update_mask] = util.normalize_pixel_values(
+                                            canvas.view(prod(shp), *img_dim), 
+                                            method="maxnorm"
+                                        ).view(*shp, *img_dim)[update_mask]
+                    canvas_so_far = canvas
                 else:
+                    # update with update_mask
                     canvas_so_far = (canvas[:, :, t:t+1] +
                                      canvas_step.unsqueeze(2))
                     canvas[:, :, t+1] = util.normalize_pixel_values(
@@ -1236,6 +1252,7 @@ class Guide(nn.Module):
         style_rnn_in, h_l, style_mlp_in = self.get_style_mlp_in(img_embed, 
                                                                 canvas_embed, 
                                                                 residual_embed, 
+                                                                residual,
                                                                 p_state)
         (z_pres, 
         z_where, 
@@ -1314,12 +1331,13 @@ class Guide(nn.Module):
         return out
 
     def get_style_mlp_in(self, img_embed, canvas_embed, residual_embed, 
-                         p_state):
+                         residual, p_state):
         '''Get the input for `style_mlp` from the current img and p_state
         Args:
             img_embed [ptcs, bs, embed_dim]
             canvas_embed [ptcs, bs, embed_dim] if self.execution_guided or None 
-            residual_embed [ptcs, bs, embed_dim]
+            residual_embed [ptcs, bs, embed_dim] or None
+            residual [ptcs, bs, 1, res, res] or None
             p_state GuideState
         Return:
             style_mlp_in [ptcs, bs, style_mlp_in_dim]
@@ -1347,6 +1365,9 @@ class Guide(nn.Module):
             mlp_in.append(img_embed.view(prod(shp), -1))
         if 'residual' in self.style_mlp_in:
             mlp_in.append(residual_embed.view(prod(shp), -1))
+        if 'residual_pixel_count' in self.style_mlp_in:
+            residual_pcount = residual.sum([2,3,4]) / prod(self.img_dim)
+            mlp_in.append(residual_pcount.view(prod(shp), 1))
         style_mlp_in = torch.cat(mlp_in, dim=1)
 
         return (style_rnn_in.view(*shp, -1), h_l.view(*shp, -1),
@@ -1621,7 +1642,7 @@ class Guide(nn.Module):
             else:
                 canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
             if self.exec_guid_type == 'residual':
-                residual = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
+                residual = imgs.detach().clone()
             else:
                 residual = None
         else:

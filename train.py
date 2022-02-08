@@ -25,7 +25,7 @@ def anneal_lr(args, model, iteration):
 def increase_beta(args, model, iteration):
     if args.increase_beta:
         args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
-                                        cur_ite=iteration, heat_step=3e4,
+                                        cur_ite=iteration, heat_step=2e4,
                                         init_ite=1e4)
         return args
         

@@ -115,8 +115,8 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     # The "REINFORCE"  term in the gradient is: [bs,]; 
     # bl_target is the negative elbo
     # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
-    # (bl_target - bl_value) * gradient[z_pres_likelihood]
-    neg_reinforce_term = (bl_target - bl_value).detach()*log_post.z_pres
+    # (bl_target - bl_value) * gradient[z_pres_posterior]
+    neg_reinforce_term = (bl_target - bl_value).detach() * log_post.z_pres
     neg_reinforce_term = neg_reinforce_term * mask_prev
     neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
 
