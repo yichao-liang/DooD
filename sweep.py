@@ -176,7 +176,7 @@ if __name__ == '__main__':
                     #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'_fixed_pri-smallData-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
-                     n + f'_fixed_pri-smallData-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
+                     n + f'_fixed_pri-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',

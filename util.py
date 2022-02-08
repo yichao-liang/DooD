@@ -282,7 +282,7 @@ def constrain_parameter(param, min=5e-2, max=1e-2):
     return torch.sigmoid(param) * (max-min) + min
 
 def normalize_pixel_values(img, method='tanh', slope=0.6):
-    '''
+    '''non inplace operation
     Args:
         img:
             for 'tanh' 1: [bs, 1, res, res] or 2: [bs, n_strk, 1, res, res]
@@ -292,26 +292,26 @@ def normalize_pixel_values(img, method='tanh', slope=0.6):
     if method == 'tanh':
         try:
             if type(slope) == float:
-                img = torch.tanh(img/slope)
+                img_ = torch.tanh(img/slope)
             elif len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
                 assert (len(img.shape) - len(slope.shape) == 3) 
                 slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
                 # img_ = torch.tanh(img/slope)
                 # if execution guided
-                img_ = torch.tanh(img/slope.clone())
+                img_ = torch.tanh(img / slope.clone())
                 return img_
             else: 
-                img = torch.tanh(img/slope)
+                breakpoint()
         except:
             breakpoint()
     elif method == 'maxnorm':
         batch_dim = img.shape[0]
         max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
         max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1) #/ maxnorm_max
-        img = safe_div(img, max_per_recon)
+        img_ = safe_div(img.clone(), max_per_recon)
     else:
         raise NotImplementedError
-    return img
+    return img_
 
 
 def get_baseline_save_dir():
@@ -415,17 +415,17 @@ def init(run_args, device):
         # val_sampler = SubsetRandomSampler(val_idx)
 
         # To only use a subset
-        idx = torch.logical_or(trn_dataset.targets == 1, 
-                               trn_dataset.targets == 3)
-        # idx = trn_dataset.targets == 1
-        trn_dataset.targets = trn_dataset.targets[idx]
-        trn_dataset.data= trn_dataset.data[idx]
+        # idx = torch.logical_or(trn_dataset.targets == 1, 
+        #                        trn_dataset.targets == 2)
+        # # idx = trn_dataset.targets == 1
+        # trn_dataset.targets = trn_dataset.targets[idx]
+        # trn_dataset.data= trn_dataset.data[idx]
 
-        idx = torch.logical_or(val_dataset.targets == 1, 
-                               val_dataset.targets == 3)
-        # idx = val_dataset.targets == 1
-        val_dataset.targets = val_dataset.targets[idx]
-        val_dataset.data= val_dataset.data[idx]
+        # idx = torch.logical_or(val_dataset.targets == 1, 
+        #                        val_dataset.targets == 2)
+        # # idx = val_dataset.targets == 1
+        # val_dataset.targets = val_dataset.targets[idx]
+        # val_dataset.data= val_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 

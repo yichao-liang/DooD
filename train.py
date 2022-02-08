@@ -74,7 +74,7 @@ def train(model, optimizer, stats, data_loader, args, writer,
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset)
-            test.stroke_mll_plot(model, val_loader, args, writer, epoch)
+            # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         for imgs, target in train_loader:
             if args.anneal_lr:

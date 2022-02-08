@@ -1143,16 +1143,26 @@ class Guide(nn.Module):
                 if self.intr_ll is None:
                     # only update the canvas where z_pres = 1
                     update_mask = (z_pres_smpl[:,:,t] == 1)
-                    canvas[update_mask] = (canvas + canvas_step)[update_mask]
-                    canvas[update_mask] = util.normalize_pixel_values(
-                                            canvas, 
-                                            method='tanh', 
-                                            slope=add_slopes[:, :, t]
-                                        )[update_mask]
-                    canvas[update_mask] = util.normalize_pixel_values(
+                    canvas = (canvas + canvas_step)
+                    # canvas[update_mask] = (canvas + canvas_step)[update_mask].clone()
+                    # canvas[update_mask] = util.normalize_pixel_values(
+                    #                             canvas.clone(), 
+                    #                             method='tanh', 
+                    #                             slope=add_slopes[:, :, t],
+                    #                             )[update_mask]
+                    # canvas[update_mask] = util.normalize_pixel_values(
+                    #                         canvas.view(prod(shp), *img_dim), 
+                    #                         method="maxnorm"
+                    #                         ).view(*shp, *img_dim)[update_mask]
+                    canvas = util.normalize_pixel_values(
+                                                canvas, 
+                                                method='tanh', 
+                                                slope=add_slopes[:, :, t],
+                                                )
+                    canvas = util.normalize_pixel_values(
                                             canvas.view(prod(shp), *img_dim), 
                                             method="maxnorm"
-                                        ).view(*shp, *img_dim)[update_mask]
+                                            ).view(*shp, *img_dim)
                     canvas_so_far = canvas
                 else:
                     # update with update_mask
@@ -1165,7 +1175,7 @@ class Guide(nn.Module):
                                                 ).squeeze(2)
                 if self.exec_guid_type == "residual":
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas, min=0.)
+                    residual = torch.clamp(imgs - canvas.detach(), min=0.)
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
