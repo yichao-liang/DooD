@@ -393,7 +393,7 @@ class GenerativeModel(nn.Module):
         imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
         # max normalized so each image has pixel values [0, 1]
-        # size: [bs*n_strk, n_channel (1), H, W]
+        # size: [ptcs*bs*n_strk, n_channel (1), H, W]
         if self.maxnorm and self.spline_decoder:
             imgs = util.normalize_pixel_values(imgs, method="maxnorm",)
 
@@ -952,10 +952,10 @@ class Guide(nn.Module):
         if self.target_in_pos == "RNN":
             self.z_what_rnn_in.append('target')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN' and self.execution_guided and \
-           self.exec_guid_type == 'residual':
-            self.z_what_rnn_in.append('residual')
-            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+        # if self.target_in_pos == 'RNN' and self.execution_guided and \
+        #    self.exec_guid_type == 'residual':
+        #     self.z_what_rnn_in.append('residual')
+        #     self.z_what_rnn_in_dim += self.feature_extractor_out_dim
 
         self.z_what_rnn_hid_dim = hidden_dim
         self.z_what_rnn = torch.nn.GRUCell(self.z_what_rnn_in_dim, 
@@ -967,10 +967,10 @@ class Guide(nn.Module):
         if self.target_in_pos == 'MLP':
             self.zwhat_mlp_in.append('target')
             self.what_mlp_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'MLP' and \
-           self.execution_guided and self.exec_guid_type == 'residual':
-            self.zwhat_mlp_in.append('residual')
-            self.what_mlp_in_dim += self.feature_extractor_out_dim
+        # if self.target_in_pos == 'MLP' and \
+        #    self.execution_guided and self.exec_guid_type == 'residual':
+        #     self.zwhat_mlp_in.append('residual')
+        #     self.what_mlp_in_dim += self.feature_extractor_out_dim
         self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
                                   hid_dim=self.z_what_rnn_hid_dim,
