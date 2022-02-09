@@ -797,6 +797,7 @@ class Guide(nn.Module):
                                                 intermediate_likelihood=None,
                                                 dependent_prior=False,
                                                 spline_decoder=True,
+                                                residual_pixel_count=False,
                                                 ):
         '''
         Args:
@@ -853,7 +854,7 @@ class Guide(nn.Module):
                                                 constrain_param=constrain_param,
                                                 render_method=render_method,
                                                 dependent_prior=dependent_prior,
-                                                spline_decoder=spline_decoder
+                                                spline_decoder=spline_decoder,
                                                 )
         # Inference networks
         # Module 1: front_cnn and style_rnn
@@ -915,6 +916,12 @@ class Guide(nn.Module):
             self.style_mlp_in.append('residual')
             self.style_mlp_in_dim += self.feature_extractor_out_dim
 
+        if residual_pixel_count:
+            assert self.exec_guid_type == 'residual',\
+                                "Has to have residual to use residual count"
+            self.style_mlp_in.append('residual_pixel_count')
+            self.style_mlp_in_dim += 1
+            
         self.style_mlp = PresWhereMLP(in_dim=self.style_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim,
@@ -1223,6 +1230,7 @@ class Guide(nn.Module):
         style_rnn_in, h_l, style_mlp_in = self.get_style_mlp_in(img_embed, 
                                                                 canvas_embed, 
                                                                 residual_embed, 
+                                                                residual,
                                                                 p_state)
         (z_pres, 
         z_where, 
@@ -1301,12 +1309,13 @@ class Guide(nn.Module):
         return out
 
     def get_style_mlp_in(self, img_embed, canvas_embed, residual_embed, 
-                         p_state):
+                        residual, p_state):
         '''Get the input for `style_mlp` from the current img and p_state
         Args:
             img_embed [ptcs, bs, embed_dim]
             canvas_embed [ptcs, bs, embed_dim] if self.execution_guided or None 
-            residual_embed [ptcs, bs, embed_dim]
+            residual_embed [ptcs, bs, embed_dim] or None
+            residual [ptcs, bs, 1, res, res] or None
             p_state GuideState
         Return:
             style_mlp_in [ptcs, bs, style_mlp_in_dim]
@@ -1334,6 +1343,9 @@ class Guide(nn.Module):
             mlp_in.append(img_embed.view(prod(shp), -1))
         if 'residual' in self.style_mlp_in:
             mlp_in.append(residual_embed.view(prod(shp), -1))
+        if 'residual_pixel_count' in self.style_mlp_in:
+            residual_pcount = residual.sum([2,3,4]) / prod(self.img_dim)
+            mlp_in.append(residual_pcount.view(prod(shp), 1))
         style_mlp_in = torch.cat(mlp_in, dim=1)
 
         return (style_rnn_in.view(*shp, -1), h_l.view(*shp, -1),
@@ -1608,7 +1620,7 @@ class Guide(nn.Module):
             else:
                 canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
             if self.exec_guid_type == 'residual':
-                residual = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
+                residual = imgs.detach().clone()
             else:
                 residual = None
         else:

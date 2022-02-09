@@ -542,7 +542,8 @@ def init(run_args, device):
                     render_method=run_args.render_method,
                     intermediate_likelihood=run_args.intermediate_likelihood,
                     # comment out for eval old models
-                    # dependent_prior=run_args.dependent_prior,
+                    dependent_prior=run_args.dependent_prior,
+                    residual_pixel_count=run_args.residual_pixel_count,
                     spline_decoder=not run_args.no_spline_renderer,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
