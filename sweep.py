@@ -182,7 +182,7 @@ if __name__ == '__main__':
                     "--increase_beta",
                     '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
-                    '--exec_guid_type', 'residual',
+                    # '--exec_guid_type', 'residual',
                     # '--dependent_prior',
                     # '--no_maxnorm',
                     # '--no_strk_tanh',
