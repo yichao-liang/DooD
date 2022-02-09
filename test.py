@@ -188,6 +188,65 @@ def marginal_likelihoods(model, stats, test_loader, args, save_imgs_dir=None,
             eval_df.to_csv("./eval_result.csv")
         writer.flush()
 
+def stroke_mll_plot(model, val_loader, args, writer, epoch):
+    '''make the stroke vs mll plot for images of 1s and 7s and save it both 
+    in a file and log it on tensorboard.
+    '''
+    n_strks, mlls, labels = [], [], []
+    gen, guide = model
+
+    for imgs, labs in val_loader:
+        imgs = imgs.to(args.device)
+        guide_out = guide(imgs, 1)
+        latents, log_post, _, mask_prev, canvas, z_prior = (
+            guide_out.z_smpl, guide_out.z_lprb, guide_out.baseline_value, 
+            guide_out.mask_prev, guide_out.canvas, guide_out.z_prior)
+        z_pres, _, _ = latents
+        # num_strks
+        num_strks = z_pres.squeeze(0).sum(1)
+        # elbo
+        log_post_z = torch.cat(
+                        [prob.sum(-1, keepdim=True) for prob in log_post], 
+                        dim=-1).sum(-1)
+        log_prior, log_likelihood = gen.log_prob(
+                                            latents=latents, 
+                                            imgs=imgs,
+                                            z_pres_mask=mask_prev,
+                                            canvas=canvas,
+                                            z_prior=z_prior)
+        log_prior_z = torch.cat(
+                        [prob.sum(-1, keepdim=True) for prob in 
+                            log_prior], dim=-1).sum(-1)
+        generative_joint_log_prob = (log_likelihood + log_prior_z)
+        elbo = - log_post_z + generative_joint_log_prob
+        # add to list
+        n_strks.extend(num_strks.detach().int().cpu().tolist())
+        mlls.extend(elbo.squeeze(0).detach().round().cpu().tolist())
+        labels.extend(labs.int().tolist())
+    # calculate the accuracy of stroke usage assuming
+    # 7s need 2 strokes, 1s need 1.
+    id7 = torch.tensor(labels) == 7
+    strks7 = torch.tensor(n_strks)[id7]
+    correct7 = (strks7 == 2).sum()
+    num7s = len(strks7)
+
+    id1 = torch.tensor(labels) == 1
+    strks1 = torch.tensor(n_strks)[id1]
+    correct1 = (strks1 == 1).sum()
+    num1s = len(strks1)
+
+    acc1 = correct1 / num1s
+    acc7 = correct7 / num7s
+    overall_acc = (correct7 + correct1) / (num7s + num1s) 
+    writer.add_scalar("Train curves/stroke accuray 1", acc1, epoch)
+    writer.add_scalar("Train curves/stroke accuray 7", acc7, epoch)
+    writer.add_scalar("Train curves/stroke accuray 1,7", overall_acc, epoch)
+    # plot
+    plot_data = pd.DataFrame({'Num_strokes': n_strks,
+                             'ELBO': mlls,
+                             'Label': labels})
+    plot.plot_stroke_mll_swarm_plot(plot_data, args, writer, epoch)
+    
 def classification_evaluation(guide, args, writer, dataset, model_tag=None,
                                                             dataset_name=None,
                                                             batch_size=64):
