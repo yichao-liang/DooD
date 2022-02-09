@@ -32,7 +32,6 @@ def increase_beta(args, model, iteration):
 def train(model, optimizer, stats, data_loader, args, writer, 
             dataset_name=None):
 
-    checkpoint_path = util.get_checkpoint_path(args)
     if args.model_type == 'MWS':
         num_iterations_so_far = len(stats.theta_losses)
         num_epochs_so_far = 0

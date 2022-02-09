@@ -16,7 +16,7 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/debug_full-seq_beta_sData/{args.save_model_name}")
+    writer = SummaryWriter(log_dir=f"./log/debug_full-seq_beta/{args.save_model_name}")
 
     # When doing hyperop
     # writer = SummaryWriter(log_dir=f"./log/hyperop/" + 
@@ -60,31 +60,6 @@ def main(args):
                                 )
 
     train.train(model, optimizer, stats, data_loader, args, writer)
-
-        # algorithm_params =  {
-        # "test_num_particles": mws_args.test_num_particles,
-        # "num_iterations": mws_args.num_iterations,
-        # "log_interval": mws_args.log_interval,
-        # "test_interval": mws_args.test_interval,
-        # "save_interval": mws_args.save_interval,
-        # "checkpoint_path": checkpoint_path,
-        # "num_particles": mws_args.num_particles,
-        # "memory_size": mws_args.memory_size,
-        # }
-        # mws.train.train(
-        #     'mws',
-        #     generative_model,
-        #     guide,
-        #     memory,
-        #     data_loader[0],
-        #     data_loader[1],
-        #     optimizer,
-        #     algorithm_params,
-        #     stats,
-        #     run_args=args,
-        #     writer=writer,
-        # )
-
 
 def get_args_parser():
     import argparse
@@ -228,7 +203,7 @@ def get_args_parser():
     parser.add_argument("--z_dim", default=10, type=int, 
         help="Only for VAE/AIR")
     parser.add_argument(
-        '--num_mlp_layers', default=3, type=int,
+        '--num_mlp_layers', default=2, type=int,
         help="num mlp layers for style_mlp and z_what_mlp, and their prior nets"
     )
     parser.add_argument(

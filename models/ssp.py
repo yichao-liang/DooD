@@ -86,10 +86,13 @@ class GenerativeModel(nn.Module):
         if prior_dist == 'Independent':
             if self.fixed_prior:
                 # z_what
-                self.register_buffer("pts_loc", torch.zeros(self.pts_per_strk, 2)+.5)
-                self.register_buffer("pts_std", torch.ones(self.pts_per_strk, 2)/5)
+                self.register_buffer("pts_loc", 
+                                        torch.zeros(self.pts_per_strk, 2)+.5)
+                self.register_buffer("pts_std", 
+                                        torch.zeros(self.pts_per_strk, 2)+.2)
                 # z_pres
-                self.register_buffer("z_pres_prob", torch.zeros(self.max_strks)+.5)
+                self.register_buffer("z_pres_prob", 
+                                        torch.zeros(self.max_strks)+.5)
                 # z_where: default '3'
                 z_where_loc, z_where_std, self.z_where_dim = \
                                             util.init_z_where(self.z_where_type)
@@ -426,9 +429,9 @@ class GenerativeModel(nn.Module):
                             slope=slope)
                             
         # maxnorm again such that the max value is one
-        if self.maxnorm and self.spline_decoder:
-            imgs = imgs.view(ptcs*bs, 1, self.res, self.res)
-            imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
+        # if self.maxnorm and self.spline_decoder:
+        #     imgs = imgs.view(ptcs*bs, 1, self.res, self.res)
+        #     imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
             # imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
 
         imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
@@ -962,9 +965,9 @@ class Guide(nn.Module):
             self.z_what_rnn_in.append('z_what')
             self.z_what_rnn_in_dim += self.z_what_dim
         # Target (transformed)
-        # if self.execution_guided:
-        #     self.z_what_rnn_in.append('canvas')
-        #     self.z_what_rnn_in_dim += self.feature_extractor_out_dim
+        if self.execution_guided:
+            self.z_what_rnn_in.append('canvas')
+            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == "RNN":
             self.z_what_rnn_in.append('target')
             self.z_what_rnn_in_dim += self.feature_extractor_out_dim
@@ -1159,10 +1162,10 @@ class Guide(nn.Module):
                                                 method='tanh', 
                                                 slope=add_slopes[:, :, t],
                                                 )
-                    canvas = util.normalize_pixel_values(
-                                            canvas.view(prod(shp), *img_dim), 
-                                            method="maxnorm"
-                                            ).view(*shp, *img_dim)
+                    # canvas = util.normalize_pixel_values(
+                    #                         canvas.view(prod(shp), *img_dim), 
+                    #                         method="maxnorm"
+                    #                         ).view(*shp, *img_dim)
                     canvas_so_far = canvas
                 else:
                     # update with update_mask
@@ -1175,7 +1178,7 @@ class Guide(nn.Module):
                                                 ).squeeze(2)
                 if self.exec_guid_type == "residual":
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas.detach(), min=0.)
+                    residual = torch.clamp(imgs - canvas, min=0.)
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
@@ -1255,7 +1258,7 @@ class Guide(nn.Module):
                 residual_embed = self.img_feature_extractor(residual.view(prod(
                                                 shp), *img_dim)).view(*shp, -1)
             else: residual_embed = None
-        else: canvas_embed = None
+        else: canvas_embed, residual_embed = None, None
 
 
         # Predict z_pres, z_where from target and canvas
@@ -1455,11 +1458,11 @@ class Guide(nn.Module):
         z_where = z_where_post.rsample()
 
         # constrain sample
-        if not self.constrain_param:
-            z_where = constrain_z_where(self.z_where_type, 
-                                        z_where.view(prod(shp), -1), 
-                                        clamp=True)
-            z_where = z_where.view(*shp, -1)
+        # if not self.constrain_param:
+        #     z_where = constrain_z_where(self.z_where_type, 
+        #                                 z_where.view(prod(shp), -1), 
+        #                                 clamp=True)
+        #     z_where = z_where.view(*shp, -1)
                                                             
         z_where_lprb = z_where_post.log_prob(z_where).unsqueeze(-1) * z_pres
         # z_where_lprb = z_where_lprb.squeeze()
@@ -1529,8 +1532,8 @@ class Guide(nn.Module):
         '''
         # bs here is actually ptcs * bs
         ptcs, bs = shp = zwhat_mlp_in.shape[:2]
-        z_what_loc, z_what_std = self.z_what_mlp(zwhat_mlp_in.view(prod(shp), -1))
-
+        z_what_loc, z_what_std = self.z_what_mlp(
+                                            zwhat_mlp_in.view(prod(shp), -1))
 
         # [bs, pts_per_strk, 2]
         z_what_loc = z_what_loc.view([*(shp), self.pts_per_strk, 2])
@@ -1538,8 +1541,8 @@ class Guide(nn.Module):
             
         z_what_post = Independent(Normal(z_what_loc, z_what_std), 
                                                     reinterpreted_batch_ndims=2)
-        assert (z_what_post.event_shape == torch.Size([self.pts_per_strk, 2]) and
-                z_what_post.batch_shape == torch.Size([*(shp)]))
+        assert (z_what_post.event_shape == torch.Size([self.pts_per_strk, 2]) 
+                and z_what_post.batch_shape == torch.Size([*(shp)]))
 
         # [ptcs, bs, pts_per_strk, 2] 
         z_what = z_what_post.rsample()
@@ -1658,8 +1661,10 @@ class Guide(nn.Module):
         else:
             canvas, residual = None, None
         
-        h_cs = torch.zeros(ptcs, bs, self.max_strks, self.style_rnn_hid_dim, device=imgs.device)
-        h_ls = torch.zeros(ptcs, bs, self.max_strks, self.style_rnn_hid_dim, device=imgs.device)
+        h_cs = torch.zeros(ptcs, bs, self.max_strks, self.style_rnn_hid_dim, 
+                                                            device=imgs.device)
+        h_ls = torch.zeros(ptcs, bs, self.max_strks, self.style_rnn_hid_dim, 
+                                                            device=imgs.device)
         
         return (state, baseline_value, mask_prev, 
                 z_pres_pms, z_where_pms, z_what_pms,

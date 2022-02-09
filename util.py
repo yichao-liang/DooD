@@ -308,7 +308,8 @@ def normalize_pixel_values(img, method='tanh', slope=0.6):
         batch_dim = img.shape[0]
         max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
         max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1) #/ maxnorm_max
-        img_ = safe_div(img.clone(), max_per_recon)
+        img = safe_div(img, max_per_recon)
+        return img
     else:
         raise NotImplementedError
     return img_
