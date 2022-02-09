@@ -55,7 +55,7 @@ def train(model, optimizer, stats, data_loader, args, writer,
             )
     guide.train()
     generative_model.train()
-    train_loader, test_loader = data_loader
+    train_loader, val_loader = data_loader
     
     # For ploting first
     imgs, target = next(iter(train_loader))
@@ -74,6 +74,8 @@ def train(model, optimizer, stats, data_loader, args, writer,
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset)
+            # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
+            
         for imgs, target in train_loader:
             if args.anneal_lr:
                 args, optimizer = anneal_lr(args, model, iteration)
@@ -154,8 +156,8 @@ def train(model, optimizer, stats, data_loader, args, writer,
         writer.flush()
 
         # Test every epoch
-        # if test_loader:
-        #     test_model(model, stats, test_loader, args, epoch=epoch, writer=writer)
+        # if val_loader:
+        #     test_model(model, stats, val_loader, args, epoch=epoch, writer=writer)
     writer.close()
     
     save(args, iteration, model, optimizer, stats)

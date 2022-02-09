@@ -345,6 +345,10 @@ def get_save_test_img_dir(args, iteration, suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
     return f"{get_save_dir(args)}/images/reconstruction_ep{iteration}_{suffix}.pdf"
 
+def get_save_count_swarm_img_dir(args, iteration, suffix='tst'):
+    Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
+    return f"{get_save_dir(args)}/images/count_swarm_ep{iteration}_{suffix}.pdf"
+
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
     '''
@@ -393,7 +397,7 @@ def init(run_args, device):
                 transforms.ToTensor(),
                 #transforms.Normalize((0.1307,), (0.3081,))
             ]))
-        val_dataset = datasets.MNIST(root='./data', train=True, download=False,
+        val_dataset = datasets.MNIST(root='./data', train=False, download=False,
                 transform=transforms.Compose([
                 transforms.Resize([res,res], antialias=True),
                 transforms.ToTensor(),
