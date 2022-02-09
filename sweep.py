@@ -174,7 +174,7 @@ if __name__ == '__main__':
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
-                     n + f'-seq_pri_fixed-rsd-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
+                     n + f'-fixed-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',
@@ -183,6 +183,7 @@ if __name__ == '__main__':
                     '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
                     # '--exec_guid_type', 'residual',
+                    # '--residual_pixel_count',
                     # '--dependent_prior',
                     # '--no_maxnorm',
                     # '--no_strk_tanh',
