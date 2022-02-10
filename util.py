@@ -264,9 +264,8 @@ def init_z_where(z_where_type):
     return init_z_where_params.get(z_where_type)
     
 def safe_div(dividend, divisor):
-    '''divident / divisor, only do it for nonzero divisor dims
+    '''divident / divisor, only do it for divisor larger than 1e-4
     '''
-    # experiment only do it for divisor larger then 1e-6
     # idx = divisor = 0
     idx = divisor >= 1e-4
     idx = idx.squeeze()
@@ -282,8 +281,8 @@ def sigmoid(x, min=0., max=1., shift=0., slope=1.):
 def constrain_parameter(param, min=5e-2, max=1e-2):
     return torch.sigmoid(param) * (max-min) + min
 
-def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
-    '''
+def normalize_pixel_values(img, method='tanh', slope=0.6):
+    '''non inplace operation
     Args:
         img:
             for 'tanh' 1: [bs, 1, res, res] or 2: [bs, n_strk, 1, res, res]
@@ -293,7 +292,7 @@ def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
     if method == 'tanh':
         try:
             if type(slope) == float:
-                img = torch.tanh(img/slope)
+                img_ = torch.tanh(img/slope)
             elif len(slope.shape) > 0 and slope.shape[0] == img.shape[0]:
                 assert (len(img.shape) - len(slope.shape) == 3) 
                 slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
@@ -302,17 +301,18 @@ def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
                 img_ = torch.tanh(img/(slope.clone()))
                 return img_
             else: 
-                img = torch.tanh(img/slope)
+                breakpoint()
         except:
             breakpoint()
     elif method == 'maxnorm':
         batch_dim = img.shape[0]
         max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
-        max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1) / maxnorm_max
+        max_per_recon = max_per_recon.reshape(batch_dim, 1, 1, 1) #/ maxnorm_max
         img = safe_div(img, max_per_recon)
+        return img
     else:
         raise NotImplementedError
-    return img
+    return img_
 
 
 def get_baseline_save_dir():
@@ -348,7 +348,6 @@ def get_save_test_img_dir(args, iteration, suffix='tst'):
 def get_save_count_swarm_img_dir(args, iteration, suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
     return f"{get_save_dir(args)}/images/count_swarm_ep{iteration}_{suffix}.pdf"
-
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
     '''
@@ -422,6 +421,12 @@ def init(run_args, device):
         # idx = trn_dataset.targets == 1
         # trn_dataset.targets = trn_dataset.targets[idx]
         # trn_dataset.data= trn_dataset.data[idx]
+
+        # idx = torch.logical_or(val_dataset.targets == 1, 
+        #                        val_dataset.targets == 2)
+        # # idx = val_dataset.targets == 1
+        # val_dataset.targets = val_dataset.targets[idx]
+        # val_dataset.data= val_dataset.data[idx]
 
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 

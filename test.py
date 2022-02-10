@@ -229,7 +229,6 @@ def stroke_mll_plot(model, val_loader, args, writer, epoch):
     strks7 = torch.tensor(n_strks)[id7]
     correct7 = (strks7 == 2).sum()
     num7s = len(strks7)
-
     id1 = torch.tensor(labels) == 1
     strks1 = torch.tensor(n_strks)[id1]
     correct1 = (strks1 == 1).sum()

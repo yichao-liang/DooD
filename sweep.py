@@ -105,7 +105,7 @@ def ablation_args():
         args = args_from_kw_list(exp_config)
         if ablation == 'canvas':
             args.append("--no_strk_tanh")
-        args.append("--no_maxnorm")
+        # args.append("--no_maxnorm")
         all_args[f"Full-{ablation}"] = args
 
     return all_args
@@ -149,8 +149,9 @@ if __name__ == '__main__':
 
     # # (Full minus 3 features except spline_latent)
     # all_exp_args['AIR+spline_latent'] = (args_from_kw_list(['spline_latent']) + 
-    #                                         ['--no_maxnorm', 
-    #                                          '--no_strk_tanh',
+    #                                         [
+    ##                                          '--no_maxnorm', 
+    ##                                          '--no_strk_tanh',
     #                                          '--target_in_pos', 'RNN',
     #                                          '--z_where_type', '3',
     #                                          '--constrain_sample'])
@@ -169,6 +170,7 @@ if __name__ == '__main__':
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
+        # args.remove('--execution_guided')
         args.extend(['--save_model_name', 
                     # n + f'-dp-{run_args.seed}',
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
@@ -180,17 +182,17 @@ if __name__ == '__main__':
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',
                     # '--beta', f'{run_args.beta}',
-                    "--increase_beta",
-                    '--final_beta', f'{run_args.final_beta}',
+                    # "--increase_beta",
+                    # '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
                     '--exec_guid_type', 'residual',
                     '--residual_pixel_count',
                     # '--dependent_prior',
+                    '--num-iterations', '500000',
+                    '--render_method', 'bounded',
                     # '--no_maxnorm',
-                    # '--no_strk_tanh',
-                    '--num-iterations', '1000000',
                     # '--continue_training',
-                    "--anneal_lr"
+                    # "--anneal_lr",
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import offsetbox
 import matplotlib.lines as mlines
+import seaborn as sns
 import numpy as np
 import seaborn as sns
 import torch
@@ -31,6 +32,16 @@ def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
     sns.swarmplot(x='Num_strokes', y='ELBO', hue='Label', dodge=True, size=1, 
                     data=dataframe,ax=ax).set_title(
                     'Number of strokes vs. ELBO on images of 1s and 7s')
+    plt.tight_layout()
+    writer.add_figure("Stroke count plot", fig, epoch)
+    save_imgs_dir = util.get_save_count_swarm_img_dir(args, epoch, suffix='')
+    plt.savefig(save_imgs_dir)
+
+def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
+    fig, ax = plt.subplots(1,1, figsize=(5,5))
+    sns.swarmplot(x='Num_strokes', y='ELBO', hue='Label', dodge=True, size=1, 
+                    data=dataframe,ax=ax).set_title(
+                    'Number of strokes vs. ELBO on images of 1s and 3s')
     plt.tight_layout()
     writer.add_figure("Stroke count plot", fig, epoch)
     save_imgs_dir = util.get_save_count_swarm_img_dir(args, epoch, suffix='')

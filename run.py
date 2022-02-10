@@ -61,31 +61,6 @@ def main(args):
 
     train.train(model, optimizer, stats, data_loader, args, writer)
 
-        # algorithm_params =  {
-        # "test_num_particles": mws_args.test_num_particles,
-        # "num_iterations": mws_args.num_iterations,
-        # "log_interval": mws_args.log_interval,
-        # "test_interval": mws_args.test_interval,
-        # "save_interval": mws_args.save_interval,
-        # "checkpoint_path": checkpoint_path,
-        # "num_particles": mws_args.num_particles,
-        # "memory_size": mws_args.memory_size,
-        # }
-        # mws.train.train(
-        #     'mws',
-        #     generative_model,
-        #     guide,
-        #     memory,
-        #     data_loader[0],
-        #     data_loader[1],
-        #     optimizer,
-        #     algorithm_params,
-        #     stats,
-        #     run_args=args,
-        #     writer=writer,
-        # )
-
-
 def get_args_parser():
     import argparse
 
@@ -253,7 +228,12 @@ def get_args_parser():
     parser.add_argument(
         '--dependent_prior',
         action='store_true',
-        help='if specified then True'
+        help='if specified then True',
+    )
+    parser.add_argument(
+        '--residual_pixel_count',
+        action='store_true',
+        help='if specified then True',
     )
     parser.add_argument(
         '--residual_pixel_count',

@@ -32,7 +32,6 @@ def increase_beta(args, model, iteration):
 def train(model, optimizer, stats, data_loader, args, writer, 
             dataset_name=None):
 
-    checkpoint_path = util.get_checkpoint_path(args)
     if args.model_type == 'MWS':
         num_iterations_so_far = len(stats.theta_losses)
         num_epochs_so_far = 0
@@ -146,7 +145,6 @@ def train(model, optimizer, stats, data_loader, args, writer,
             if iteration % args.save_interval == 0 or iteration == \
                                                             args.num_iterations:
                 save(args, iteration, model, optimizer, stats)
-                pass
             
             # End training based on `iteration`
             iteration += 1
@@ -165,10 +163,10 @@ def train(model, optimizer, stats, data_loader, args, writer,
 
 def test_model(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
                                                                 writer=None):
-    with torch.no_grad():
-        test.marginal_likelihoods(model, stats, test_loader, args, 
+    test.marginal_likelihoods(model, stats, test_loader, args, 
                                             save_imgs_dir, epoch, writer, k=1,
                                             dataset_name=args.dataset)
+    
 def get_model_named_params(args, guide, generative_model):
     '''Return the trainable parameters of the models
     '''
