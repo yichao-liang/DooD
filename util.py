@@ -299,7 +299,7 @@ def normalize_pixel_values(img, method='tanh', slope=0.6, maxnorm_max=1.):
                 slope = slope.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
                 # img_ = torch.tanh(img/slope)
                 # if execution guided
-                img_ = torch.tanh(img/slope.clone())
+                img_ = torch.tanh(img/(slope.clone()))
                 return img_
             else: 
                 img = torch.tanh(img/slope)
@@ -416,7 +416,8 @@ def init(run_args, device):
         # val_sampler = SubsetRandomSampler(val_idx)
 
         # To only use a subset
-        # idx = torch.logical_or(trn_dataset.targets == 1, trn_dataset.targets == 7)
+        # idx = torch.logical_or(trn_dataset.targets == 1, 
+        #                        trn_dataset.targets == 2)
         # idx = torch.logical_or(trn_dataset.targets == 0, trn_dataset.targets == 8)
         # idx = trn_dataset.targets == 1
         # trn_dataset.targets = trn_dataset.targets[idx]

@@ -15,7 +15,7 @@ from models.mws.handwritten_characters.losses import get_mws_loss
 
 def anneal_lr(args, model, iteration):
     if args.model_type == 'Sequential':
-        lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
+        lr = util.anneal_weight(init_val=1e-3, final_val=1e-4,
                                 cur_ite=iteration, anneal_step=2e4,
                                 init_ite=1e4)
         args.lr = lr
@@ -25,8 +25,8 @@ def anneal_lr(args, model, iteration):
 def increase_beta(args, model, iteration):
     if args.increase_beta:
         args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
-                                        cur_ite=iteration, heat_step=2e4,
-                                        init_ite=1e4)
+                                        cur_ite=iteration, heat_step=3e4,
+                                        init_ite=2e4)
         return args
         
 def train(model, optimizer, stats, data_loader, args, writer, 

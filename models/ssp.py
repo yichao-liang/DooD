@@ -423,8 +423,15 @@ class GenerativeModel(nn.Module):
                 slope = self.get_tanh_slope().view(prod(shp))
             imgs = util.normalize_pixel_values(imgs, 
                             method=self.norm_pixel_method,
-                            slope=slope).view(ptcs, bs, 1, self.res, self.res)
-        
+                            slope=slope)
+
+        # maxnorm again such that the max value is one
+        # if self.maxnorm and self.spline_decoder:
+        #     imgs = imgs.view(ptcs*bs, 1, self.res, self.res)
+        #     imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
+
+        imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
+         
         assert not imgs.isnan().any()
         if self.strk_tanh or n_strks > 1:
             assert imgs.max() <= 1.
@@ -911,14 +918,23 @@ class Guide(nn.Module):
         if self.target_in_pos == 'MLP':
             self.style_mlp_in.append('target')
             self.style_mlp_in_dim += self.feature_extractor_out_dim
+
         if self.target_in_pos == 'MLP' and\
             self.execution_guided and  self.exec_guid_type == 'residual':
             self.style_mlp_in.append('residual')
             self.style_mlp_in_dim += self.feature_extractor_out_dim
+            self.residual_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=256,
+                                                num_mlp_layers=1)
 
+        self.residual_pixel_count = residual_pixel_count
         if residual_pixel_count:
-            assert self.exec_guid_type == 'residual',\
-                                "Has to have residual to use residual count"
             self.style_mlp_in.append('residual_pixel_count')
             self.style_mlp_in_dim += 1
             
@@ -978,6 +994,7 @@ class Guide(nn.Module):
         #    self.execution_guided and self.exec_guid_type == 'residual':
         #     self.zwhat_mlp_in.append('residual')
         #     self.what_mlp_in_dim += self.feature_extractor_out_dim
+
         self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
                                   hid_dim=self.z_what_rnn_hid_dim,
@@ -1129,10 +1146,17 @@ class Guide(nn.Module):
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
                     canvas = canvas + canvas_step
-                    canvas = canvas_so_far = util.normalize_pixel_values(
+                    canvas = util.normalize_pixel_values(
                                                 canvas, 
                                                 method='tanh', 
                                                 slope=add_slopes[:, :, t])
+                    # update_mask = (z_pres_smpl[:,:,t] == 1)
+                    # canvas[update_mask] = util.normalize_pixel_values(
+                    #                             canvas.clone(), 
+                    #                             method='tanh', 
+                    #                             slope=add_slopes[:, :, t],
+                    #                             )[update_mask]
+                    canvas_so_far = canvas
                 else:
                     canvas_so_far = (canvas[:, :, t:t+1] +
                                      canvas_step.unsqueeze(2))
@@ -1141,11 +1165,13 @@ class Guide(nn.Module):
                                                 method='tanh',
                                                 slope=add_slopes[:, :, t:t+1]
                                                 ).squeeze(2)
-                if self.exec_guid_type == "residual":
+                if self.exec_guid_type == "residual" or\
+                    self.residual_pixel_count:
                     # compute the residual
                     residual = torch.clamp(imgs - canvas_so_far, min=0.)
 
             # Calculate the prior with the hidden states.
+
             if self.prior_dist == 'Sequential':
                 glmp_eb = None
                 if self.dependent_prior:
@@ -1220,8 +1246,8 @@ class Guide(nn.Module):
                                                     *img_dim)).view(*shp, -1)
 
             if self.exec_guid_type == 'residual':
-                residual_embed = self.img_feature_extractor(residual.view(prod(
-                                                shp), *img_dim)).view(*shp, -1)
+                residual_embed = self.residual_feature_extractor(residual.view(
+                                        prod(shp), *img_dim)).view(*shp, -1)
             else: residual_embed = None
         else: canvas_embed = None
 
