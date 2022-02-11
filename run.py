@@ -85,7 +85,7 @@ def get_args_parser():
     )
     parser.add_argument(
         '--render_method', type=str,
-        default='bounded',
+        default='base',
         choices=['bounded', 'base'],
         help='method for Bezier renderer',
     )
@@ -227,11 +227,6 @@ def get_args_parser():
     )
     parser.add_argument(
         '--dependent_prior',
-        action='store_true',
-        help='if specified then True',
-    )
-    parser.add_argument(
-        '--residual_pixel_count',
         action='store_true',
         help='if specified then True',
     )

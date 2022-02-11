@@ -177,22 +177,21 @@ if __name__ == '__main__':
                     #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-fixed-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
-                     n + f'-fixed-rsd-βll1-{run_args.final_beta}-anLr-{run_args.seed}',
+                     n + f'-fixed-βll1-{run_args.final_beta}-anLr-baseRender-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
                     # '--final_bern', f'{run_args.final_bern}',
                     # '--beta', f'{run_args.beta}',
                     # "--increase_beta",
-                    # '--final_beta', f'{run_args.final_beta}',
+                    '--final_beta', f'{run_args.final_beta}',
                     '--prior', "Independent",
-                    '--exec_guid_type', 'residual',
-                    '--residual_pixel_count',
+                    # '--exec_guid_type', 'residual',
+                    # '--residual_pixel_count',
                     # '--dependent_prior',
                     '--num-iterations', '500000',
-                    '--render_method', 'bounded',
                     # '--no_maxnorm',
                     # '--continue_training',
-                    # "--anneal_lr",
+                    "--anneal_lr",
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")
