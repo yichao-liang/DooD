@@ -170,28 +170,33 @@ if __name__ == '__main__':
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
-        # args.remove('--execution_guided')
+        args.remove('--execution_guided')
         args.extend(['--save_model_name', 
-                    # n + f'-dp-{run_args.seed}',
+                    # n + f'-lr1e-3-{run_args.seed}',
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-fixed-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
-                     n + f'-fixed-βll1-{run_args.final_beta}-anLr-baseRender-{run_args.seed}',
+                    #  n + f'-neuralRender-noMaxStrkTanhNorm-noEG-sepWherePres{run_args.seed}',
+                     n + f'-fixPri-noSpDec-noEG-wr4-{run_args.seed}',
 
                     '--seed', f'{run_args.seed}',
-                    # '--final_bern', f'{run_args.final_bern}',
+                    '--no_spline_renderer',
+                    '--prior', "Independent",
+                    # '--z_what_in_pos', 'z_where_rnn',
+                    # '--target_in_pos', 'RNN',
+                    # '--z_where_type', '3',
+                    '--lr', '1e-3', 
+                    '--sep_where_pres_mlp',
                     # '--beta', f'{run_args.beta}',
                     # "--increase_beta",
-                    '--final_beta', f'{run_args.final_beta}',
-                    '--prior', "Independent",
+                    # '--final_beta', f'{run_args.final_beta}',
                     # '--exec_guid_type', 'residual',
                     # '--residual_pixel_count',
                     # '--dependent_prior',
-                    '--num-iterations', '500000',
                     # '--no_maxnorm',
+                    # "--anneal_lr",
                     # '--continue_training',
-                    "--anneal_lr",
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")

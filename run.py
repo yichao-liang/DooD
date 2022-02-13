@@ -235,6 +235,11 @@ def get_args_parser():
         action='store_true',
         help='if specified then True',
     )
+    parser.add_argument(
+        '--sep_where_pres_mlp',
+        action='store_true',
+        help='if specified then True',
+    )
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

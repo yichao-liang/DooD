@@ -551,6 +551,7 @@ def init(run_args, device):
                     dependent_prior=run_args.dependent_prior,
                     residual_pixel_count=run_args.residual_pixel_count,
                     spline_decoder=not run_args.no_spline_renderer,
+                    sep_where_pres_mlp=run_args.sep_where_pres_mlp,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -574,6 +575,7 @@ def init(run_args, device):
                         z_what_in_pos=run_args.z_what_in_pos,
                         prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
+                        sep_where_pres_mlp=run_args.sep_where_pres_mlp,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(

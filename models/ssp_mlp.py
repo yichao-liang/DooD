@@ -96,7 +96,7 @@ class PresWhereMLP(nn.Module):
     """Infer presence and location from RNN hidden state
     """
     def __init__(self, in_dim, z_where_type, z_where_dim, hidden_dim, num_layers,
-        constrain_param=False):
+        constrain_param=False, spline_decoder=True):
         nn.Module.__init__(self)
         self.z_where_dim = z_where_dim
         self.type = z_where_type
@@ -106,26 +106,26 @@ class PresWhereMLP(nn.Module):
                                  num_layers=num_layers)        
         self.constrain_param = constrain_param
 
-        if z_where_type == '4_rotate':
-            # has minimal constrain
-            self.seq.linear_modules[-1].weight.data.zero_()
-            # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
-            self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+        if spline_decoder:
+            if z_where_type == '4_rotate':
+                # has minimal constrain
+                self.seq.linear_modules[-1].weight.data.zero_()
+                # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+                    [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
 
-            # AIR constrain
-            # self.seq.linear_modules[-1].weight.data.zero_()
-            # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
-            # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-            #     [4, 1,0,0,0, 1,1,1,1], dtype=torch.float)) 
-            pass
-        elif z_where_type == '3':
-            self.seq.linear_modules[-1].weight.data.zero_()
-            # [pres, loc:scale,shift, std:scale,shift
-            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-                torch.tensor([4, 4,0,0, -4,-4,-4], dtype=torch.float))
-        else:
-            raise NotImplementedError
+                # AIR constrain
+                # self.seq.linear_modules[-1].weight.data.zero_()
+                # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+                # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+                #     [4, 1,0,0,0, 1,1,1,1], dtype=torch.float)) 
+            elif z_where_type == '3':
+                self.seq.linear_modules[-1].weight.data.zero_()
+                # [pres, loc:scale,shift, std:scale,shift
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([4, 4,0,0, -4,-4,-4], dtype=torch.float))
+            else:
+                raise NotImplementedError
     
     def forward(self, h):
         # todo make capacible with other z_where_types
@@ -142,6 +142,54 @@ class PresWhereMLP(nn.Module):
         z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
 
         return z_pres_p, z_where_loc, z_where_std
+
+class WhereMLP(nn.Module):
+    """Infer z_where variable from rnn hidden state
+    """
+    def __init__(self, in_dim, z_where_type, z_where_dim, hidden_dim, 
+                 num_layers):
+        super().__init__()
+        self.z_where_dim = z_where_dim
+        self.type = z_where_type
+        self.seq = util.init_mlp(in_dim=in_dim, 
+                                 out_dim=z_where_dim * 2,
+                                 hidden_dim=hidden_dim,
+                                 num_layers=num_layers)        
+        if z_where_type == '4_rotate':
+            # has minimal constrain
+            self.seq.linear_modules[-1].weight.data.zero_()
+            # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+                [4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+        elif z_where_type == '3':
+            self.seq.linear_modules[-1].weight.data.zero_()
+            # [pres, loc:scale,shift, std:scale,shift
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                torch.tensor([4,0,0, -4,-4,-4], dtype=torch.float))
+        else:
+            raise NotImplementedError
+    def forward(self, h):
+        # todo make capacible with other z_where_types
+        z = self.seq(h)
+        z_where_std = z[:, self.z_where_dim:] 
+        z_where_loc = z[:, :self.z_where_dim] 
+        # has minimal constrain
+        z_where_loc = constrain_z_where(z_where_type=self.type,
+                                        z_where_loc=z_where_loc)
+        z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
+        return z_where_loc, z_where_std
+
+class PresMLP(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers):
+        super().__init__()
+        self.seq = util.init_mlp(in_dim=in_dim,
+                                 out_dim=1,
+                                 hidden_dim=hidden_dim,
+                                 num_layers=num_layers)
+    def forward(self, h):
+        z = self.seq(h)
+        z_pres_p = util.constrain_parameter(z, min=1e-12, max=1-(1e-12))
+        return z_pres_p
 
 class WhatMLP(nn.Module):
     def __init__(self, in_dim=256, pts_per_strk=5, hid_dim=256, num_layers=1,

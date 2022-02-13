@@ -15,7 +15,14 @@ from models.mws.handwritten_characters.losses import get_mws_loss
 
 def anneal_lr(args, model, iteration):
     if args.model_type == 'Sequential':
-        lr = util.anneal_weight(init_val=1e-3, final_val=1e-4,
+        lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
+                                cur_ite=iteration, anneal_step=2e4,
+                                init_ite=1e4)
+        args.lr = lr
+        new_optimizer = util.init_optimizer(args, model)
+        return args, new_optimizer
+    if args.model_type == 'AIR':
+        lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
                                 cur_ite=iteration, anneal_step=2e4,
                                 init_ite=1e4)
         args.lr = lr

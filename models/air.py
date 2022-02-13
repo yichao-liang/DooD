@@ -17,12 +17,10 @@ from kornia.morphology import dilation, erosion
 
 import util
 from models.air_mlp import *
+from models import template
+from models.template import ZSample,ZLogProb, GuideState, GenState
 
 # latent variable tuple
-ZSample = namedtuple("ZSample", "z_pres z_what z_where")
-ZLogProb = namedtuple("ZLogProb", "z_pres z_what z_where")
-GuideState = namedtuple('GuideState', 'h_l h_c bl_h z_pres z_where z_what')
-GenState = namedtuple('GenState', 'h_l h_c z_pres z_where z_what')
 GuideReturn = namedtuple('GuideReturn', ['z_smpl', 
                                          'z_lprb', 
                                          'z_prior',
@@ -334,44 +332,39 @@ class GenerativeModel(nn.Module):
             else:
                 yield n, p
 
-class Guide(nn.Module):
-    def __init__(self, max_strks=2, img_dim=[1,28,28],
-                                            hidden_dim=256, 
-                                            z_where_type='3', 
-                                            execution_guided=False,
-                                            exec_guid_type=None,
-                                            z_what_dim=50,
-                                            feature_extractor_sharing=True,
-                                            z_what_in_pos='z_where_rnn',
-                                            prior_dist='Independent',
-                                            target_in_pos="RNN",
-                                            intermediate_likelihood=None,
+class Guide(template.Guide):
+    def __init__(self, max_strks=2, 
+                    img_dim=[1,28,28],
+                    hidden_dim=256, 
+                    z_where_type='3', 
+                    execution_guided=False,
+                    exec_guid_type=None,
+                    z_what_dim=50,
+                    feature_extractor_sharing=True,
+                    z_what_in_pos='z_where_rnn',
+                    prior_dist='Independent',
+                    target_in_pos="RNN",
+                    intermediate_likelihood=None,
+                    sep_where_pres_mlp=True,
                                             ):
-        super().__init__()
         # Parameters
-        self.max_strks = max_strks
-        self.img_dim = img_dim
-        self.img_numel = np.prod(img_dim)
-        self.hidden_dim = hidden_dim
-        self.z_pres_dim = 1
         self.z_what_dim = z_what_dim
-        self.z_where_type = z_where_type
-        self.z_where_dim = util.init_z_where(self.z_where_type).dim
-        self.z_what_in_pos = z_what_in_pos
-        self.intr_ll = intermediate_likelihood
+        super().__init__(max_strks=max_strks, 
+                    img_dim=img_dim,
+                    hidden_dim=hidden_dim, 
+                    z_where_type=z_where_type, 
+                    execution_guided=execution_guided,
+                    exec_guid_type=exec_guid_type,
+                    feature_extractor_sharing=feature_extractor_sharing,
+                    z_what_dim=self.z_what_dim,
+                    z_what_in_pos=z_what_in_pos,
+                    prior_dist=prior_dist,
+                    target_in_pos=target_in_pos,
+                    intermediate_likelihood=intermediate_likelihood,
+                    sep_where_pres_mlp=sep_where_pres_mlp,
+                    )
 
         # Internal renderer
-        self.execution_guided = execution_guided
-        self.exec_guid_type = exec_guid_type
-        self.prior_dist = prior_dist
-        self.target_in_pos = target_in_pos
-        # if prior_dist == "Independent":
-        #     # If Independent, we have the option to input the target img to the
-        #     # {style, what}_RNN or the {style, what}_MLP
-        #     self.target_in_pos = 'RNN'
-        # else:
-        #     self.target_in_pos = 'MLP'
-
         if self.execution_guided or self.prior_dist == 'Sequential':
             self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
@@ -382,113 +375,24 @@ class Guide(nn.Module):
                                             prior_dist=self.prior_dist,
                                             )
         # Inference networks
-        # Module 1: front_cnn and pr_wr_rnn
-        self.feature_extractor_sharing = feature_extractor_sharing
-        self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
-        self.feature_extractor_out_dim = 256
-        self.img_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                            self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=256,
-                                            num_mlp_layers=1)
-        # self.cnn_out_dim = 2500 if self.img_dim[-1] == 50 else 784
-        # self.feature_extractor_out_dim = 2500 if self.img_dim[-1] == 50 else 784
-        # self.img_feature_extractor = lambda x: torch.reshape(x, (x.shape[0], -1)
-        #                                                     )
-
-        # pres, where rnn
-        # self.pr_wr_rnn_in_dim = (self.feature_extractor_out_dim + 
-        #                                 self.z_pres_dim + 
-        #                                 self.z_where_dim)
-        self.pr_wr_rnn_in_dim = self.z_pres_dim + self.z_where_dim
-        # Target image
-        if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
-            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        # Canvas
-        if self.execution_guided:
-            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        # z_what
-        if self.z_what_in_pos == 'z_where_rnn':
-            self.pr_wr_rnn_in_dim += self.z_what_dim
-
-        self.pr_wr_rnn_hid_dim = 256
-        self.pr_wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
-                                          self.pr_wr_rnn_hid_dim)
-
-        # pr_wr_mlp:
-        #   rnn hidden state -> (z_pres, z_where dist parameters)
-        # self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
-        self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
-        # if (self.prior_dist == 'Sequential' or
-        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')
-        #    ):
-        if self.target_in_pos == 'MLP':
-            # Add target_img dim
-            self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
-        if self.prior_dist == 'Sequential':
-            self.style_mlp_in = 'h+target'
-
-        self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
+        if self.sep_where_pres_mlp:
+            self.pr_mlp = PresMLP(in_dim=self.pr_wr_mlp_in_dim)
+            self.wr_mlp = WhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
+                                      z_where_type=self.z_where_type,
+                                      z_where_dim=self.z_where_dim)
+        else:
+            self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim)
 
-        # Module 2: z_what_cnn, z_what_rnn, z_what_mlp
+        # Module 2: z_what_cnn, wt_rnn, wt_mlp
         # stn transformed image -> (`z_what_dim` control points)
-        # self.z_what_rnn_in_dim = (self.feature_extractor_out_dim)
-        # if self.z_what_in_pos == 'z_what_rnn':
-        #     self.z_what_rnn_in_dim += self.z_what_dim
-        self.z_what_rnn_in_dim = self.z_what_dim
-
-        # Target (transformed)
-        # if self.prior_dist == 'Independent' and self.target_in_pos == "RNN":
-        if self.target_in_pos == "RNN":
-            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-
-        # Canvas
-        # If prior_dist == 'Independent' and self.execution_guided then the 
-        # canvas is only used for the style net and not z_what net.
-        if self.prior_dist == 'Sequential' and self.execution_guided:
-            self.z_what_rnn_in_dim += self.feature_extractor_out_dim
-
-        # minus z_what
-        if self.z_what_in_pos == 'z_where_rnn':
-            self.z_what_rnn_in_dim -= self.z_what_dim
-
-        self.z_what_rnn_hid_dim = 256
-        self.z_what_rnn = torch.nn.GRUCell(self.z_what_rnn_in_dim, 
-                                            self.z_what_rnn_hid_dim)
-
+        # self.wt_rnn_in_dim = (self.feature_extractor_out_dim)
         # z_what MLP
-        self.what_mlp_in_dim = self.z_what_rnn_hid_dim
-
-        # if (self.prior_dist == 'Sequential' or 
-        #     (self.prior_dist == 'Independent' and self.target_in_pos == 'MLP')):
-        if self.target_in_pos == 'MLP':
-            self.what_mlp_in_dim += self.feature_extractor_out_dim
-        self.z_what_mlp = WhatMLP(in_dim=self.what_mlp_in_dim,
+        self.wt_mlp = WhatMLP(in_dim=self.wt_mlp_in_dim,
                                   z_what_dim=self.z_what_dim,
                                   hid_dim=hidden_dim,
                                   num_layers=2)
-
-        # Module 3: Baseline (bl) rnn and regressor
-        self.bl_hid_dim = 256
-        self.bl_in_dim = (self.feature_extractor_out_dim  + 
-                          self.z_pres_dim + 
-                          self.z_where_dim +
-                          self.z_what_dim)
-        if self.execution_guided:
-            self.bl_in_dim += self.feature_extractor_out_dim
-        self.bl_rnn = torch.nn.GRUCell(self.bl_in_dim, self.bl_hid_dim)
-        self.bl_regressor = nn.Sequential(
-            nn.Linear(self.bl_hid_dim, 256),
-            nn.ReLU(),
-            nn.Linear(256, 1)
-        )
-        
 
     def forward(self, imgs, num_particles=1):
         '''
@@ -628,16 +532,12 @@ class Guide(nn.Module):
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
 
-        # embed image
-        img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim)
-                                                                ).view(*shp, -1)
-        canvas_embed = self.img_feature_extractor(
-                            canvas.view(prod(shp), *img_dim)).view(*shp, -1) \
-                            if canvas is not None else None
-
+        img_embed, canvas_embed, residual_embed = self.get_img_features(
+                                                        imgs, canvas, residual)
         # Predict z_pres, z_where from target and canvas
-        pr_wr_mlp_in, pr_wr_rnn_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
+        pr_wr_rnn_in, pr_wr_mlp_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
                                                                 canvas_embed,
+                                                                residual_embed,
                                                                 residual, 
                                                                 p_state)
         (z_pres, 
@@ -647,18 +547,18 @@ class Guide(nn.Module):
          z_pres_p, 
          z_where_pms)  = self.get_z_l(pr_wr_mlp_in, p_state)
 
-
         # Get spatial transformed "crop" from input image
         trans_imgs = util.spatial_transform(
                                     imgs.view(prod(shp), *img_dim), 
                                     util.get_affine_matrix_from_param(
                                             z_where.view(prod(shp), -1), 
-                                                z_where_type=self.z_where_type))
-        z_what_mlp_in, h_c = self.get_z_what_mlp_in(
+                                            z_where_type=self.z_where_type))
+        wt_mlp_in, h_c = self.get_wt_mlp_in(
                     trans_imgs.view(*shp, *img_dim), 
-                    canvas_embed.view(*shp, -1) if canvas is not None else None,
+                    canvas_embed,
+                    residual_embed,
                     p_state)
-        z_what, z_what_lprb, z_what_pms = self.get_z_c(z_what_mlp_in, 
+        z_what, z_what_lprb, z_what_pms = self.get_z_c(wt_mlp_in, 
                                                             p_state, z_pres)
 
         # Compute baseline for z_pres
@@ -700,58 +600,6 @@ class Guide(nn.Module):
         }
         return out
 
-    def get_pr_wr_mlp_in(self, img_embed, canvas_embed, residual, p_state):
-        '''Get the input for `pr_wr_mlp` from the current img and p_state
-        Args:
-            img_embed [ptcs, bs, embed_dim]
-            canvas_embed [ptcs, bs, 1, res, res] if self.execution_guided or None 
-            p_state GuideState
-        Return:
-            pr_wr_mlp_in [ptcs, bs, pr_wr_mlp_in_dim]
-            pr_wr_rnn_in [ptcs, bs, pr_wr_rnn_in_dim]
-        '''
-        ptcs, bs = shp = img_embed.shape[:2]
-        if self.exec_guid_type == 'residual':
-            residual_embed = self.img_feature_extractor(residual.view(prod(shp), 
-                                1, self.res, self.res)).view(prod(shp), -1)
-
-        # style RNN input
-        rnn_in = [p_state.z_pres.view(prod(shp), -1), 
-                  p_state.z_where.view(prod(shp), -1)]
-
-        # Append prev.z
-        if self.z_what_in_pos == 'z_where_rnn':
-            rnn_in.append(p_state.z_what.view(prod(shp), -1))
-
-        # canvas
-        if (self.execution_guided and self.exec_guid_type == 'canvas'):
-            rnn_in.append(canvas_embed.view(prod(shp), -1)) 
-
-        # Append target/residual
-        # target / residual
-        if (self.prior_dist == 'Independent' and self.target_in_pos == 'RNN' and
-            self.execution_guided and self.exec_guid_type == 'residual'):
-            rnn_in.append(residual_embed.view(prod(shp), -1))
-        elif self.prior_dist == 'Independent' and self.target_in_pos == 'RNN':
-            rnn_in.append(img_embed.view(prod(shp), -1))
-        rnn_in = torch.cat(rnn_in, dim=1)
-
-        # Get the new h_l
-        h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
-        
-        # Style MLP input
-        pr_wr_mlp_in = [h_l]
-
-        # target / residual
-        if self.target_in_pos == "MLP" and self.style_mlp_in == 'h+target':
-            pr_wr_mlp_in.append(img_embed.view(prod(shp), -1))
-        elif self.target_in_pos == "MLP" and self.style_mlp_in == 'h+residual':
-            pr_wr_mlp_in.append(residual_embed.view(prod(shp), -1))
-        pr_wr_mlp_in = torch.cat(pr_wr_mlp_in, dim=1)
-
-        return pr_wr_mlp_in.view(*shp, -1), rnn_in.view(*shp, -1), \
-               h_l.view(*shp, -1)
-
     def get_z_l(self, pr_wr_mlp_in, p_state):
         """Predict z_pres and z_where from `pr_wr_mlp_in`
         Args:
@@ -770,7 +618,12 @@ class Guide(nn.Module):
         ptcs, bs = shp = pr_wr_mlp_in.shape[:2]
 
         # Predict presence and location from h
-        z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(
+        if self.sep_where_pres_mlp:
+            z_pres_p = self.pr_mlp(pr_wr_mlp_in.view(prod(shp), -1))
+            z_where_loc, z_where_scale =\
+                       self.wr_mlp(pr_wr_mlp_in.view(prod(shp), -1))
+        else:
+            z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(
                                             pr_wr_mlp_in.view(prod(shp), -1))
         z_pres_p = z_pres_p.view(*shp, -1)
         z_where_loc = z_where_loc.view(*shp, -1)
@@ -816,52 +669,10 @@ class Guide(nn.Module):
         return (z_pres, z_where, z_pres_lprb, z_where_lprb, z_pres_p, 
                 (z_where_loc, z_where_scale))
 
-    def get_z_what_mlp_in(self, trans_imgs, canvas_embed, p_state):
-        '''Get the input for the z_what_mlp
-        Args:
-            trans_imgs: [ptcs, bs, *img_dim]
-            canvas_embed: [ptcs, bs, em_dim]
-            p_state
-        Return:
-            z_what_mlp_in: [ptcs, bs, in_dim]
-            h_c: [ptcs, bs, in_dim]
-        '''
-        # Sample z_what, get log_prob
-        ptcs, bs = shp = trans_imgs.shape[:2]
-        img_dim = trans_imgs.shape[2:]
-
-        trans_embed = self.img_feature_extractor(trans_imgs.view(prod(shp), 
-                                                                *img_dim))
-            
-        z_what_rnn_in = []
-        # prev.z_what
-        if self.z_what_in_pos == 'z_what_rnn':
-            z_what_rnn_in.append(p_state.z_what.view(prod(shp), -1))
-
-        # Canvas
-        if (self.prior_dist == 'Sequential' and self.execution_guided and 
-           self.exec_guid_type == 'canvas'):
-            z_what_rnn_in.append(canvas_embed.view(prod(shp), -1))
-        
-        # Target
-        if self.target_in_pos == 'RNN':
-            z_what_rnn_in.append(trans_embed.view(prod(shp), -1))
-        
-        z_what_rnn_in = torch.cat(z_what_rnn_in, dim=1)
-        h_c = self.z_what_rnn(z_what_rnn_in, p_state.h_c.view(prod(shp), -1))
-        
-        # z_what MLP input
-        z_what_mlp_in = [h_c]
-        if self.target_in_pos == 'MLP':
-            z_what_mlp_in.append(trans_embed.view(prod(shp), -1))
-        z_what_mlp_in = torch.cat(z_what_mlp_in, dim=1)
-        
-        return z_what_mlp_in.view(*shp, -1), h_c.view(*shp, -1)
-
-    def get_z_c(self, z_what_mlp_in, p_state, z_pres):
+    def get_z_c(self, wt_mlp_in, p_state, z_pres):
         '''
         Args:
-            zwhat_mlp_in [ptcs, bs, mlp_in_dim]
+            wt_mlp_in [ptcs, bs, mlp_in_dim]
             z_pres [ptcs, bs, 1]
             ptcs::int
         Return:
@@ -870,8 +681,8 @@ class Guide(nn.Module):
             z_what_loc = [ptcs, bs, pts_per_strk, 2]
             z_what_std = [ptcs, bs, pts_per_strk, 2]
         '''
-        ptcs, bs = shp = z_what_mlp_in.shape[:2]
-        z_what_loc, z_what_std = self.z_what_mlp(z_what_mlp_in.view(prod(shp), -1))
+        ptcs, bs = shp = wt_mlp_in.shape[:2]
+        z_what_loc, z_what_std = self.wt_mlp(wt_mlp_in.view(prod(shp), -1))
 
         # [bs, z_dim]
         z_what_loc = z_what_loc.view([*shp, self.z_what_dim])
@@ -922,7 +733,7 @@ class Guide(nn.Module):
         state = GuideState(
             h_l=torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
                                                             device=imgs.device),
-            h_c=torch.zeros(ptcs, bs, self.z_what_rnn_hid_dim, 
+            h_c=torch.zeros(ptcs, bs, self.wt_rnn_hid_dim, 
                                                             device=imgs.device),
             bl_h=torch.zeros(ptcs, bs, self.bl_hid_dim, device=imgs.device),
             z_pres=torch.ones(ptcs, bs, 1, device=imgs.device),
