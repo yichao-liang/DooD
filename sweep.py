@@ -170,7 +170,7 @@ if __name__ == '__main__':
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
-        # args.remove('--execution_guided')
+        args.remove('--execution_guided')
         args.extend(['--save_model_name', 
                     # n + f'-lr1e-3-{run_args.seed}',
                     #  n + f'-anl{run_args.final_val}-{run_args.seed}',
@@ -178,13 +178,15 @@ if __name__ == '__main__':
                     #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
                     #  n + f'-fixed-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
                     #  n + f'-neuralRender-noMaxStrkTanhNorm-noEG-sepWherePres{run_args.seed}',
-                     n + f'-fixPri-noSpDec-wr3-{run_args.seed}',
+                    #  n + f'-fixPri-noSeperatedZ-noEG-2nm-wr3-{run_args.seed}',
+                     n + f'-fixPri-noSpDec-noSeperatedZ-noEG-2nm-wr3-{run_args.seed}',
+                    
 
                     '--seed', f'{run_args.seed}',
                     '--no_spline_renderer',
                     '--prior', "Independent",
-                    # '--z_what_in_pos', 'z_where_rnn',
-                    # '--target_in_pos', 'RNN',
+                    '--z_what_in_pos', 'z_where_rnn',
+                    '--target_in_pos', 'RNN',
                     '--z_where_type', '3',
                     '--lr', '1e-3', 
                     '--sep_where_pres_mlp',

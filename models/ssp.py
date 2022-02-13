@@ -49,7 +49,7 @@ class GenerativeModel(nn.Module):
                                                 hidden_dim=256,
                                                 num_mlp_layers=2,
                                                 maxnorm=True,
-                                                strk_tanh=True,
+                                                single_strk_tanh=True,
                                                 constrain_param=True,
                                                 fixed_prior=True,
                                                 spline_decoder=True,
@@ -63,7 +63,7 @@ class GenerativeModel(nn.Module):
         self.pts_per_strk = pts_per_strk
         self.execution_guided = execution_guided
         self.maxnorm = maxnorm
-        self.strk_tanh = strk_tanh
+        self.single_strk_tanh = single_strk_tanh
         self.constrain_param = constrain_param
         self.intr_ll = intermediate_likelihood
         if self.intr_ll == "Geom":
@@ -159,14 +159,14 @@ class GenerativeModel(nn.Module):
         # Whether the sigma for renderer or per-stroke-slope depends on the input
         self.input_dependent_param = input_dependent_param
         if self.input_dependent_param:
-            self.sigma, self.tanh_norm_slope_stroke, self.tanh_norm_slope\
+            self.sigma, self.single_strk_tanh_slope, self.add_strk_tanh_slope\
                                                             = None, None, None
         else:
             self.sigma = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
-            self.tanh_norm_slope_stroke = torch.nn.Parameter(torch.tensor(6.), 
+            self.single_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
-            self.tanh_norm_slope = torch.nn.Parameter(torch.tensor(6.), 
+            self.add_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
         self.transform_z_what = transform_z_what
 
@@ -176,10 +176,10 @@ class GenerativeModel(nn.Module):
                                                             max=1.-1e-6)
     def get_sigma(self): 
         return util.constrain_parameter(self.sigma, min=.01, max=.04)
-    def get_tanh_slope(self):
-        return util.constrain_parameter(self.tanh_norm_slope, min=.1,max=.7)
-    def get_tanh_slope_strk(self):
-        return util.constrain_parameter(self.tanh_norm_slope_stroke, min=.1, 
+    def get_add_strk_tanh_slope(self):
+        return util.constrain_parameter(self.add_strk_tanh_slope, min=.1,max=.7)
+    def get_single_strk_tanh_slope(self):
+        return util.constrain_parameter(self.single_strk_tanh_slope, min=.1, 
                                                                      max=.7)
     def get_imgs_dist_std(self):
         # return F.softplus(self.imgs_dist_std) + 1e-6
@@ -395,18 +395,20 @@ class GenerativeModel(nn.Module):
 
         # max normalized so each image has pixel values [0, 1]
         # size: [ptcs*bs*n_strk, n_channel (1), H, W]
-        if self.maxnorm and self.spline_decoder:
+        # if self.maxnorm and self.spline_decoder:
+        if self.maxnorm:
             imgs = util.normalize_pixel_values(imgs, method="maxnorm",)
 
         # Change back to [ptcs, bs, n_strk, n_channel (1), H, W]
         imgs = imgs.view(ptcs, bs, n_strks, 1, self.res, self.res)
 
-        if self.strk_tanh and self.spline_decoder:
+        # if self.single_strk_tanh and self.spline_decoder:
+        if self.single_strk_tanh:
             # Normalize per stroke
             if self.input_dependent_param:
-                slope = self.tanh_norm_slope_stroke
+                slope = self.single_strk_tanh_slope
             else:
-                slope = self.get_tanh_slope_strk()
+                slope = self.get_single_strk_tanh_slope()
             # output imgs: [prod(shp), n_strks, 1, res, res]
             imgs = util.normalize_pixel_values(imgs, 
                                             method=self.norm_pixel_method,
@@ -418,9 +420,9 @@ class GenerativeModel(nn.Module):
             # only normalize again if there were more then 1 stroke
             if self.input_dependent_param:
                 # should have shape [ptcs, bs]
-                slope = self.tanh_norm_slope.squeeze()
+                slope = self.add_strk_tanh_slope
             else:
-                slope = self.get_tanh_slope().view(prod(shp))
+                slope = self.get_add_strk_tanh_slope().view(prod(shp))
             imgs = util.normalize_pixel_values(imgs, 
                             method=self.norm_pixel_method,
                             slope=slope)
@@ -458,11 +460,11 @@ class GenerativeModel(nn.Module):
 
         recon = recon.view(ptcs, bs, n_strks, 1, res, res)
 
-        if self.strk_tanh and self.spline_decoder:
+        if self.single_strk_tanh and self.spline_decoder:
             if self.input_dependent_param:
-                slope = self.tanh_norm_slope_stroke
+                slope = self.single_strk_tanh_slope
             else:
-                slope = self.get_tanh_slope_strk()
+                slope = self.get_single_strk_tanh_slope()
             recon = util.normalize_pixel_values(recon, method='tanh', 
                                                 slope=slope)
         recon = recon.view(ptcs, bs, n_strks, 1, res, res)
@@ -508,7 +510,7 @@ class GenerativeModel(nn.Module):
 
         # Likelihood
         # self.sigma = decoder_param.sigma
-        # self.tanh_norm_slope_stroke = decoder_param.slope[0]
+        # self.single_strk_tanh_slope = decoder_param.slope[0]
         if self.intr_ll:
             imgs = imgs.unsqueeze(2).expand(*bs, *img_shape)
         
@@ -551,7 +553,7 @@ class GenerativeModel(nn.Module):
         Args:
             in_img [bs, 1, res, res]:
                 For unconditioned sampling: in_img is some random inputs for the
-                    sigma, strk_tanh network;
+                    sigma, single_strk_tanh network;
                 For ... (update later)
         Return:
             imgs [bs, 1, res, res]
@@ -632,7 +634,7 @@ class GenerativeModel(nn.Module):
                 z_where_smpl[:, t] = state.z_where
 
                 self.sigma = result['sigma']
-                self.tanh_norm_slope_stroke = result['slope'][0]
+                self.single_strk_tanh_slope = result['slope'][0]
                 # [bs]
                 add_slope = result['slope'][1].squeeze(-1)
 
@@ -793,7 +795,7 @@ class Guide(template.Guide):
                         bl_mlp_hid_dim=512,
                         bl_rnn_hid_dim=256,
                         maxnorm=True,
-                        strk_tanh=True,
+                        single_strk_tanh=True,
                         z_what_in_pos=None,
                         constrain_param=True,
                         render_method='bounded',
@@ -827,7 +829,7 @@ class Guide(template.Guide):
                 bl_mlp_hid_dim=bl_mlp_hid_dim,
                 bl_rnn_hid_dim=bl_rnn_hid_dim,
                 maxnorm=maxnorm,
-                strk_tanh=strk_tanh,
+                single_strk_tanh=single_strk_tanh,
                 dependent_prior=dependent_prior,
                 spline_decoder=spline_decoder,
                 residual_pixel_count=residual_pixel_count,
@@ -850,7 +852,7 @@ class Guide(template.Guide):
                                             prior_dist=prior_dist,
                                             num_mlp_layers=num_mlp_layers,
                                             maxnorm=maxnorm,
-                                            strk_tanh=strk_tanh,
+                                            single_strk_tanh=single_strk_tanh,
                                             constrain_param=constrain_param,
                                             render_method=render_method,
                                             dependent_prior=dependent_prior,
@@ -882,7 +884,8 @@ class Guide(template.Guide):
                                       hidden_dim=hidden_dim,
                                       num_layers=num_mlp_layers,
                                       maxnorm=self.maxnorm,
-                                      strk_tanh=self.strk_tanh)
+                                      single_strk_tanh=self.single_strk_tanh,
+                                      spline_decoder=spline_decoder)
 
         self.wt_mlp = WhatMLP(in_dim=self.wt_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
@@ -989,7 +992,7 @@ class Guide(template.Guide):
             if self.execution_guided:
                 self.internal_decoder.sigma = sigmas[:, :, t:t+1].clone()
                 # tanh_slope [ptcs, bs, 1]
-                self.internal_decoder.tanh_norm_slope_stroke = \
+                self.internal_decoder.single_strk_tanh_slope = \
                                                 strk_slopes[:, :, t:t+1]
                 # todo
                 canvas_step = self.internal_decoder.renders_imgs((

@@ -108,9 +108,9 @@ def plot_reconstructions(imgs:torch.Tensor,
         if args.model_type == 'Sequential' and \
            generative_model.input_dependent_param:
             generative_model.sigma = guide_out.decoder_param.sigma[0]
-            generative_model.tanh_norm_slope_stroke = \
+            generative_model.single_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[0]
-            generative_model.tanh_norm_slope = \
+            generative_model.add_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[1][:, :, -1]
         recon_glimpse = generative_model.renders_glimpses(latent.z_what)
         recon_glimpse = recon_glimpse.squeeze(0)

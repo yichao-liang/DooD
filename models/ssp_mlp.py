@@ -48,18 +48,25 @@ def constrain_z_what(z_what_loc, clamp=False):
 class RendererParamMLP(nn.Module):
     """Predict the render parameters
     """
-    def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, strk_tanh):
+    def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, strk_tanh,
+                 spline_decoder=True):
         super().__init__()
         self.maxnorm = maxnorm
         self.strk_tanh = strk_tanh
+        self.spline_decoder=spline_decoder
         self.seq = util.init_mlp(in_dim=in_dim, 
                                  out_dim=3,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)        
         self.seq.linear_modules[-1].weight.data.zero_()
         if self.maxnorm and self.strk_tanh:
-            self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [6,2,2], dtype=torch.float)) # with maxnorm
+            if self.spline_decoder:
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([6,2,2], dtype=torch.float)) # with maxnorm
+            else:
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([6,2,2], dtype=torch.float)) # with maxnorm
+  
         elif not self.strk_tanh and not self.maxnorm:
             # without both
             # used when no execution_guided
@@ -79,7 +86,12 @@ class RendererParamMLP(nn.Module):
 
         # stroke slope
         if self.maxnorm:
-            strk_slope = util.constrain_parameter(z[:, 1:2], min=.1, max=.9) # maxnorm
+            if self.spline_decoder:
+                strk_slope = util.constrain_parameter(z[:, 1:2], 
+                                                      min=.1, max=.9) # maxnorm
+            else:
+                strk_slope = util.constrain_parameter(z[:, 1:2], 
+                                                      min=.1, max=5) # maxnorm
         else:
             strk_slope = F.softplus(z[:, 1:2]) + 1e-3 # tanh
 
@@ -186,6 +198,10 @@ class PresMLP(nn.Module):
                                  out_dim=1,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)
+        self.seq.linear_modules[-1].weight.data.zero_()
+        # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+        self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+            [4], dtype=torch.float)) 
     def forward(self, h):
         z = self.seq(h)
         z_pres_p = util.constrain_parameter(z, min=1e-12, max=1-(1e-12))

@@ -42,9 +42,9 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         # If we haven't rendered the final reconstruction AND we have
         # predicted render parameters
         generative_model.sigma = guide_out.decoder_param.sigma
-        generative_model.tanh_norm_slope_stroke = \
+        generative_model.single_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[0]
-        generative_model.tanh_norm_slope = \
+        generative_model.add_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[1][:, :, -1]
     
     # multi by beta
