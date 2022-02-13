@@ -351,7 +351,8 @@ class GenerativeModel(nn.Module):
         return dist
 
     def renders_imgs(self, latents):
-        '''Batched img rendering
+        '''Batched img rendering. Decode z_what then transform accroding to
+        z_where with inverse spatial transform.
         Args:
             latents: 
                 z_pres: [ptcs, bs, n_strks] 
@@ -371,7 +372,7 @@ class GenerativeModel(nn.Module):
             sigma = self.get_sigma()
 
         if self.spline_decoder:
-            # imgs [bs, n_strk, 1, res, res]
+            # imgs [ptcs*bs, n_strk, 1, res, res]
             try:
                 imgs = self.decoder(z_what.view(prod(shp), n_strks, 
                                                 pts_per_strk, 2), 
@@ -386,7 +387,7 @@ class GenerativeModel(nn.Module):
         # reshape image for further processing
         imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
 
-        # Get affine matrix: [bs * n_strk, 2, 3]
+        # Get affine matrix: [ptcs*bs*n_strk, 2, 3]
         z_where_mtrx = util.get_affine_matrix_from_param(
                                 z_where.view(ptcs*bs*n_strks, -1), 
                                 self.z_where_type)
@@ -395,14 +396,11 @@ class GenerativeModel(nn.Module):
         # max normalized so each image has pixel values [0, 1]
         # size: [ptcs*bs*n_strk, n_channel (1), H, W]
         if self.maxnorm and self.spline_decoder:
-        # if self.maxnorm:
             imgs = util.normalize_pixel_values(imgs, method="maxnorm",)
 
-        # Change back to [ptcs*bs, n_strk, n_channel (1), H, W]
-        imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
+        # Change back to [ptcs, bs, n_strk, n_channel (1), H, W]
+        imgs = imgs.view(ptcs, bs, n_strks, 1, self.res, self.res)
 
-
-        # if self.strk_tanh  and self.spline_decoder:
         if self.strk_tanh and self.spline_decoder:
             # Normalize per stroke
             if self.input_dependent_param:
@@ -412,29 +410,27 @@ class GenerativeModel(nn.Module):
             # output imgs: [prod(shp), n_strks, 1, res, res]
             imgs = util.normalize_pixel_values(imgs, 
                                             method=self.norm_pixel_method,
-                                            slope=slope.view(prod(shp), -1))
-
-        # Change to [ptcs*bs, n_channel (1), H, W] through `sum`
-        imgs = imgs.sum(1) 
+                                            slope=slope)
+        # Change to [ptcs, bs, n_channel (1), H, W] through `sum`
+        imgs = imgs.sum(2) 
 
         if n_strks > 1:
             # only normalize again if there were more then 1 stroke
             if self.input_dependent_param:
-                slope = self.tanh_norm_slope.squeeze().view(prod(shp))
+                # should have shape [ptcs, bs]
+                slope = self.tanh_norm_slope.squeeze()
             else:
                 slope = self.get_tanh_slope().view(prod(shp))
             imgs = util.normalize_pixel_values(imgs, 
                             method=self.norm_pixel_method,
                             slope=slope)
-        # maxnorm again such that the max value is one
-        # if self.maxnorm and self.spline_decoder:
-        #     imgs = imgs.view(ptcs*bs, 1, self.res, self.res)
-        #     imgs = util.normalize_pixel_values(imgs.clone(), method="maxnorm")
         imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
+
         return imgs 
         
     def renders_glimpses(self, z_what):
-        '''Get glimpse reconstruction from z_what control points
+        '''Get glimpse reconstruction from z_what control points without being
+        transformed by z_where
         Args:
             z_what: [ptcs, bs, n_strk, n_pts, 2]
         Return:
@@ -468,8 +464,8 @@ class GenerativeModel(nn.Module):
             else:
                 slope = self.get_tanh_slope_strk()
             recon = util.normalize_pixel_values(recon, method='tanh', 
-                                                slope=slope
-                                        ).view(ptcs, bs, n_strks, 1, res, res)
+                                                slope=slope)
+        recon = recon.view(ptcs, bs, n_strks, 1, res, res)
         return recon
 
     def log_prob(self, latents, imgs, z_pres_mask, canvas, decoder_param=None,
