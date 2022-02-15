@@ -16,8 +16,9 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/debug_full-fixpri/{args.save_model_name}")
-    # writer = SummaryWriter(log_dir=f"./log/debug_fulls{args.seed}/{args.save_model_name}")
+    log_dir = f"./log/debug_full-bl/{args.save_model_name}"
+    # log_dir = f"./log/debug_full{args.seed}/{args.save_model_name}"
+    writer = SummaryWriter(log_dir=log_dir)
 
     # When doing hyperop
     # writer = SummaryWriter(log_dir=f"./log/hyperop/" + 
@@ -247,17 +248,19 @@ def get_args_parser():
         help='''This is useful when canvas is used. If Ture, a recon is computed 
         at the end is used for the likelihood loss, instead of the canvas'''
     )
-
-    # Baseline network
-    parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
-    parser.add_argument('--bl_mlp_hid_dim', default=256, type=int, help='')
-    parser.add_argument('--bl_rnn_hid_dim', default=256, type=int, help='')
     parser.add_argument('--no_maxnorm', action='store_true', 
                                      help='if specified then True.')
     parser.add_argument('--no_sgl_strk_tanh', action='store_true', 
                                      help='if specified then True.')
     parser.add_argument('--no_add_strk_tanh', action='store_true', 
                                      help='if specified then True.')
+    parser.add_argument('--no_baseline', action='store_true',
+                        help='if specified then True, not use baseline net')
+
+    # Baseline network
+    parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
+    parser.add_argument('--bl_mlp_hid_dim', default=256, type=int, help='')
+    parser.add_argument('--bl_rnn_hid_dim', default=256, type=int, help='')
     # parser.add_argument('--maxnorm', default=True, type=bool,
     #                                  help='if not specified then True.')
 
@@ -305,6 +308,10 @@ def get_args_parser():
         help='if not specified then False')
     parser.add_argument("--final_beta", default=1, type=float, 
                         help="Minimal value for the beta")
+    parser.add_argument("--log_grad", action='store_true',
+                        help="store gradient values in tensorboard")
+    parser.add_argument("--log_param", action='store_true',
+                    help="store distribution, rendering params in tensorboard")
 
     return parser
 

@@ -180,7 +180,7 @@ if __name__ == '__main__':
                     #  n + f'-neuralRender-noMaxStrkTanhNorm-noEG-sepWherePres{run_args.seed}',
                     #  n + f'-fixPri-noSpDec-noSeperatedZ-noEG+2nm-wr3-{run_args.seed}',
                     #  n + f'-fixPri-noSpDec-noEG-3nm-wr3-{run_args.seed}',
-                     n + f'-fixPri-SpDec-noEG-3norm-wr3-{run_args.seed}',
+                     n + f'-fixPri-SpDec-noEG-3norm-wr3-noBl-{run_args.seed}',
                     
 
                     '--seed', f'{run_args.seed}',
@@ -189,6 +189,7 @@ if __name__ == '__main__':
                     # '--z_what_in_pos', 'z_where_rnn',
                     # '--target_in_pos', 'RNN',
                     '--z_where_type', '3',
+                    '--no_baseline',
                     # '--lr', '1e-3', 
                     # '--sep_where_pres_mlp',
                     # '--render_at_the_end',

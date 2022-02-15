@@ -118,11 +118,13 @@ def train(model, optimizer, stats, data_loader, args, writer,
                 writer.add_scalar("Train curves/"+n, l.detach().mean(), 
                                                                     iteration)
             # Check for nans gradients, parameters
-            # named_params = get_model_named_params(args, guide, generative_model)
-            # for name, parameter in named_params:
-            # #     try:
-            #     writer.add_scalar(f"Grad_norm/{name}", parameter.grad.norm(2), 
-                                                                    # iteration)
+            if args.log_grad:
+                named_params = get_model_named_params(args, guide, 
+                                                        generative_model)
+                for name, parameter in named_params:
+                    writer.add_scalar(f"Grad_norm/{name}", 
+                                      parameter.grad.norm(2), iteration)
+                #     try:
                     ## if (name == 'style_mlp.seq.linear_modules.2.weight' and
                     ##     (parameter.grad.norm(2) > 6e4)):
                     ##     print(f'{name} has grad_norm = {parameter.grad.norm(2)}')
@@ -337,14 +339,14 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
 
 def save(args, iteration, model, optimizer, stats):
     # save iteration.pt
-    util.save_checkpoint(
-        util.get_checkpoint_path(args, 
-        checkpoint_iteration=iteration),
-        model,
-        optimizer,
-        stats,
-        run_args=args,
-    )
+    # util.save_checkpoint(
+    #     util.get_checkpoint_path(args, 
+    #     checkpoint_iteration=iteration),
+    #     model,
+    #     optimizer,
+    #     stats,
+    #     run_args=args,
+    # )
     # save latest.pt
     util.save_checkpoint(
         util.get_checkpoint_path(args),
