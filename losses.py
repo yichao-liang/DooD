@@ -22,7 +22,8 @@ SequentialLoss = namedtuple('SequentialLoss', ['overall_loss',
                                                 'log_posterior'])
 
 def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
-                            iteration=0, writer=None, writer_tag=None, beta=1):
+                            iteration=0, writer=None, writer_tag=None, beta=1,
+                            args=None):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -37,16 +38,16 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         guide_out.z_smpl, guide_out.z_lprb, guide_out.baseline_value, 
         guide_out.mask_prev, guide_out.canvas, guide_out.z_prior)
 
-    if (not guide.execution_guided and 
-        generative_model.input_dependent_param):
+    if ((not guide.execution_guided and generative_model.input_dependent_param)
+        or args.render_at_the_end):
         # If we haven't rendered the final reconstruction AND we have
         # predicted render parameters
         generative_model.sigma = guide_out.decoder_param.sigma
-        generative_model.single_strk_tanh_slope = \
+        generative_model.sgl_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[0]
         generative_model.add_strk_tanh_slope = \
                                     guide_out.decoder_param.slope[1][:, :, -1]
-    
+        if args.render_at_the_end: canvas = None
     # multi by beta
     # log_post_ = {}
     # for i, z in enumerate(log_post._fields):
@@ -152,82 +153,82 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                                     iteration)
 
             # renderer parameters
-            writer.add_histogram(f"{writer_tag}Parameters/img_dist_std",
-                    generative_model.get_imgs_dist_std().detach(), iteration)
-            if generative_model.input_dependent_param:
-                writer.add_histogram(f"{writer_tag}Parameters/gen.sigma",
-                            guide_out.decoder_param.sigma.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/tanh.add_slopes",
-                            guide_out.decoder_param.slope[1].detach(), iteration)
-                if generative_model.strk_tanh:
-                    writer.add_histogram(f"{writer_tag}Parameters/tanh.stroke_slopes",
-                            guide_out.decoder_param.slope[0].detach(), iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/img_dist_std",
+            #         generative_model.get_imgs_dist_std().detach(), iteration)
+            # if generative_model.input_dependent_param:
+            #     writer.add_histogram(f"{writer_tag}Parameters/gen.sigma",
+            #                 guide_out.decoder_param.sigma.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/tanh.add_slopes",
+            #                 guide_out.decoder_param.slope[1].detach(), iteration)
+            #     if generative_model.sgl_strk_tanh:
+            #         writer.add_histogram(f"{writer_tag}Parameters/tanh.stroke_slopes",
+            #                 guide_out.decoder_param.slope[0].detach(), iteration)
             
-            # z prior parameters
-            if generative_model.prior_dist == 'Sequential':
-                writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
-                            guide.internal_decoder.z_pres_p.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
-                            guide.internal_decoder.z_what_loc.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
-                            guide.internal_decoder.z_what_std.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.scale",
-                            guide.internal_decoder.z_where_loc.detach()[:, 0], iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.shift",
-                            guide.internal_decoder.z_where_loc.detach()[:, 1:3], iteration)
-                if guide.z_where_type == '4_rotate':
-                    writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.rotate",
-                            guide.internal_decoder.z_where_loc.detach()[:, 3], iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.std",
-                            guide.internal_decoder.z_where_std.detach(), iteration)
-            elif (not generative_model.fixed_prior and 
-                 generative_model.prior_dist == 'Independent'):
-                writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
-                            generative_model.z_pres_prob.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
-                            generative_model.pts_loc.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
-                            generative_model.pts_std.detach(), iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.scale",
-                            generative_model.z_where_loc.detach()[0], iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.shift",
-                            generative_model.z_where_loc.detach()[1:3], iteration)
-                if guide.z_where_type == '4_rotate':
-                    writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.rotate",
-                            generative_model.z_where_loc.detach()[3], iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.std",
-                            generative_model.z_where_std.detach(), iteration)
+            # # z prior parameters
+            # if generative_model.prior_dist == 'Sequential':
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
+            #                 guide.internal_decoder.z_pres_p.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
+            #                 guide.internal_decoder.z_what_loc.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
+            #                 guide.internal_decoder.z_what_std.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.scale",
+            #                 guide.internal_decoder.z_where_loc.detach()[:, 0], iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.shift",
+            #                 guide.internal_decoder.z_where_loc.detach()[:, 1:3], iteration)
+            #     if guide.z_where_type == '4_rotate':
+            #         writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.rotate",
+            #                 guide.internal_decoder.z_where_loc.detach()[:, 3], iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.std",
+            #                 guide.internal_decoder.z_where_std.detach(), iteration)
+            # elif (not generative_model.fixed_prior and 
+            #      generative_model.prior_dist == 'Independent'):
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
+            #                 generative_model.z_pres_prob.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
+            #                 generative_model.pts_loc.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
+            #                 generative_model.pts_std.detach(), iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.scale",
+            #                 generative_model.z_where_loc.detach()[0], iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.shift",
+            #                 generative_model.z_where_loc.detach()[1:3], iteration)
+            #     if guide.z_where_type == '4_rotate':
+            #         writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.loc.rotate",
+            #                 generative_model.z_where_loc.detach()[3], iteration)
+            #     writer.add_histogram(f"{writer_tag}Parameters/z_where_prior.std",
+            #                 generative_model.z_where_std.detach(), iteration)
                 
                             
-            # z posterior parameters
-            writer.add_histogram(f"{writer_tag}Parameters/z_pres_posterior",
-                            guide_out.z_pms.z_pres.detach(), iteration)
-            writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.loc.scale",
-                            guide_out.z_pms.z_where.detach()[:, :, :, 0, 0], iteration)
-            writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.loc.shift",
-                            guide_out.z_pms.z_where.detach()[:, :, :, 1:3, 0], iteration)
-            if guide.z_where_type == '4_rotate':
-                writer.add_histogram("f{writer_tag}Parameters/z_where_posterior.loc.rotate",
-                            guide_out.z_pms.z_where.detach()[:, :, :, 3, 0], iteration)
-            writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.std",
-                            guide_out.z_pms.z_where.detach()[:, :, :, :, 1], iteration)
-            writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.loc",
-                            guide_out.z_pms.z_what.detach()[:, :, :, :, :, 0], iteration)
-            writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.std",
-                            guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1], iteration)
+            # # z posterior parameters
+            # writer.add_histogram(f"{writer_tag}Parameters/z_pres_posterior",
+            #                 guide_out.z_pms.z_pres.detach(), iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.loc.scale",
+            #                 guide_out.z_pms.z_where.detach()[:, :, :, 0, 0], iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.loc.shift",
+            #                 guide_out.z_pms.z_where.detach()[:, :, :, 1:3, 0], iteration)
+            # if guide.z_where_type == '4_rotate':
+            #     writer.add_histogram("f{writer_tag}Parameters/z_where_posterior.loc.rotate",
+            #                 guide_out.z_pms.z_where.detach()[:, :, :, 3, 0], iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/z_where_posterior.std",
+            #                 guide_out.z_pms.z_where.detach()[:, :, :, :, 1], iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.loc",
+            #                 guide_out.z_pms.z_what.detach()[:, :, :, :, :, 0], iteration)
+            # writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.std",
+            #                 guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1], iteration)
 
-            # z posterior samples
-            writer.add_histogram(f"{writer_tag}Samples/z_pres",
-                            guide_out.z_smpl.z_pres.detach(), iteration)
-            writer.add_histogram(f"{writer_tag}Samples/z_where.scale",
-                            guide_out.z_smpl.z_where.detach()[:, :, :, 0], iteration)
-            writer.add_histogram(f"{writer_tag}Samples/z_where.shift",
-                            guide_out.z_smpl.z_where.detach()[:, :, :, 1:3], iteration)
-            if guide.z_where_type == '4_rotate':
-                writer.add_histogram(f"{writer_tag}Samples/z_where.rotate",
-                            guide_out.z_smpl.z_where.detach()[:, :, :, 3], iteration)
-            writer.add_histogram(f"{writer_tag}Samples/z_what",
-                            guide_out.z_smpl.z_what.detach(), iteration)
+            # # z posterior samples
+            # writer.add_histogram(f"{writer_tag}Samples/z_pres",
+            #                 guide_out.z_smpl.z_pres.detach(), iteration)
+            # writer.add_histogram(f"{writer_tag}Samples/z_where.scale",
+            #                 guide_out.z_smpl.z_where.detach()[:, :, :, 0], iteration)
+            # writer.add_histogram(f"{writer_tag}Samples/z_where.shift",
+            #                 guide_out.z_smpl.z_where.detach()[:, :, :, 1:3], iteration)
+            # if guide.z_where_type == '4_rotate':
+            #     writer.add_histogram(f"{writer_tag}Samples/z_where.rotate",
+            #                 guide_out.z_smpl.z_where.detach()[:, :, :, 3], iteration)
+            # writer.add_histogram(f"{writer_tag}Samples/z_what",
+            #                 guide_out.z_smpl.z_what.detach(), iteration)
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
     return SequentialLoss(overall_loss=loss, 

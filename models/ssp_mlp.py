@@ -48,31 +48,33 @@ def constrain_z_what(z_what_loc, clamp=False):
 class RendererParamMLP(nn.Module):
     """Predict the render parameters
     """
-    def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, strk_tanh,
+    def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, sgl_strk_tanh,
                  spline_decoder=True):
         super().__init__()
         self.maxnorm = maxnorm
-        self.strk_tanh = strk_tanh
+        self.sgl_strk_tanh = sgl_strk_tanh
         self.spline_decoder=spline_decoder
         self.seq = util.init_mlp(in_dim=in_dim, 
                                  out_dim=3,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)        
         self.seq.linear_modules[-1].weight.data.zero_()
-        if self.maxnorm and self.strk_tanh:
-            if self.spline_decoder:
-                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+        if self.maxnorm and self.sgl_strk_tanh:
+            # if self.spline_decoder:
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                     torch.tensor([6,2,2], dtype=torch.float)) # with maxnorm
-            else:
-                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-                    torch.tensor([6,2,2], dtype=torch.float)) # with maxnorm
+            # else:
+            #     self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+            #         torch.tensor([6,2,6], dtype=torch.float)) # with maxnorm
   
-        elif not self.strk_tanh and not self.maxnorm:
-            # without both
-            # used when no execution_guided
-            self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [0,20,30], dtype=torch.float)) 
-        elif not self.maxnorm and self.strk_tanh:
+        elif not self.sgl_strk_tanh and not self.maxnorm:
+            # if self.spline_decoder:
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([0,20,30], dtype=torch.float)) 
+            # else:
+            #     self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+            #         torch.tensor([0,0,1], dtype=torch.float)) 
+        elif not self.maxnorm and self.sgl_strk_tanh:
             # used when execution_guided
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 [0,5,0], dtype=torch.float)) # without maxnorm
@@ -86,21 +88,26 @@ class RendererParamMLP(nn.Module):
 
         # stroke slope
         if self.maxnorm:
-            if self.spline_decoder:
-                strk_slope = util.constrain_parameter(z[:, 1:2], 
+            # if self.spline_decoder:
+            strk_slope = util.constrain_parameter(z[:, 1:2], 
                                                       min=.1, max=.9) # maxnorm
-            else:
-                strk_slope = util.constrain_parameter(z[:, 1:2], 
-                                                      min=.1, max=5) # maxnorm
+            # else:
+            #     strk_slope = util.constrain_parameter(z[:, 1:2], 
+            #                                           min=.1, max=5) # maxnorm
         else:
             strk_slope = F.softplus(z[:, 1:2]) + 1e-3 # tanh
 
         # add slope
-        if self.strk_tanh:
+        if self.sgl_strk_tanh:
+            # if self.spline_decoder:
             add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
-            # add_slope = F.softplus(z[:, 2:3]) + 1e-3
+            # else:
+            #     add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=3)
         else:
+            # if self.spline_decoder:
             add_slope = F.softplus(z[:, 2:3]) + 1e-3
+            # else:
+            #     add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
 
         return sigma, strk_slope, add_slope
 

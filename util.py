@@ -503,9 +503,9 @@ def init(run_args, device):
                                 ).to(device)
 
     elif run_args.model_type == 'Sequential':
-        assert ((run_args.execution_guided == (not run_args.no_strk_tanh)) or
-                not run_args.execution_guided),\
-            "execution_guided should be used in accordance with strk_tanh norm"
+        # assert ((run_args.execution_guided == (not run_args.no_sgl_strk_tanh)) or
+        #         not run_args.execution_guided),\
+            # "execution_guided should be used in accordance with strk_tanh norm"
         generative_model = ssp.GenerativeModel(
                     max_strks=run_args.strokes_per_img,
                     pts_per_strk=run_args.points_per_stroke,
@@ -517,7 +517,8 @@ def init(run_args, device):
                     prior_dist=run_args.prior_dist,
                     num_mlp_layers=run_args.num_mlp_layers,
                     maxnorm=not run_args.no_maxnorm,
-                    strk_tanh=not run_args.no_strk_tanh,
+                    sgl_strk_tanh=not run_args.no_sgl_strk_tanh,
+                    add_strk_tanh=not run_args.no_add_strk_tanh,
                     constrain_param=not run_args.constrain_sample,
                     spline_decoder=not run_args.no_spline_renderer,
                     render_method=run_args.render_method,
@@ -542,7 +543,8 @@ def init(run_args, device):
                     bl_mlp_hid_dim=run_args.bl_mlp_hid_dim,
                     bl_rnn_hid_dim=run_args.bl_rnn_hid_dim,
                     maxnorm=not run_args.no_maxnorm,
-                    strk_tanh=not run_args.no_strk_tanh,
+                    sgl_strk_tanh=not run_args.no_sgl_strk_tanh,
+                    add_strk_tanh=not run_args.no_add_strk_tanh,
                     z_what_in_pos=run_args.z_what_in_pos,
                     constrain_param=not run_args.constrain_sample,
                     render_method=run_args.render_method,
@@ -552,6 +554,7 @@ def init(run_args, device):
                     residual_pixel_count=run_args.residual_pixel_count,
                     spline_decoder=not run_args.no_spline_renderer,
                     sep_where_pres_mlp=run_args.sep_where_pres_mlp,
+                    render_at_the_end=run_args.render_at_the_end,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'

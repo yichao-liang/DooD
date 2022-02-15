@@ -49,7 +49,8 @@ class GenerativeModel(nn.Module):
                                                 hidden_dim=256,
                                                 num_mlp_layers=2,
                                                 maxnorm=True,
-                                                single_strk_tanh=True,
+                                                sgl_strk_tanh=True,
+                                                add_strk_tanh=True,
                                                 constrain_param=True,
                                                 fixed_prior=True,
                                                 spline_decoder=True,
@@ -63,7 +64,8 @@ class GenerativeModel(nn.Module):
         self.pts_per_strk = pts_per_strk
         self.execution_guided = execution_guided
         self.maxnorm = maxnorm
-        self.single_strk_tanh = single_strk_tanh
+        self.sgl_strk_tanh = sgl_strk_tanh
+        self.add_strk_tanh = add_strk_tanh
         self.constrain_param = constrain_param
         self.intr_ll = intermediate_likelihood
         if self.intr_ll == "Geom":
@@ -159,12 +161,12 @@ class GenerativeModel(nn.Module):
         # Whether the sigma for renderer or per-stroke-slope depends on the input
         self.input_dependent_param = input_dependent_param
         if self.input_dependent_param:
-            self.sigma, self.single_strk_tanh_slope, self.add_strk_tanh_slope\
+            self.sigma, self.sgl_strk_tanh_slope, self.add_strk_tanh_slope\
                                                             = None, None, None
         else:
             self.sigma = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
-            self.single_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
+            self.sgl_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
             self.add_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
@@ -178,8 +180,8 @@ class GenerativeModel(nn.Module):
         return util.constrain_parameter(self.sigma, min=.01, max=.04)
     def get_add_strk_tanh_slope(self):
         return util.constrain_parameter(self.add_strk_tanh_slope, min=.1,max=.7)
-    def get_single_strk_tanh_slope(self):
-        return util.constrain_parameter(self.single_strk_tanh_slope, min=.1, 
+    def get_sgl_strk_tanh_slope(self):
+        return util.constrain_parameter(self.sgl_strk_tanh_slope, min=.1, 
                                                                      max=.7)
     def get_imgs_dist_std(self):
         # return F.softplus(self.imgs_dist_std) + 1e-6
@@ -402,13 +404,13 @@ class GenerativeModel(nn.Module):
         # Change back to [ptcs, bs, n_strk, n_channel (1), H, W]
         imgs = imgs.view(ptcs, bs, n_strks, 1, self.res, self.res)
 
-        # if self.single_strk_tanh and self.spline_decoder:
-        if self.single_strk_tanh:
+        # if self.sgl_strk_tanh and self.spline_decoder:
+        if self.sgl_strk_tanh:
             # Normalize per stroke
             if self.input_dependent_param:
-                slope = self.single_strk_tanh_slope
+                slope = self.sgl_strk_tanh_slope
             else:
-                slope = self.get_single_strk_tanh_slope()
+                slope = self.get_sgl_strk_tanh_slope()
             # output imgs: [prod(shp), n_strks, 1, res, res]
             imgs = util.normalize_pixel_values(imgs, 
                                             method=self.norm_pixel_method,
@@ -416,7 +418,7 @@ class GenerativeModel(nn.Module):
         # Change to [ptcs, bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(2) 
 
-        if n_strks > 1:
+        if n_strks > 1 and self.add_strk_tanh:
             # only normalize again if there were more then 1 stroke
             if self.input_dependent_param:
                 # should have shape [ptcs, bs]
@@ -426,6 +428,7 @@ class GenerativeModel(nn.Module):
             imgs = util.normalize_pixel_values(imgs, 
                             method=self.norm_pixel_method,
                             slope=slope)
+
         imgs = imgs.view(ptcs, bs, 1, self.res, self.res)
 
         return imgs 
@@ -460,11 +463,11 @@ class GenerativeModel(nn.Module):
 
         recon = recon.view(ptcs, bs, n_strks, 1, res, res)
 
-        if self.single_strk_tanh and self.spline_decoder:
+        if self.sgl_strk_tanh and self.spline_decoder:
             if self.input_dependent_param:
-                slope = self.single_strk_tanh_slope
+                slope = self.sgl_strk_tanh_slope
             else:
-                slope = self.get_single_strk_tanh_slope()
+                slope = self.get_sgl_strk_tanh_slope()
             recon = util.normalize_pixel_values(recon, method='tanh', 
                                                 slope=slope)
         recon = recon.view(ptcs, bs, n_strks, 1, res, res)
@@ -510,7 +513,7 @@ class GenerativeModel(nn.Module):
 
         # Likelihood
         # self.sigma = decoder_param.sigma
-        # self.single_strk_tanh_slope = decoder_param.slope[0]
+        # self.sgl_strk_tanh_slope = decoder_param.slope[0]
         if self.intr_ll:
             imgs = imgs.unsqueeze(2).expand(*bs, *img_shape)
         
@@ -553,7 +556,7 @@ class GenerativeModel(nn.Module):
         Args:
             in_img [bs, 1, res, res]:
                 For unconditioned sampling: in_img is some random inputs for the
-                    sigma, single_strk_tanh network;
+                    sigma, sgl_strk_tanh network;
                 For ... (update later)
         Return:
             imgs [bs, 1, res, res]
@@ -634,7 +637,7 @@ class GenerativeModel(nn.Module):
                 z_where_smpl[:, t] = state.z_where
 
                 self.sigma = result['sigma']
-                self.single_strk_tanh_slope = result['slope'][0]
+                self.sgl_strk_tanh_slope = result['slope'][0]
                 # [bs]
                 add_slope = result['slope'][1].squeeze(-1)
 
@@ -795,7 +798,8 @@ class Guide(template.Guide):
                         bl_mlp_hid_dim=512,
                         bl_rnn_hid_dim=256,
                         maxnorm=True,
-                        single_strk_tanh=True,
+                        sgl_strk_tanh=True,
+                        add_strk_tanh = True,
                         z_what_in_pos=None,
                         constrain_param=True,
                         render_method='bounded',
@@ -804,6 +808,7 @@ class Guide(template.Guide):
                         spline_decoder=True,
                         residual_pixel_count=False,
                         sep_where_pres_mlp=False,
+                        render_at_the_end=False,
                 ):
         '''
         Args:
@@ -829,7 +834,6 @@ class Guide(template.Guide):
                 bl_mlp_hid_dim=bl_mlp_hid_dim,
                 bl_rnn_hid_dim=bl_rnn_hid_dim,
                 maxnorm=maxnorm,
-                single_strk_tanh=single_strk_tanh,
                 dependent_prior=dependent_prior,
                 spline_decoder=spline_decoder,
                 residual_pixel_count=residual_pixel_count,
@@ -837,6 +841,9 @@ class Guide(template.Guide):
                 )
         # Parameters
         self.constrain_param = constrain_param
+        self.sgl_strk_tanh = sgl_strk_tanh
+        self.add_strk_tanh = add_strk_tanh
+        self.render_at_the_end = render_at_the_end
 
         # Internal renderer
         if self.execution_guided or self.prior_dist == 'Sequential':
@@ -852,7 +859,8 @@ class Guide(template.Guide):
                                             prior_dist=prior_dist,
                                             num_mlp_layers=num_mlp_layers,
                                             maxnorm=maxnorm,
-                                            single_strk_tanh=single_strk_tanh,
+                                            sgl_strk_tanh=sgl_strk_tanh,
+                                            add_strk_tanh = add_strk_tanh,
                                             constrain_param=constrain_param,
                                             render_method=render_method,
                                             dependent_prior=dependent_prior,
@@ -884,7 +892,7 @@ class Guide(template.Guide):
                                       hidden_dim=hidden_dim,
                                       num_layers=num_mlp_layers,
                                       maxnorm=self.maxnorm,
-                                      single_strk_tanh=self.single_strk_tanh,
+                                      sgl_strk_tanh=self.sgl_strk_tanh,
                                       spline_decoder=spline_decoder)
 
         self.wt_mlp = WhatMLP(in_dim=self.wt_mlp_in_dim,
@@ -936,7 +944,7 @@ class Guide(template.Guide):
          z_pres_smpl, z_where_smpl, z_what_smpl,
          z_pres_lprb, z_where_lprb, z_what_lprb,
          z_pres_prir, z_where_prir, z_what_prir,
-         sigmas, h_cs, h_ls, strk_slopes, add_slopes, 
+         sigmas, h_cs, h_ls, sgl_strk_tanh_slope, add_strk_tanh_slope, 
          canvas, residual) = self.initialize_state(imgs, ptcs)
 
         for t in range(self.max_strks):
@@ -984,17 +992,16 @@ class Guide(template.Guide):
             baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
 
             sigmas[:, :, t] = result['sigma'].squeeze(-1)
-            strk_slopes[:, :, t] = result['slope'][0].squeeze(-1)
-            # add_slopes is shared across strokes in non-execution-guided models
-            add_slopes[:, :, t] = result['slope'][1].squeeze(-1)
+            sgl_strk_tanh_slope[:, :, t] = result['slope'][0].squeeze(-1)
+            # add_strk_tanh_slope is shared across strokes in non-execution-guided models
+            add_strk_tanh_slope[:, :, t] = result['slope'][1].squeeze(-1)
 
             # Update the canvas
             if self.execution_guided:
                 self.internal_decoder.sigma = sigmas[:, :, t:t+1].clone()
                 # tanh_slope [ptcs, bs, 1]
-                self.internal_decoder.single_strk_tanh_slope = \
-                                                strk_slopes[:, :, t:t+1]
-                # todo
+                self.internal_decoder.sgl_strk_tanh_slope = \
+                                            sgl_strk_tanh_slope[:, :, t:t+1]
                 canvas_step = self.internal_decoder.renders_imgs((
                                         z_pres_smpl[:, :, t:t+1].clone(),
                                         z_what_smpl[:, :, t:t+1],
@@ -1002,20 +1009,25 @@ class Guide(template.Guide):
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
                     canvas = canvas + canvas_step
-                    canvas = util.normalize_pixel_values(
-                                                canvas, 
-                                                method='tanh', 
-                                                slope=add_slopes[:, :, t])
+                    #at step 0 canvas doesn't need normalization, this also
+                    #allows the last prediction used in `render_at_the_end`
+                    # if t > 0 and self.add_strk_tanh:
+                    if self.spline_decoder:
+                        canvas = util.normalize_pixel_values(
+                                        canvas, 
+                                        method='tanh', 
+                                        slope=add_strk_tanh_slope[:, :, t-1])
+                    # if self.render_at_the_end:
+                    #     canvas = canvas.detach()
                     canvas_so_far = canvas
                 else:
-                    # update with update_mask
                     canvas_so_far = (canvas[:, :, t:t+1] +
                                      canvas_step.unsqueeze(2))
                     canvas[:, :, t+1] = util.normalize_pixel_values(
-                                                canvas_so_far, 
-                                                method='tanh',
-                                                slope=add_slopes[:, :, t:t+1]
-                                                ).squeeze(2)
+                                        canvas_so_far, 
+                                        method='tanh',
+                                        slope=add_strk_tanh_slope[:, :, t:t+1]
+                                        ).squeeze(2)
                 if self.exec_guid_type == "residual" or\
                     self.residual_pixel_count:
                     # compute the residual
@@ -1063,7 +1075,7 @@ class Guide(template.Guide):
                            mask_prev=mask_prev,
                            decoder_param=DecoderParam(
                                sigma=sigmas,
-                               slope=(strk_slopes, add_slopes)),
+                               slope=(sgl_strk_tanh_slope, add_strk_tanh_slope)),
                            canvas=canvas,
                            residual=residual,
                            z_prior=ZLogProb(
@@ -1317,7 +1329,7 @@ class Guide(template.Guide):
             z_where_prir [ptcs, bs, ..]
             z_what_prir [ptcs, bs, ..]
             sigmas [ptcs, bs, ..]
-            strk_slopes [ptcs, bs, ..]
+            sgl_strk_tanh_slope [ptcs, bs, ..]
             canvas [ptcs, bs, ..]
             residual [ptcs, bs, ..]
         '''
@@ -1371,8 +1383,8 @@ class Guide(template.Guide):
 
         # sigma and slope: for rendering
         sigmas = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
-        strk_slopes = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
-        add_slopes = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
+        sgl_strk_tanh_slope = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
+        add_strk_tanh_slope = torch.zeros(ptcs, bs, self.max_strks, device=imgs.device)
 
         '''Signal mask for each step
         At time t, `mask_prev` stroes whether prev.z_pres==0, `mask_curr` 
@@ -1411,7 +1423,7 @@ class Guide(template.Guide):
                 z_pres_smpl, z_where_smpl, z_what_smpl, 
                 z_pres_lprb, z_where_lprb, z_what_lprb,
                 z_pres_prir, z_where_prir, z_what_prir, 
-                sigmas, h_cs, h_ls, strk_slopes, add_slopes, canvas, residual)
+                sigmas, h_cs, h_ls, sgl_strk_tanh_slope, add_strk_tanh_slope, canvas, residual)
     
     def character_conditioned_sampling(self, cond_img, n_samples=7):
         '''Only useful when it has an internal render, o/w it returns None and 

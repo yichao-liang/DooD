@@ -16,7 +16,8 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    writer = SummaryWriter(log_dir=f"./log/debug_full-fixPri/{args.save_model_name}")
+    writer = SummaryWriter(log_dir=f"./log/debug_full-fixpri/{args.save_model_name}")
+    # writer = SummaryWriter(log_dir=f"./log/debug_fulls{args.seed}/{args.save_model_name}")
 
     # When doing hyperop
     # writer = SummaryWriter(log_dir=f"./log/hyperop/" + 
@@ -240,6 +241,12 @@ def get_args_parser():
         action='store_true',
         help='if specified then True',
     )
+    parser.add_argument(
+        '--render_at_the_end',
+        action='store_true',
+        help='''This is useful when canvas is used. If Ture, a recon is computed 
+        at the end is used for the likelihood loss, instead of the canvas'''
+    )
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
@@ -247,7 +254,9 @@ def get_args_parser():
     parser.add_argument('--bl_rnn_hid_dim', default=256, type=int, help='')
     parser.add_argument('--no_maxnorm', action='store_true', 
                                      help='if specified then True.')
-    parser.add_argument('--no_strk_tanh', action='store_true', 
+    parser.add_argument('--no_sgl_strk_tanh', action='store_true', 
+                                     help='if specified then True.')
+    parser.add_argument('--no_add_strk_tanh', action='store_true', 
                                      help='if specified then True.')
     # parser.add_argument('--maxnorm', default=True, type=bool,
     #                                  help='if not specified then True.')

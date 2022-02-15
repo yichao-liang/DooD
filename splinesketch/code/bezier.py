@@ -22,7 +22,9 @@ class Bezier(torch.nn.Module):
         self.method = method
         self.debug = debug
 
+        # C.shape: [res, res]
         C, D = torch.meshgrid(torch.Tensor(range(self.res)), torch.Tensor(range(self.res)))
+        # c.shape [1, 1, res, res]
         self.c = torch.nn.Parameter(C.unsqueeze(0).unsqueeze(0) / res, requires_grad=False)
         self.d = torch.nn.Parameter(D.unsqueeze(0).unsqueeze(0) / res, requires_grad=False)
 
@@ -38,10 +40,18 @@ class Bezier(torch.nn.Module):
             self.raster = self._raster_shrunk
 
     def sample_curve(self, control_points, t):
+        '''
+        Args: 
+            control_points [batch_shape, n_strks, n_points, 2]
+            t [self.steps]
+        '''
         order = control_points.size()[2] - 1
         order = torch.tensor(order).float().to(t.device)
+        
+        # feat: [n_points, steps]
         feat = torch.stack([comb(order, k) * t**(order - k) * (1 - t)**(k)
                             for k in torch.arange(order + 1).float().to(t.device)])
+        # curve: [bs, n_strks, 2, steps]
         curve = torch.einsum('bcki,kt->bcit', control_points, feat)
         return curve
     
@@ -58,13 +68,15 @@ class Bezier(torch.nn.Module):
             else: [batch_size, n_channels (1), H, W]
         '''
         # BCKXY -> BHW
+        # steps.shape: [self.steps]
         steps = torch.linspace(0, 1, self.steps).to(control_points.device)
         shape = control_points.shape[:-2]
 
         if keep_strk_dim:
-            # [b, n_strks, 2, n_pts] -> [b, 2, (n_strks * n_pts)]
+            # curve coordinates at each of the step t out of the e.g. 100 steps.
+            # [b, n_strks, 2, steps] -> [(b * n_strks), 2, steps]
             curve = rearrange(self.sample_curve(control_points, steps),
-                        'b strk xy pts -> (b strk) xy pts')
+                            'b strk xy pts -> (b strk) xy pts')
             return self.raster(curve, sigma).view(*shape, 1, self.res, self.res)
         else:
             # [b, n_strks, xy, n_pts] -> [b, xy, (n_strks * n_pts)]
@@ -75,11 +87,16 @@ class Bezier(torch.nn.Module):
 
 
     def _raster_base(self, curve, sigma=5e-2):
-        '''
-        curve [bs, steps, 2]
+        '''Raster image from curve sample points
+        Args:
+            curve [bs, 2, steps]
+            sigma float or [bs, 1]
+        Return:
+            img [bs, 1, res, res]
         '''
         tic = time()
 
+        # x: [bs, 1, 1, steps]
         x = curve[:, 0].unsqueeze(1).unsqueeze(1)
         y = curve[:, 1].unsqueeze(1).unsqueeze(1)
         batch_size = curve.size()[0]
@@ -87,6 +104,7 @@ class Bezier(torch.nn.Module):
         
         # x_ = x.expand(self.res, self.res, steps)
         # y_ = y.expand(self.res, self.res, steps)
+        # c: [1, 1, res, res] -> [bs, steps, res, res] -> [bs, res, res, steps]
         c = torch.transpose(self.c.expand(batch_size, steps, self.res, self.res)
                                                                         ,1, 3)
         d = torch.transpose(self.d.expand(batch_size, steps, self.res, self.res)
@@ -96,10 +114,13 @@ class Bezier(torch.nn.Module):
             print(time() - tic)
 
         if torch.is_tensor(sigma):
+            # size [bs, 1, 1, 1]
             sigma = sigma.flatten()[:, None, None, None]
         raster = torch.exp((-(x - c)**2 - (y - d)**2) / (2*sigma**2))
         # raster = torch.mean(raster, dim=2)
         # raster = torch.min(torch.sum(raster, dim=2), torch.Tensor([1]).to(self.device))
+
+        # [bs, res, res]
         raster = torch.sum(raster, dim=3)
         #  raster = torch.max(raster, dim=2)[0]
         if self.debug:

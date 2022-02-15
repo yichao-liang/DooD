@@ -29,7 +29,6 @@ class Guide(nn.Module):
                 bl_mlp_hid_dim=512,
                 bl_rnn_hid_dim=256,
                 maxnorm=True,
-                strk_tanh=True,
                 dependent_prior=False,
                 spline_decoder=True,
                 residual_pixel_count=False,
@@ -46,7 +45,6 @@ class Guide(nn.Module):
         self.z_where_type = z_where_type
         self.z_where_dim = util.init_z_where(self.z_where_type).dim
         self.maxnorm = maxnorm
-        self.strk_tanh = strk_tanh
         self.z_what_in_pos = z_what_in_pos
         self.intr_ll = intermediate_likelihood
         if self.intr_ll is not None:
