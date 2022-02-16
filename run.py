@@ -16,7 +16,7 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    log_dir = f"./log/debug_full-bl/{args.save_model_name}"
+    log_dir = f"./log/debug_full-seq_beta/{args.save_model_name}"
     # log_dir = f"./log/debug_full{args.seed}/{args.save_model_name}"
     writer = SummaryWriter(log_dir=log_dir)
 

@@ -60,12 +60,12 @@ class RendererParamMLP(nn.Module):
                                  num_layers=num_layers)        
         self.seq.linear_modules[-1].weight.data.zero_()
         if self.maxnorm and self.sgl_strk_tanh:
-            # if self.spline_decoder:
-            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+            if self.spline_decoder:
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                     torch.tensor([6,2,2], dtype=torch.float)) # with maxnorm
-            # else:
-            #     self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-            #         torch.tensor([6,2,6], dtype=torch.float)) # with maxnorm
+            else:
+                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([6,2,6], dtype=torch.float)) # with maxnorm
   
         elif not self.sgl_strk_tanh and not self.maxnorm:
             # if self.spline_decoder:
@@ -88,21 +88,21 @@ class RendererParamMLP(nn.Module):
 
         # stroke slope
         if self.maxnorm:
-            # if self.spline_decoder:
-            strk_slope = util.constrain_parameter(z[:, 1:2], 
+            if self.spline_decoder:
+                strk_slope = util.constrain_parameter(z[:, 1:2], 
                                                       min=.1, max=.9) # maxnorm
-            # else:
-            #     strk_slope = util.constrain_parameter(z[:, 1:2], 
-            #                                           min=.1, max=5) # maxnorm
+            else:
+                strk_slope = util.constrain_parameter(z[:, 1:2], 
+                                                      min=.1, max=5) # maxnorm
         else:
             strk_slope = F.softplus(z[:, 1:2]) + 1e-3 # tanh
 
         # add slope
         if self.sgl_strk_tanh:
-            # if self.spline_decoder:
-            add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
-            # else:
-            #     add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=3)
+            if self.spline_decoder:
+                add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
+            else:
+                add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=3)
         else:
             # if self.spline_decoder:
             add_slope = F.softplus(z[:, 2:3]) + 1e-3
@@ -125,26 +125,26 @@ class PresWhereMLP(nn.Module):
                                  num_layers=num_layers)        
         self.constrain_param = constrain_param
 
-        if spline_decoder:
-            if z_where_type == '4_rotate':
-                # has minimal constrain
-                self.seq.linear_modules[-1].weight.data.zero_()
-                # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
-                self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                    [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+        # if spline_decoder:
+        if z_where_type == '4_rotate':
+            # has minimal constrain
+            self.seq.linear_modules[-1].weight.data.zero_()
+            # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+                [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
 
-                # AIR constrain
-                # self.seq.linear_modules[-1].weight.data.zero_()
-                # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
-                # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                #     [4, 1,0,0,0, 1,1,1,1], dtype=torch.float)) 
-            elif z_where_type == '3':
-                self.seq.linear_modules[-1].weight.data.zero_()
-                # [pres, loc:scale,shift, std:scale,shift
-                self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-                    torch.tensor([4, 4,0,0, -4,-4,-4], dtype=torch.float))
-            else:
-                raise NotImplementedError
+            # AIR constrain
+            # self.seq.linear_modules[-1].weight.data.zero_()
+            # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+            # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+            #     [4, 1,0,0,0, 1,1,1,1], dtype=torch.float)) 
+        elif z_where_type == '3':
+            self.seq.linear_modules[-1].weight.data.zero_()
+            # [pres, loc:scale,shift, std:scale,shift
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                torch.tensor([4, 4,0,0, -4,-4,-4], dtype=torch.float))
+        else:
+            raise NotImplementedError
     
     def forward(self, h):
         # todo make capacible with other z_where_types

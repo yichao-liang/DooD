@@ -123,7 +123,7 @@ def train(model, optimizer, stats, data_loader, args, writer,
                                                         generative_model)
                 for name, parameter in named_params:
                     writer.add_scalar(f"Grad_norm/{name}", 
-                                      parameter.grad.norm(2), iteration)
+                                        parameter.grad.norm(2), iteration)
                 #     try:
                     ## if (name == 'style_mlp.seq.linear_modules.2.weight' and
                     ##     (parameter.grad.norm(2) > 6e4)):

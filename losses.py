@@ -223,6 +223,10 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                                 guide_out.z_pms.z_what.detach()[:, :, :, :, :, 0], iteration)
                 writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.std",
                                 guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1], iteration)
+                writer.add_scalar(
+                    f"{writer_tag}Parameters/z_what_posterior.std_sum",
+                    guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1].sum(), 
+                    iteration)
 
                 # z posterior samples
                 writer.add_histogram(f"{writer_tag}Samples/z_pres",
