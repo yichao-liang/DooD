@@ -170,25 +170,17 @@ if __name__ == '__main__':
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
-        args.remove('--execution_guided')
+        # args.remove('--execution_guided')
         args.extend(['--save_model_name', 
-                    # n + f'-lr1e-3-{run_args.seed}',
-                    #  n + f'-anl{run_args.final_val}-{run_args.seed}',
-                    #  n + f'-seq_pri_fixed-β{run_args.beta}-RE-an_lr.1-{run_args.seed}',
-                    #  n + f'-seq_pri_fixed-βll1-{run_args.final_beta}-RE-an_lr.1-{run_args.seed}',
-                    #  n + f'-fixed-rsd-βll1-{run_args.final_beta}-RE-{run_args.seed}',
-                    #  n + f'-neuralRender-noMaxStrkTanhNorm-noEG-sepWherePres{run_args.seed}',
-                     n + f'-fixPri-noSpDec-noSeperatedZ-noEG-wr3-wg-{run_args.seed}',
-                    #  n + f'-fixPri-noSpDec-noEG-3nm-wr3-{run_args.seed}',
-                    #  n + f'-fixPri-SpDec-noEG-3norm-wr3-noBl-{run_args.seed}',
+                    n + f'-simple_pres-{run_args.seed}',
                     
-
                     '--seed', f'{run_args.seed}',
-                    '--no_spline_renderer',
-                    '--prior', "Independent",
-                    '--z_what_in_pos', 'z_where_rnn',
-                    '--target_in_pos', 'RNN',
-                    '--z_where_type', '3',
+                    # '--no_spline_renderer',
+                    # '--prior', "Independent",
+                    '--simple_pres',
+                    # '--z_what_in_pos', 'z_where_rnn',
+                    # '--target_in_pos', 'RNN',
+                    # '--z_where_type', '3',
                     # '--no_baseline',
                     # '--lr', '1e-3', 
                     # '--sep_where_pres_mlp',
@@ -196,15 +188,17 @@ if __name__ == '__main__':
                     # '--beta', f'{run_args.beta}',
                     # "--increase_beta",
                     # '--final_beta', f'{run_args.final_beta}',
-                    # '--exec_guid_type', 'residual',
-                    # '--residual_pixel_count',
+                    '--exec_guid_type', 'residual',
+                    '--residual_pixel_count',
                     # '--dependent_prior',
-                    '--no_maxnorm',
-                    '--no_sgl_strk_tanh',
+                    # '--no_maxnorm',
+                    # '--no_sgl_strk_tanh',
                     # '--no-add_strk_tanh',
                     # "--anneal_lr",
                     # '--continue_training',
                     # "--log_grad",
+                    "--log_param",
+                    # '--save_history_ckpt',
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")

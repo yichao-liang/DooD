@@ -555,6 +555,7 @@ def init(run_args, device):
                     spline_decoder=not run_args.no_spline_renderer,
                     sep_where_pres_mlp=run_args.sep_where_pres_mlp,
                     render_at_the_end=run_args.render_at_the_end,
+                    simple_pres=run_args.simple_pres,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'

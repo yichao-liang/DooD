@@ -339,14 +339,15 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
 
 def save(args, iteration, model, optimizer, stats):
     # save iteration.pt
-    # util.save_checkpoint(
-    #     util.get_checkpoint_path(args, 
-    #     checkpoint_iteration=iteration),
-    #     model,
-    #     optimizer,
-    #     stats,
-    #     run_args=args,
-    # )
+    if args.save_history_ckpt:
+        util.save_checkpoint(
+            util.get_checkpoint_path(args, 
+            checkpoint_iteration=iteration),
+            model,
+            optimizer,
+            stats,
+            run_args=args,
+        )
     # save latest.pt
     util.save_checkpoint(
         util.get_checkpoint_path(args),

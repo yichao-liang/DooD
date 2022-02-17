@@ -809,6 +809,7 @@ class Guide(template.Guide):
                         residual_pixel_count=False,
                         sep_where_pres_mlp=False,
                         render_at_the_end=False,
+                        simple_pres=False,
                 ):
         '''
         Args:
@@ -837,7 +838,8 @@ class Guide(template.Guide):
                 dependent_prior=dependent_prior,
                 spline_decoder=spline_decoder,
                 residual_pixel_count=residual_pixel_count,
-                sep_where_pres_mlp=sep_where_pres_mlp
+                sep_where_pres_mlp=sep_where_pres_mlp,
+                simple_pres=simple_pres,
                 )
         # Parameters
         self.constrain_param = constrain_param
@@ -1008,6 +1010,7 @@ class Guide(template.Guide):
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
+                    # breakpoint()
                     canvas = canvas + canvas_step
                     #at step 0 canvas doesn't need normalization, this also
                     #allows the last prediction used in `render_at_the_end`
@@ -1016,7 +1019,7 @@ class Guide(template.Guide):
                         canvas = util.normalize_pixel_values(
                                         canvas, 
                                         method='tanh', 
-                                        slope=add_strk_tanh_slope[:, :, t-1])
+                                        slope=add_strk_tanh_slope[:, :, t])
                     # if self.render_at_the_end:
                     #     canvas = canvas.detach()
                     canvas_so_far = canvas
@@ -1031,7 +1034,7 @@ class Guide(template.Guide):
                 if self.exec_guid_type == "residual" or\
                     self.residual_pixel_count:
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas, min=0.)
+                    residual = torch.clamp(imgs - canvas, min=0.).detach()
 
             # Calculate the prior with the hidden states.
 
@@ -1110,6 +1113,10 @@ class Guide(template.Guide):
                                                                 residual_embed, 
                                                                 residual,
                                                                 p_state)
+        rsd_ratio = None
+        if self.simple_pres:
+            rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
+
         (z_pres, 
         z_where, 
         z_pres_lprb, 
@@ -1118,7 +1125,7 @@ class Guide(template.Guide):
         z_where_pms, 
         sigma, 
         strk_slope, 
-        add_slope) = self.get_z_l(pr_wr_mlp_in, p_state)
+        add_slope) = self.get_z_l(pr_wr_mlp_in, p_state, rsd_ratio)
 
         # Get spatial transformed "crop" from input image
         # imgs [bs, *img_dim]
@@ -1181,7 +1188,7 @@ class Guide(template.Guide):
         return out
 
     # @profile
-    def get_z_l(self, pr_wr_mlp_in, p_state):
+    def get_z_l(self, pr_wr_mlp_in, p_state, rsd_ratio=None):
         """Predict z_pres and z_where from `pr_wr_mlp_in`
         Args:
             pr_wr_mlp_in [ptcs, bs, in_dim]: input based on input types
@@ -1210,6 +1217,12 @@ class Guide(template.Guide):
         else:
             z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(
                                             pr_wr_mlp_in.view(prod(shp), -1))
+        if self.simple_pres:
+            # in this case the predictions above are ignored
+            assert rsd_ratio is not None
+            z_pres_p = rsd_ratio.detach() ** self.get_rsd_power()
+
+
         z_pres_p = z_pres_p.view(*shp, -1)
         z_where_loc = z_where_loc.view(*shp, -1)
         z_where_scale = z_where_scale.view(*shp, -1)

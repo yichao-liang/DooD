@@ -5,6 +5,8 @@ import numpy as np
 from numpy import prod
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
 ZLogProb = namedtuple("ZLogProb", "z_pres z_what z_where")
@@ -33,6 +35,7 @@ class Guide(nn.Module):
                 spline_decoder=True,
                 residual_pixel_count=False,
                 sep_where_pres_mlp=True,
+                simple_pres=False,
                 ):
         super().__init__()
         
@@ -52,6 +55,7 @@ class Guide(nn.Module):
                                             "execution_guided = True"
         self.dependent_prior = dependent_prior
         self.spline_decoder = spline_decoder
+        self.simple_pres = simple_pres
 
         # Internal renderer
         self.execution_guided = execution_guided
@@ -113,6 +117,10 @@ class Guide(nn.Module):
                                           self.pr_wr_rnn_hid_dim)
 
         # 2.2 pres_where_mlp
+        if self.simple_pres:
+            assert self.execution_guided, "simple_pres requires execution guide"
+            self.rsd_power = torch.nn.Parameter(torch.zeros(1)-5., 
+                                                        requires_grad=True)
         self.pr_wr_mlp_in = ['h']
         self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
         if self.target_in_pos == 'MLP':
@@ -187,6 +195,9 @@ class Guide(nn.Module):
                                           out_dim=1,
                                           hidden_dim=bl_mlp_hid_dim,
                                           num_layers=num_bl_layers)
+
+    def get_rsd_power(self):
+        return F.softplus(self.rsd_power)
 
     def get_img_features(self, imgs, canvas, residual):
         ptcs, bs = shp = imgs.shape[:2]

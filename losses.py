@@ -105,6 +105,10 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     log_likelihood = log_likelihood / beta
     
 
+
+    if args.no_baseline:
+        bl_value = 0.
+    # -- old
     bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                     for prob in log_post], dim=-1).sum(-1)
     bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
@@ -112,14 +116,24 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     # this is like -ELBO
     bl_target = bl_target - log_likelihood[:, :, None]
     bl_target = (bl_target * mask_prev)
+    reinforce_loss = bl_target - bl_value
+    # -- new: instead of subtract bl_value from after cumsum, do it before 
+    #         cumsum
+    # log_post_sum = torch.cat([prob.unsqueeze(-1) for prob 
+    #                             in log_post], dim=-1).sum(-1)
+    # kl_sum = log_post_sum - torch.cat([prob.unsqueeze(-1) for prob 
+    #                             in log_prior], dim=-1).sum(-1)
+    # kl_sum_ = kl_sum - bl_value
+    # kl_cumsum = kl_sum_.flip(-1).cumsum(-1).flip(-1)
+    # reinforce_loss = kl_cumsum - log_likelihood[:, :, None]
+    # reinforce_loss = reinforce_loss * mask_prev.detach()
+    # bl_target = kl_sum - log_likelihood[:, :, None]
 
     # The "REINFORCE"  term in the gradient is: [bs,]; 
     # bl_target is the negative elbo
     # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
     # (bl_target - bl_value) * gradient[z_pres_posterior]
-    if args.no_baseline:
-        bl_value = 0
-    neg_reinforce_term = (bl_target - bl_value).detach() * log_post.z_pres
+    neg_reinforce_term = (reinforce_loss).detach() * log_post.z_pres
     neg_reinforce_term = neg_reinforce_term * mask_prev
     neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
 
@@ -138,7 +152,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         # but not for sequential
         baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
                             reduction='none')
-        baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
+        baseline_loss = baseline_loss * mask_prev.detach() # [bs, n_strks]
         baseline_loss = baseline_loss.sum(2)
         loss = model_loss + baseline_loss # [bs, ]
 
@@ -148,6 +162,8 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
             if writer_tag is None:
                 writer_tag = ''
             writer.add_scalar(f"{writer_tag}Train curves/beta", beta, iteration)
+            writer.add_scalar(f"{writer_tag}Train curves/reinforce variance",
+                              reinforce_loss.detach().var(), iteration)
             # loss
             for n, log_prob in zip(log_post._fields, log_post):
                 writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
@@ -224,7 +240,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                 writer.add_histogram(f"{writer_tag}Parameters/z_what_posterior.std",
                                 guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1], iteration)
                 writer.add_scalar(
-                    f"{writer_tag}Parameters/z_what_posterior.std_sum",
+                    f"{writer_tag}Train curves/z_what_posterior.std_sum",
                     guide_out.z_pms.z_what.detach()[:, :, :, :, :, 1].sum(), 
                     iteration)
 
