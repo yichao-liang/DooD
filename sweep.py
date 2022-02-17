@@ -7,108 +7,7 @@ import subprocess
 import argparse
 
 import util
-
-strokes_per_img = '4'
-
-'''
-Our model = AIR + sequential prior
-                + canvas-so-far
-                + seperated z_{where, pre} and z_what (4-dim z_where)
-                + spline renderer
-                (+ input target at mlp, i.e., target_in_pos = 'RNN', for 
-                    writing-completion)
-'''
-full_config = [
-                'sequential_prior',  
-                'spline_latent',  
-                'canvas',  
-                'seperated_z',
-            ]
-
-models_2_cmd = {
-    'VAE': [ 
-        '--model-type', 'VAE',
-        '--lr', '1e-3',
-    ],
-    'AIR': [
-        '--model-type', 'AIR',
-        '--prior_dist', 'Independent',
-        '--lr', '1e-4', 
-        '--bl_lr', '1e-3',
-        '--z_where_type', '3',
-        '--strokes_per_img', strokes_per_img,
-        '--z_what_in_pos', 'z_where_rnn',
-        '--target_in_pos', 'RNN'
-    ],
-    'AIR4': [
-        '--model-type', 'AIR',
-        '--prior_dist', 'Independent',
-        '--lr', '1e-4', 
-        '--bl_lr', '1e-3',
-        '--z_where_type', '4_rotate',
-        '--strokes_per_img', strokes_per_img,
-        '--z_what_in_pos', 'z_where_rnn',
-        '--target_in_pos', 'RNN'
-    ],
-    'MWS': [
-        '--model-type', 'MWS',
-    ],
-    'AIR+seq_prir': [
-        '--model-type', 'AIR',
-        '--prior_dist', 'Sequential',
-        '--lr', '1e-4', 
-        '--bl_lr', '1e-3',
-        '--z_where_type', '3',
-        '--strokes_per_img', strokes_per_img,
-        '--z_what_in_pos', 'z_where_rnn',
-        '--target_in_pos', 'RNN'
-    ]
-}
-
-def args_from_kw_list(kw_config):
-    '''Get the arguments for running the full model/ablations from keywords
-    '''
-    args = []
-    # ---
-    args.append('--prior_dist')
-    if 'sequential_prior' in kw_config:
-        args.extend(['Sequential'])
-    else:
-        args.extend(['Independent'])
-    # ---    
-    args.append('--model-type')
-    if 'spline_latent' in kw_config:
-        args.extend(['Sequential'])
-    else:
-        args.extend(['AIR'])
-        args.extend(['--lr', '1e-4'])
-    # ---
-    if 'canvas' in kw_config:
-        args.extend(['--execution_guided'])
-        args.extend(['--exec_guid_type', 'canvas'])
-    # ---
-    args.append('--z_what_in_pos')
-    if 'seperated_z' in kw_config:
-        args.append('z_what_rnn')
-    else:
-        args.append('z_where_rnn')
-    return args
-
-def ablation_args():
-    all_args = {}
-    for ablation in full_config:
-        # if ablation == 'spline_latent':
-            # skipping Full-spline_latent b/c the model didn't work
-            # continue
-        exp_config = full_config.copy()
-        exp_config.remove(ablation)
-        args = args_from_kw_list(exp_config)
-        if ablation == 'canvas':
-            args.append("--no_strk_tanh")
-        # args.append("--no_maxnorm")
-        all_args[f"Full-{ablation}"] = args
-
-    return all_args
+import exp_dict as ed
 
 def get_args_parser():
     parser = argparse.ArgumentParser(formatter_class=
@@ -128,77 +27,33 @@ if __name__ == '__main__':
     all_exp_args = {}
 
     # VAE and AIR 
-    # all_exp_args['VAE'] = models_2_cmd['VAE']
-    # all_exp_args['AIR10'] = models_2_cmd['AIR']
+    # all_exp_args['VAE'] = ed.models_2_cmd['VAE']
+    # all_exp_args['AIR10'] = ed.models_2_cmd['AIR']
 
     # # Full model
-    all_exp_args['Full'] = args_from_kw_list(full_config) + [
-                                                        '--constrain_sample']
-
-    # # Full - spline
-    # all_exp_args['Full-spline_decoder'] = [
-    #                                 '--model-type', 'Sequential',
-    #                                 '--prior_dist', 'Sequential',
-    #                                 '--strokes_per_img', '4',
-    #                                 '--lr', '1e-4', '--bl_lr', '1e-3',
-    #                                 '--z_where_type', '3',
-    #                                 '--execution_guided',
-    #                                 '--z_what_in_pos', 'z_what_rnn',
-    #                                 '--target_in_pos', 'MLP',
-    #                                 '--no_spline_renderer']
-
-    # # (Full minus 3 features except spline_latent)
-    # all_exp_args['AIR+spline_latent'] = (args_from_kw_list(['spline_latent']) + 
-    #                                         [
-    ##                                          '--no_maxnorm', 
-    ##                                          '--no_strk_tanh',
-    #                                          '--target_in_pos', 'RNN',
-    #                                          '--z_where_type', '3',
-    #                                          '--constrain_sample'])
+    # all_exp_args['Full'] = ed.exp_dict['Full']
 
     # # # Full model ablation (Full minus 1 feature)
-    # all_ablations = ablation_args()
+    # all_ablations = ed.ablation_args()
     # all_exp_args.update(all_ablations)
-    # all_exp_args['Full-sequential_prior'] = all_exp_args['Full-sequential_prior'
-    #                                         ] + ['--constrain_sample']
 
-    # # # MWS
+    # # MWS
     # all_exp_args['MWS'] = models_2_cmd['MWS']
 
     # Not in final list: AIR+seq_prir
     # all_exp_args['AIR+seq_prir'] = models_2_cmd['AIR+seq_prir']
+
+    exp_name = "Full-simple_arch"
+    all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
     for n, args in all_exp_args.items():
         print(f"==> Begin training the '{n}' model")
         # args.remove('--execution_guided')
-        args.extend(['--save_model_name', 
-                    n + f'-simple_pres-{run_args.seed}',
-                    
+        model_name = n + f'-{run_args.seed}'
+        args.extend(['--save_model_name', model_name,
+                     '--tb_dir', f'./log/full-eg/{model_name}',
+
                     '--seed', f'{run_args.seed}',
-                    # '--no_spline_renderer',
-                    # '--prior', "Independent",
-                    '--simple_pres',
-                    # '--z_what_in_pos', 'z_where_rnn',
-                    # '--target_in_pos', 'RNN',
-                    # '--z_where_type', '3',
-                    # '--no_baseline',
-                    # '--lr', '1e-3', 
-                    # '--sep_where_pres_mlp',
-                    # '--render_at_the_end',
-                    # '--beta', f'{run_args.beta}',
-                    # "--increase_beta",
-                    # '--final_beta', f'{run_args.final_beta}',
-                    '--exec_guid_type', 'residual',
-                    '--residual_pixel_count',
-                    # '--dependent_prior',
-                    # '--no_maxnorm',
-                    # '--no_sgl_strk_tanh',
-                    # '--no-add_strk_tanh',
-                    # "--anneal_lr",
-                    # '--continue_training',
-                    # "--log_grad",
-                    "--log_param",
-                    # '--save_history_ckpt',
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")
