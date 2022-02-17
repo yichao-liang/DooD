@@ -810,6 +810,8 @@ class Guide(template.Guide):
                         sep_where_pres_mlp=False,
                         render_at_the_end=False,
                         simple_pres=False,
+                        simple_arch=False,
+                        residual_no_target=False,
                 ):
         '''
         Args:
@@ -840,6 +842,8 @@ class Guide(template.Guide):
                 residual_pixel_count=residual_pixel_count,
                 sep_where_pres_mlp=sep_where_pres_mlp,
                 simple_pres=simple_pres,
+                simple_arch=simple_arch,
+                residual_no_target=residual_no_target,
                 )
         # Parameters
         self.constrain_param = constrain_param

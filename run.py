@@ -16,7 +16,7 @@ def main(args):
 
     # Write will output to ./log
     # When doing sweep evaluation
-    log_dir = f"./log/debug_full-eg/{args.save_model_name}"
+    log_dir = args.tb_dir
     # log_dir = f"./log/debug_full{args.seed}/{args.save_model_name}"
     writer = SummaryWriter(log_dir=log_dir)
 
@@ -260,6 +260,12 @@ def get_args_parser():
                         help='''if specified, use residual pixel as z_pres param
                         specifically, z_pres_prob = residual ** r where r is
                         a positive integer''')
+    parser.add_argument('--simple_arch', action='store_true',
+                        help='''if specified, only use residual for passing
+                        sequential information for the guide, not RNNs''')
+    parser.add_argument('--residual_no_target', action='store_true',
+                        help='''if true then only residual is passed, not target
+                        and residual''')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
@@ -319,6 +325,9 @@ def get_args_parser():
     parser.add_argument("--save_history_ckpt", action='store_true',
                 help='''store distribution, save not only latest checkput but
                 also the all the past ones''')
+    parser.add_argument("--tb_dir", default='./log/model',
+                        type=str, 
+                    help="tensorboard log dir, recommand: ./{dir}/{model_name}")
 
 
     return parser

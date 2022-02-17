@@ -36,6 +36,8 @@ class Guide(nn.Module):
                 residual_pixel_count=False,
                 sep_where_pres_mlp=True,
                 simple_pres=False,
+                simple_arch=False,
+                residual_no_target=False,
                 ):
         super().__init__()
         
@@ -56,6 +58,18 @@ class Guide(nn.Module):
         self.dependent_prior = dependent_prior
         self.spline_decoder = spline_decoder
         self.simple_pres = simple_pres
+        if simple_pres:
+            assert execution_guided and exec_guid_type=='residual',\
+                    "simple_pres requires execution guide and residual"
+        self.simple_arch = simple_arch
+        if simple_arch:
+            assert execution_guided and exec_guid_type=='residual',\
+                    "simple_arch requires execution guide and residual"
+        self.residual_no_target = residual_no_target
+        if residual_no_target:
+            assert execution_guided and exec_guid_type=='residual',\
+                    "residual_no_target requires execution guide and residual"
+
 
         # Internal renderer
         self.execution_guided = execution_guided
@@ -104,7 +118,7 @@ class Guide(nn.Module):
         if self.execution_guided:
             self.pr_wr_rnn_in.append('canvas')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN':
+        if self.target_in_pos == 'RNN' and not self.residual_no_target:
             self.pr_wr_rnn_in.append('target')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == 'RNN' and self.execution_guided and \
@@ -118,12 +132,14 @@ class Guide(nn.Module):
 
         # 2.2 pres_where_mlp
         if self.simple_pres:
-            assert self.execution_guided, "simple_pres requires execution guide"
             self.rsd_power = torch.nn.Parameter(torch.zeros(1)-5., 
                                                         requires_grad=True)
-        self.pr_wr_mlp_in = ['h']
-        self.pr_wr_mlp_in_dim = self.pr_wr_rnn_hid_dim
-        if self.target_in_pos == 'MLP':
+        self.pr_wr_mlp_in = []
+        self.pr_wr_mlp_in_dim = 0
+        if not self.simple_arch:
+            self.pr_wr_mlp_in = ['h']
+            self.pr_wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+        if self.target_in_pos == 'MLP' and not self.residual_no_target:
             self.pr_wr_mlp_in.append('target')
             self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
 
@@ -149,8 +165,8 @@ class Guide(nn.Module):
         self.sep_where_pres_mlp = sep_where_pres_mlp
 
         # 3.1. what_rnn
-        self.wt_rnn_in_dim = 0
         self.wt_rnn_in = []
+        self.wt_rnn_in_dim = 0
 
         if self.z_what_in_pos == 'z_what_rnn':
             self.wt_rnn_in.append('z_what')
@@ -159,7 +175,7 @@ class Guide(nn.Module):
         if self.execution_guided:
             self.wt_rnn_in.append('canvas')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == "RNN":
+        if self.target_in_pos == "RNN" and not self.residual_no_target:
             self.wt_rnn_in.append('target')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
         # if self.target_in_pos == 'RNN' and self.execution_guided and \
@@ -172,9 +188,12 @@ class Guide(nn.Module):
                                             self.wt_rnn_hid_dim)
 
         # 3.2 wt_mlp: instantiated in specific modules
-        self.wt_mlp_in = ['h']
-        self.wt_mlp_in_dim = self.wt_rnn_hid_dim
-        if self.target_in_pos == 'MLP':
+        self.wt_mlp_in = []
+        self.wt_mlp_in_dim = 0
+        if not self.simple_arch:
+            self.wt_mlp_in = ['h']
+            self.wt_mlp_in_dim += self.wt_rnn_hid_dim
+        if self.target_in_pos == 'MLP' and not self.residual_no_target:
             self.wt_mlp_in.append('target')
             self.wt_mlp_in_dim += self.feature_extractor_out_dim
         # if self.target_in_pos == 'MLP' and \
@@ -248,7 +267,9 @@ class Guide(nn.Module):
         h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
 
         # Style MLP input
-        mlp_in = [h_l]
+        mlp_in = []
+        if 'h' in self.pr_wr_mlp_in:
+            mlp_in.append(h_l)
         if 'target' in self.pr_wr_mlp_in:
             mlp_in.append(img_embed.view(prod(shp), -1))
         if 'residual' in self.pr_wr_mlp_in:
@@ -300,7 +321,9 @@ class Guide(nn.Module):
         h_c = self.wt_rnn(wt_rnn_in, p_state.h_c.view(prod(shp), -1))
 
         # z_what MLP input
-        wt_mlp_in = [h_c]
+        wt_mlp_in = []
+        if 'h' in self.wt_mlp_in:
+            wt_mlp_in.append(h_c)
         if 'target' in self.wt_mlp_in:
             wt_mlp_in.append(trans_embed.view(prod(shp), -1))
         if 'residual' in self.wt_mlp_in:
