@@ -20,8 +20,8 @@ class Guide(nn.Module):
                 img_dim=[1,28,28],
                 hidden_dim=256, 
                 z_where_type='3', 
-                execution_guided=False,
-                exec_guid_type=None,
+                use_canvas=False,
+                use_residual=None,
                 feature_extractor_sharing=True,
                 z_what_in_pos='z_where_rnn',
                 prior_dist='Independent',
@@ -53,27 +53,29 @@ class Guide(nn.Module):
         self.z_what_in_pos = z_what_in_pos
         self.intr_ll = intermediate_likelihood
         if self.intr_ll is not None:
-            assert execution_guided, "intermediate likelihood needs" + \
-                                            "execution_guided = True"
+            assert use_canvas, "intermediate likelihood needs" + \
+                                            "use_canvas = True"
         self.dependent_prior = dependent_prior
         self.spline_decoder = spline_decoder
         self.simple_pres = simple_pres
+        if use_residual:
+            assert use_canvas, "residual needs canvas to be computed"
         if simple_pres:
-            assert execution_guided and exec_guid_type=='residual',\
+            assert use_residual,\
                     "simple_pres requires execution guide and residual"
         self.simple_arch = simple_arch
         if simple_arch:
-            assert execution_guided and exec_guid_type=='residual',\
+            assert use_residual,\
                     "simple_arch requires execution guide and residual"
         self.residual_no_target = residual_no_target
         if residual_no_target:
-            assert execution_guided and exec_guid_type=='residual',\
+            assert use_residual,\
                     "residual_no_target requires execution guide and residual"
 
 
         # Internal renderer
-        self.execution_guided = execution_guided
-        self.exec_guid_type = exec_guid_type
+        self.use_canvas = use_canvas
+        self.use_residual = use_residual
         self.prior_dist = prior_dist
         self.target_in_pos = target_in_pos
 
@@ -115,14 +117,16 @@ class Guide(nn.Module):
             self.pr_wr_rnn_in_dim += self.z_what_dim
         # Canvas: only default in full; adding the target, residual would 
         # make the model not able to generate from prior
-        if self.execution_guided:
+        if self.use_canvas:
             self.pr_wr_rnn_in.append('canvas')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+
         if self.target_in_pos == 'RNN' and not self.residual_no_target:
             self.pr_wr_rnn_in.append('target')
+            assert False, "not recommanded unless in ablation"
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN' and self.execution_guided and \
-           self.exec_guid_type == 'residual':
+        if self.target_in_pos == 'RNN' and self.use_residual:
+            assert False, "not recommanded unless in ablation"
             self.pr_wr_rnn_in.append('residual')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
         
@@ -143,8 +147,7 @@ class Guide(nn.Module):
             self.pr_wr_mlp_in.append('target')
             self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
 
-        if self.target_in_pos == 'MLP' and\
-            self.execution_guided and  self.exec_guid_type == 'residual':
+        if self.target_in_pos == 'MLP' and self.use_residual:
             self.pr_wr_mlp_in.append('residual')
             self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
             self.residual_feature_extractor = util.init_cnn(
@@ -172,16 +175,19 @@ class Guide(nn.Module):
             self.wt_rnn_in.append('z_what')
             self.wt_rnn_in_dim += self.z_what_dim
         # Target (transformed)
-        if self.execution_guided:
+        if self.use_canvas:
             self.wt_rnn_in.append('canvas')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
+
+        # the full model doesn't have target in at RNN
         if self.target_in_pos == "RNN" and not self.residual_no_target:
             self.wt_rnn_in.append('target')
+            assert False, "not recommanded unless in ablation"
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
-        # if self.target_in_pos == 'RNN' and self.execution_guided and \
-        #    self.exec_guid_type == 'residual':
-        #     self.wt_rnn_in.append('residual')
-        #     self.wt_rnn_in_dim += self.feature_extractor_out_dim
+        if self.target_in_pos == 'RNN' and self.use_residual:
+            assert False, "not recommanded unless in ablation"
+            self.wt_rnn_in.append('residual')
+            self.wt_rnn_in_dim += self.feature_extractor_out_dim
 
         self.wt_rnn_hid_dim = hidden_dim
         self.wt_rnn = torch.nn.GRUCell(self.wt_rnn_in_dim, 
@@ -194,12 +200,11 @@ class Guide(nn.Module):
             self.wt_mlp_in = ['h']
             self.wt_mlp_in_dim += self.wt_rnn_hid_dim
         if self.target_in_pos == 'MLP' and not self.residual_no_target:
-            self.wt_mlp_in.append('target')
+            self.wt_mlp_in.append('trans_target')
             self.wt_mlp_in_dim += self.feature_extractor_out_dim
-        # if self.target_in_pos == 'MLP' and \
-        #    self.execution_guided and self.exec_guid_type == 'residual':
-        #     self.wt_mlp_in.append('residual')
-        #     self.wt_mlp_in_dim += self.feature_extractor_out_dim
+        if self.target_in_pos == 'MLP' and self.use_residual:
+            self.wt_mlp_in.append('trans_residual')
+            self.wt_mlp_in_dim += self.feature_extractor_out_dim
 
         # 4. baseline
         self.bl_hid_dim = bl_rnn_hid_dim
@@ -207,7 +212,7 @@ class Guide(nn.Module):
                           self.z_pres_dim + 
                           self.z_where_dim +
                           self.z_what_dim)
-        if self.execution_guided:
+        if self.use_canvas:
             self.bl_in_dim += self.feature_extractor_out_dim
         self.bl_rnn = torch.nn.GRUCell(self.bl_in_dim, self.bl_hid_dim)
         self.bl_regressor = util.init_mlp(in_dim=self.bl_hid_dim,
@@ -229,7 +234,7 @@ class Guide(nn.Module):
             canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), 
                                                     *img_dim)).view(*shp, -1)
 
-            if self.exec_guid_type == 'residual':
+            if self.use_residual:
                 residual_embed = self.residual_feature_extractor(residual.view(
                                         prod(shp), *img_dim)).view(*shp, -1)
             else: residual_embed = None
@@ -242,7 +247,7 @@ class Guide(nn.Module):
         '''Get the input for `pr_wr_mlp` from the current img and p_state
         Args:
             img_embed [ptcs, bs, embed_dim]
-            canvas_embed [ptcs, bs, embed_dim] if self.execution_guided or None 
+            canvas_embed [ptcs, bs, embed_dim] if self.use_canvas or None 
             residual_embed [ptcs, bs, embed_dim] or None
             residual [ptcs, bs, 1, res, res] or None
             p_state GuideState
@@ -282,8 +287,7 @@ class Guide(nn.Module):
         return (rnn_in.view(*shp, -1), h_l.view(*shp, -1),
                 mlp_in.view(*shp, -1))
         
-    def get_wt_mlp_in(self, trans_imgs, canvas_embed, residual_embed, 
-                                                            p_state):
+    def get_wt_mlp_in(self, trans_imgs, trans_rsd, canvas_embed, p_state):
         '''Get the input for the wt_mlp
         Args:
             trans_imgs: [ptcs, bs, *img_dim]
@@ -300,12 +304,14 @@ class Guide(nn.Module):
 
         # [bs, pts_per_strk, 2, 1]
         if self.feature_extractor_sharing:
-            trans_embed = self.img_feature_extractor(trans_imgs.view(prod(shp), 
+            trans_tar_em = self.img_feature_extractor(trans_imgs.view(prod(shp), 
                                                                     *img_dim))
         else:
-            trans_embed = self.glimpse_feature_extractor(trans_imgs.view(prod(
-                                                                        shp, 
-                                                                    *img_dim)))
+            trans_tar_em = self.glimpse_feature_extractor(trans_imgs.view(prod(
+                                                                shp), *img_dim))
+        if trans_rsd != None:
+            trans_rsd_em = self.residual_feature_extractor(
+                                            trans_rsd.view(prod(shp), *img_dim))
             
         # z_what RNN input
         wt_rnn_in = []
@@ -314,9 +320,9 @@ class Guide(nn.Module):
         if 'canvas' in self.wt_rnn_in:
             wt_rnn_in.append(canvas_embed.view(prod(shp), -1))
         if 'target' in self.wt_rnn_in:
-            wt_rnn_in.append(trans_embed.view(prod(shp), -1))
+            wt_rnn_in.append(trans_tar_em.view(prod(shp), -1))
         if 'residual' in self.wt_rnn_in:
-            wt_rnn_in.append(residual_embed.view(prod(shp), -1))
+            wt_rnn_in.append(trans_rsd_em.view(prod(shp), -1))
         wt_rnn_in = torch.cat(wt_rnn_in, dim=1)
         h_c = self.wt_rnn(wt_rnn_in, p_state.h_c.view(prod(shp), -1))
 
@@ -324,10 +330,10 @@ class Guide(nn.Module):
         wt_mlp_in = []
         if 'h' in self.wt_mlp_in:
             wt_mlp_in.append(h_c)
-        if 'target' in self.wt_mlp_in:
-            wt_mlp_in.append(trans_embed.view(prod(shp), -1))
-        if 'residual' in self.wt_mlp_in:
-            wt_mlp_in.append(residual_embed.view(prod(shp), -1))
+        if 'trans_target' in self.wt_mlp_in:
+            wt_mlp_in.append(trans_tar_em.view(prod(shp), -1))
+        if 'trans_residual' in self.wt_mlp_in:
+            wt_mlp_in.append(trans_rsd_em.view(prod(shp), -1))
         mlp_in = torch.cat(wt_mlp_in, dim=1)
 
         return mlp_in.view(*shp, -1), h_c.view(*shp, -1)

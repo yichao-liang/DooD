@@ -75,8 +75,7 @@ def args_from_kw_list(kw_config):
         args.extend(['--lr', '1e-4'])
     # ---
     if 'canvas' in kw_config:
-        args.extend(['--execution_guided'])
-        args.extend(['--exec_guid_type', 'canvas'])
+        args.extend(['--use_canvas'])
     # ---
     args.append('--z_what_in_pos')
     if 'seperated_z' in kw_config:
@@ -115,12 +114,12 @@ def ablation_args():
                     # '--beta', f'{run_args.beta}',
                     # "--increase_beta",
                     # '--final_beta', f'{run_args.final_beta}',
-                    # '--exec_guid_type', 'residual',
+                    # '--use_residual',
                     # '--residual_pixel_count',
                     # '--dependent_prior',
                     # '--no_maxnorm',
                     # '--no_sgl_strk_tanh',
-                    # '--no-add_strk_tanh',
+                    # '--no_add_strk_tanh',
                     # "--anneal_lr",
                     # '--continue_training',
                     # "--log_grad",
@@ -128,12 +127,55 @@ def ablation_args():
                     # '--save_history_ckpt',
 
 # Record all experiment configs
+full_model_args = args_from_kw_list(full_config)
+# i.e. ['--prior_dist', 'Sequential', 
+    #   '--model-type', 'Sequential', 
+    #   '--z_what_in_pos', 'z_what_rnn',
+    #   '--use_canvas']
+full_no_canvas = args_from_kw_list(full_config)
+full_no_canvas.remove('--use_canvas')
+
 exp_dict = {
-    # 'Full': args_from_kw_list(full_config),
-    'Full-simple_arch': args_from_kw_list(full_config) +\
+    # Feb 17
+    'Full-fixed_prir-useRsd-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--prior', "Independent",
+            '--use_residual',
+        ],
+    'Full-spDec-simple_arch': full_model_args +\
         [
             '--simple_arch',
             '--log_param',
-            '--exec_guid_type', 'residual',
-        ]
+            '--use_residual',
+        ],
+    'Full-spDec-simple_pres': full_model_args +\
+        [
+            '--simple_pres',
+            '--log_param',
+            '--use_residual',
+        ],
+    'Full': full_model_args,
+    # this shouldn't collapse from conclusion from investigation into collapse
+    'Full-spDec-fxPrior-noEG-anLr': full_no_canvas +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr',
+        ],
+    # a minimal model that collapse:
+    'Full-neuralDec-fixed_prir-useCanvas': full_model_args +\
+        [
+            '--no_spline_renderer',
+            '--prior_dist', 'Independent',
+            '--no_maxnorm',
+            '--no_sgl_strk_tanh',
+        ],  
+    # model that doesn't collapse:
+    'Full-neuralDec-fixed_prir-noEG': full_no_canvas +\
+        [
+            '--no_spline_renderer',
+            '--prior_dist', 'Independent',
+            '--no_maxnorm',
+            '--no_sgl_strk_tanh',
+        ],
 }

@@ -39,10 +39,11 @@ def main(args):
     num_iterations = args.num_iterations
     if not (args.continue_training and Path(checkpoint_path).exists()):
         util.logging.info("Training from scratch")
-        model, optimizer, stats, data_loader = util.init(args, device)
+        model, optimizer, scheduler, stats, data_loader = util.init(args, 
+                                                                      device)
     else:
-        model, optimizer, stats, data_loader, args = util.load_checkpoint(
-                                                    checkpoint_path, device)
+        model, optimizer, scheduler, stats, data_loader, args =\
+                                util.load_checkpoint(checkpoint_path, device)
     args.num_iterations = num_iterations
 
     # train
@@ -61,7 +62,7 @@ def main(args):
                                 mws_args.log_interval
                                 )
 
-    train.train(model, optimizer, stats, data_loader, args, writer)
+    train.train(model, optimizer, scheduler, stats, data_loader, args, writer)
 
 def get_args_parser():
     import argparse
@@ -166,20 +167,30 @@ def get_args_parser():
         # default=False,
         default=True, type=bool, help="",
     )
+    # parser.add_argument(
+    #     '-eg', "--execution_guided",
+    #     action='store_true', 
+    #     # default=True,
+    #     help="if not declared, False"
+    # )
+    # parser.add_argument(
+    #     '--exec_guid_type',
+    #     # default='canvas_so_far',
+    #     default='canvas', choices=['residual', 'canvas', 'target+residual'], 
+    #     type=str,
+    #     help="""Only useful is --execution_guided = True. 
+    #     Residual: only uses the difference between the target and canvas-so-far;
+    #     Canvas_so_far: stack the target image on canvas-so-far"""
+    # )
     parser.add_argument(
-        '-eg', "--execution_guided",
-        action='store_true', 
-        # default=True,
-        help="if not declared, False"
+        '--use_canvas',
+        action='store_true',
+        help="equivalent to specifying execution_guided as before"
     )
     parser.add_argument(
-        '--exec_guid_type',
-        # default='canvas_so_far',
-        default='canvas', choices=['residual', 'canvas', 'target+residual'], 
-        type=str,
-        help="""Only useful is --execution_guided = True. 
-        Residual: only uses the difference between the target and canvas-so-far;
-        Canvas_so_far: stack the target image on canvas-so-far"""
+        '--use_residual',
+        action='store_true',
+        help="equivalent to specifying exec_guid_type == residual as before"
     )
     parser.add_argument(
         "--transform_z_what",

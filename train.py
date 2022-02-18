@@ -13,21 +13,21 @@ import test
 from models import base, air
 from models.mws.handwritten_characters.losses import get_mws_loss
 
-def anneal_lr(args, model, iteration):
-    if args.model_type == 'Sequential':
-        lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
-                                cur_ite=iteration, anneal_step=2e4,
-                                init_ite=1e4)
-        args.lr = lr
-        new_optimizer = util.init_optimizer(args, model)
-        return args, new_optimizer
-    if args.model_type == 'AIR':
-        lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
-                                cur_ite=iteration, anneal_step=2e4,
-                                init_ite=1e4)
-        args.lr = lr
-        new_optimizer = util.init_optimizer(args, model)
-        return args, new_optimizer
+# def anneal_lr(args, model, iteration):
+#     if args.model_type == 'Sequential':
+#         lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
+#                                 cur_ite=iteration, anneal_step=2e4,
+#                                 init_ite=1e4)
+#         args.lr = lr
+#         new_optimizer = util.init_optimizer(args, model)
+#         return args, new_optimizer
+#     if args.model_type == 'AIR':
+#         lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
+#                                 cur_ite=iteration, anneal_step=2e4,
+#                                 init_ite=1e4)
+#         args.lr = lr
+#         new_optimizer = util.init_optimizer(args, model)
+#         return args, new_optimizer
 
 def increase_beta(args, model, iteration):
     if args.increase_beta:
@@ -36,7 +36,7 @@ def increase_beta(args, model, iteration):
                                         init_ite=2e4)
         return args
         
-def train(model, optimizer, stats, data_loader, args, writer, 
+def train(model, optimizer, scheduler, stats, data_loader, args, writer, 
             dataset_name=None):
 
     if args.model_type == 'MWS':
@@ -83,8 +83,8 @@ def train(model, optimizer, stats, data_loader, args, writer,
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         for imgs, target in train_loader:
-            if args.anneal_lr:
-                args, optimizer = anneal_lr(args, model, iteration)
+            # if args.anneal_lr:
+            #     args, optimizer = anneal_lr(args, model, iteration)
             if args.increase_beta:
                 args = increase_beta(args, model, iteration)
 
@@ -117,6 +117,9 @@ def train(model, optimizer, stats, data_loader, args, writer,
             for n, l in zip(loss_tuple._fields, loss_tuple):
                 writer.add_scalar("Train curves/"+n, l.detach().mean(), 
                                                                     iteration)
+            writer.add_scalar("Train curves/lr", 
+                              optimizer.state_dict()['param_groups'][0]['lr'], 
+                              iteration)
             # Check for nans gradients, parameters
             if args.log_grad:
                 named_params = get_model_named_params(args, guide, 
@@ -141,6 +144,8 @@ def train(model, optimizer, stats, data_loader, args, writer,
                 #     breakpoint()
 
             optimizer.step()
+            if args.anneal_lr:
+                scheduler.step(loss_tuple.log_posterior.mean())
 
             stats = log_stat(args, stats, iteration, loss, loss_tuple)
 
@@ -185,12 +190,12 @@ def get_model_named_params(args, guide, generative_model):
                     guide.internal_decoder.no_img_dist_named_params(),
                     generative_model.img_dist_named_params())
     elif args.model_type in ['AIR']:
-        if not args.execution_guided and args.prior_dist == 'Sequential':
+        if not args.use_canvas and args.prior_dist == 'Sequential':
             named_params = itertools.chain(
                             guide.non_decoder_named_params(),
                             generative_model.no_img_dist_named_params()
                                         ) 
-        elif args.execution_guided or args.prior_dist == 'Sequential':
+        elif args.use_canvas or args.prior_dist == 'Sequential':
             named_params = itertools.chain(
                                 # guide.non_decoder_named_params(),
                                 # guide.non_decoder_named_params(),
@@ -199,7 +204,7 @@ def get_model_named_params(args, guide, generative_model):
         elif args.prior_dist == 'Independent':
             named_params = itertools.chain(guide.named_parameters(),
                                     generative_model.named_parameters()) 
-        elif not args.execution_guided:
+        elif not args.use_canvas:
             named_params = itertools.chain(
                                 guide.non_decoder_named_params(),
                                 generative_model.decoder_named_params())

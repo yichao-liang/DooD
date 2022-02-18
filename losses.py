@@ -38,7 +38,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         guide_out.z_smpl, guide_out.z_lprb, guide_out.baseline_value, 
         guide_out.mask_prev, guide_out.canvas, guide_out.z_prior)
 
-    if ((not guide.execution_guided and generative_model.input_dependent_param)
+    if ((not guide.use_canvas and generative_model.input_dependent_param)
         or args.render_at_the_end):
         # If we haven't rendered the final reconstruction AND we have
         # predicted render parameters

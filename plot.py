@@ -114,7 +114,7 @@ def plot_reconstructions(imgs:torch.Tensor,
                                     guide_out.decoder_param.slope[1][:, :, -1]
         recon_glimpse = generative_model.renders_glimpses(latent.z_what)
         recon_glimpse = recon_glimpse.squeeze(0)
-        if args.execution_guided:
+        if args.use_canvas:
             if guide.intr_ll is not None:
                 recon_img = guide_out.canvas[0, :, -1].expand(n,3,res,res)
             else:
@@ -173,19 +173,18 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         recon_img = display_transform(recon_img)
         # pre canvas for debugging execution guided
-        if args.execution_guided:
-            if args.exec_guid_type == 'canvas':
+        if args.use_canvas:
+            if args.use_residual:
+                # just reuse the name cum_canvas; this is actually just the
+                # final residual
+                cum_canvas = display_transform(guide_out.residual[0].expand(n, 3, res, res))
+            else:
                 if guide.intr_ll is not None:
                     cum_canvas = display_transform(guide_out.canvas[0, :, -1
                                                     ].expand(n, 3, res,res))
                 else:
                     cum_canvas = display_transform(guide_out.canvas[0].expand(
                                                             n, 3, res, res))
-            elif args.exec_guid_type == 'residual':
-                # just reuse the name cum_canvas; this is actually just the
-                # final residual
-                cum_canvas = display_transform(guide_out.residual[0].expand(n, 3, res, res))
-            else: raise NotImplementedError
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)
         # comparision: [n, 3, res * (1_for_target + n_strks_stn + 1_for_recon), res]

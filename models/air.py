@@ -41,7 +41,7 @@ def schedule_model_parameters(gen, guide, iteration, args):
     
 class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, res=28, z_where_type='3',
-                                                    execution_guided=False, 
+                                                    use_canvas=False, 
                                                     transform_z_what=True,
                                                     hidden_dim=256,
                                                     z_what_dim=50,
@@ -49,7 +49,7 @@ class GenerativeModel(nn.Module):
                                                     ):
         super().__init__()
         self.max_strks = max_strks
-        self.execution_guided=execution_guided
+        self.use_canvas=use_canvas
         self.h_dim = hidden_dim
 
         # Prior parameters
@@ -337,8 +337,8 @@ class Guide(template.Guide):
                     img_dim=[1,28,28],
                     hidden_dim=256, 
                     z_where_type='3', 
-                    execution_guided=False,
-                    exec_guid_type=None,
+                    use_canvas=False,
+                    use_residual=None,
                     z_what_dim=50,
                     feature_extractor_sharing=True,
                     z_what_in_pos='z_where_rnn',
@@ -353,8 +353,8 @@ class Guide(template.Guide):
                     img_dim=img_dim,
                     hidden_dim=hidden_dim, 
                     z_where_type=z_where_type, 
-                    execution_guided=execution_guided,
-                    exec_guid_type=exec_guid_type,
+                    use_canvas=use_canvas,
+                    use_residual=use_residual,
                     feature_extractor_sharing=feature_extractor_sharing,
                     z_what_dim=self.z_what_dim,
                     z_what_in_pos=z_what_in_pos,
@@ -365,13 +365,13 @@ class Guide(template.Guide):
                     )
 
         # Internal renderer
-        if self.execution_guided or self.prior_dist == 'Sequential':
+        if self.use_canvas or self.prior_dist == 'Sequential':
             self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
                                             z_what_dim=self.z_what_dim,
                                             max_strks=self.max_strks,
                                             res=img_dim[-1],
-                                            execution_guided=execution_guided,
+                                            use_canvas=use_canvas,
                                             prior_dist=self.prior_dist,
                                             )
         # Inference networks
@@ -467,14 +467,14 @@ class Guide(template.Guide):
             baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
 
             # Update the canvas
-            if self.execution_guided:
+            if self.use_canvas:
                 canvas_step = self.internal_decoder.renders_imgs((
                                             z_pres_smpl[:, :, t:t+1].clone(),
                                             z_what_smpl[:, :, t:t+1],
                                             z_where_smpl[:, :, t:t+1]))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 canvas = canvas + canvas_step
-                if self.exec_guid_type == "residual":
+                if self.use_residual == "residual":
                     # compute the residual
                     residual = torch.clamp(imgs - canvas, min=0.)
 
@@ -569,7 +569,7 @@ class Guide(template.Guide):
                     p_state.z_where.detach().view(prod(shp), -1), 
                     p_state.z_what.detach().view(prod(shp), -1)
                     ]
-        if self.execution_guided:
+        if self.use_canvas:
             bl_input.append(canvas_embed.detach().view(prod(shp), -1)) 
         bl_input = torch.cat(bl_input, dim=1)
         bl_h = self.bl_rnn(bl_input.detach(), p_state.bl_h.view(prod(shp), -1))
@@ -786,11 +786,11 @@ class Guide(template.Guide):
         '''
         mask_prev = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
 
-        if self.execution_guided:
-            # if exec_guid_type == 'residual', canvas stores the difference
-            # if exec_guid_type == 'canvas-so-far', canvas stores the cummulative
+        if self.use_canvas:
+            # if use_residual == 'residual', canvas stores the difference
+            # if use_residual == 'canvas-so-far', canvas stores the cummulative
             canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
-            if self.exec_guid_type == 'residual':
+            if self.use_residual:
                 residual = torch.zeros(ptcs, bs, *self.img_dim, 
                                                             device=imgs.device)
             else:

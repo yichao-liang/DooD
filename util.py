@@ -503,15 +503,15 @@ def init(run_args, device):
                                 ).to(device)
 
     elif run_args.model_type == 'Sequential':
-        # assert ((run_args.execution_guided == (not run_args.no_sgl_strk_tanh)) or
-        #         not run_args.execution_guided),\
-            # "execution_guided should be used in accordance with strk_tanh norm"
+        # assert ((run_args.use_canvas == (not run_args.no_sgl_strk_tanh)) or
+        #         not run_args.use_canvas),\
+            # "use_canvas should be used in accordance with strk_tanh norm"
         generative_model = ssp.GenerativeModel(
                     max_strks=run_args.strokes_per_img,
                     pts_per_strk=run_args.points_per_stroke,
                     z_where_type=run_args.z_where_type,
                     res=run_args.img_res,
-                    execution_guided=run_args.execution_guided,
+                    use_canvas=run_args.use_canvas,
                     transform_z_what=run_args.transform_z_what,
                     input_dependent_param=run_args.input_dependent_render_param,
                     prior_dist=run_args.prior_dist,
@@ -531,10 +531,10 @@ def init(run_args, device):
                 pts_per_strk=run_args.points_per_stroke,
                 z_where_type=run_args.z_where_type,
                 img_dim=[1, run_args.img_res, run_args.img_res],
-                execution_guided=run_args.execution_guided,
+                use_canvas=run_args.use_canvas,
                 transform_z_what=run_args.transform_z_what,
                 input_dependent_param=run_args.input_dependent_render_param,
-                exec_guid_type=run_args.exec_guid_type,
+                use_residual=run_args.use_residual,
                 prior_dist=run_args.prior_dist,
                 target_in_pos=run_args.target_in_pos,
                 feature_extractor_sharing=run_args.feature_extractor_sharing,
@@ -565,7 +565,7 @@ def init(run_args, device):
                                 max_strks=run_args.strokes_per_img,
                                 res=run_args.img_res,
                                 z_where_type=run_args.z_where_type,
-                                execution_guided=run_args.execution_guided,
+                                use_canvas=run_args.use_canvas,
                                 z_what_dim=run_args.z_dim,
                                 prior_dist=run_args.prior_dist,
                         ).to(device)
@@ -573,8 +573,8 @@ def init(run_args, device):
                         max_strks=run_args.strokes_per_img,
                         img_dim=[1, run_args.img_res, run_args.img_res],
                         z_where_type=run_args.z_where_type,
-                        execution_guided=run_args.execution_guided,
-                        exec_guid_type=run_args.exec_guid_type,
+                        use_canvas=run_args.use_canvas,
+                        use_residual=run_args.use_residual,
                         feature_extractor_sharing=\
                                             run_args.feature_extractor_sharing,
                         z_what_dim=run_args.z_dim,
@@ -614,14 +614,14 @@ def init(run_args, device):
         model = (generative_model, guide)
 
     # Optimizer
-    optimizer = init_optimizer(run_args, model)
+    optimizer, scheduler = init_optimizer(run_args, model)
 
     # Stats
     if run_args.model_type != 'MWS':
         stats = Stats([], [], [], [])
 
 
-    return model, optimizer, stats, data_loader
+    return model, optimizer, scheduler, stats, data_loader
 
 def init_optimizer(run_args, model):
     # Model tuple
@@ -649,7 +649,7 @@ def init_optimizer(run_args, model):
         ])
     elif run_args.model_type == 'Sequential':
         train_style_mlp = True
-        if run_args.execution_guided or run_args.prior_dist == 'Sequential':
+        if run_args.use_canvas or run_args.prior_dist == 'Sequential':
             if train_style_mlp:
                 air_parameters = itertools.chain(
                                              guide.air_params(), 
@@ -680,12 +680,15 @@ def init_optimizer(run_args, model):
                 'weight_decay': run_args.weight_decay,
             }
         ]) 
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max',factor=0.1, patience=5000, threshold=25, 
+            min_lr=[1e-4, 1e-3], threshold_mode='abs'
+        )
     else:
         parameters = itertools.chain(guide.parameters(), 
                                      generative_model.parameters())
         optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
-        
-    return optimizer
+    return optimizer, scheduler
 
 def save_checkpoint(path, model, optimizer, stats, run_args=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)

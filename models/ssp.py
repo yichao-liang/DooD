@@ -42,7 +42,7 @@ def schedule_model_parameters(gen, guide, iteration, loss, device):
 
 class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, pts_per_strk=5, res=28, z_where_type='3',
-                                                execution_guided=False, 
+                                                use_canvas=False, 
                                                 transform_z_what=True,
                                                 input_dependent_param=True,
                                                 prior_dist='Independent',
@@ -62,7 +62,7 @@ class GenerativeModel(nn.Module):
         super().__init__()
         self.max_strks = max_strks
         self.pts_per_strk = pts_per_strk
-        self.execution_guided = execution_guided
+        self.use_canvas = use_canvas
         self.maxnorm = maxnorm
         self.sgl_strk_tanh = sgl_strk_tanh
         self.add_strk_tanh = add_strk_tanh
@@ -73,8 +73,8 @@ class GenerativeModel(nn.Module):
                                                             requires_grad=True)
 
         if self.intr_ll is not None:
-            assert self.execution_guided, "intermediate likelihood needs" + \
-                                        "execution_guided = True"
+            assert self.use_canvas, "intermediate likelihood needs" + \
+                                        "use_canvas = True"
         self.dependent_prior = dependent_prior
 
         # Prior parameters
@@ -457,13 +457,13 @@ class GenerativeModel(nn.Module):
         else:
             recon = self.decoder(z_what.view(ptcs*bs, n_strks, -1))
 
-        if self.maxnorm and self.spline_decoder:
+        if self.maxnorm:
             recon = util.normalize_pixel_values(
                     recon.view(ptcs*bs*n_strks, 1, res, res), method='maxnorm')
 
         recon = recon.view(ptcs, bs, n_strks, 1, res, res)
 
-        if self.sgl_strk_tanh and self.spline_decoder:
+        if self.sgl_strk_tanh:
             if self.input_dependent_param:
                 slope = self.sgl_strk_tanh_slope
             else:
@@ -786,8 +786,8 @@ class Guide(template.Guide):
                         img_dim=[1,28,28],
                         hidden_dim=256, 
                         z_where_type='3', 
-                        execution_guided=False,
-                        exec_guid_type=None,
+                        use_canvas=False,
+                        use_residual=None,
                         transform_z_what=False, 
                         input_dependent_param=True,
                         prior_dist='Independent',
@@ -826,8 +826,8 @@ class Guide(template.Guide):
                 img_dim=img_dim,
                 hidden_dim=hidden_dim, 
                 z_where_type=z_where_type, 
-                execution_guided=execution_guided,
-                exec_guid_type=exec_guid_type,
+                use_canvas=use_canvas,
+                use_residual=use_residual,
                 feature_extractor_sharing=feature_extractor_sharing,
                 z_what_in_pos=z_what_in_pos,
                 prior_dist=prior_dist,
@@ -852,13 +852,13 @@ class Guide(template.Guide):
         self.render_at_the_end = render_at_the_end
 
         # Internal renderer
-        if self.execution_guided or self.prior_dist == 'Sequential':
+        if self.use_canvas or self.prior_dist == 'Sequential':
             self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
                                             pts_per_strk=self.pts_per_strk,
                                             max_strks=self.max_strks,
                                             res=img_dim[-1],
-                                            execution_guided=execution_guided,
+                                            use_canvas=use_canvas,
                                             transform_z_what=transform_z_what,
                                             input_dependent_param=\
                                                     input_dependent_param,
@@ -1003,7 +1003,7 @@ class Guide(template.Guide):
             add_strk_tanh_slope[:, :, t] = result['slope'][1].squeeze(-1)
 
             # Update the canvas
-            if self.execution_guided:
+            if self.use_canvas:
                 self.internal_decoder.sigma = sigmas[:, :, t:t+1].clone()
                 # tanh_slope [ptcs, bs, 1]
                 self.internal_decoder.sgl_strk_tanh_slope = \
@@ -1014,12 +1014,8 @@ class Guide(template.Guide):
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
-                    # breakpoint()
                     canvas = canvas + canvas_step
-                    #at step 0 canvas doesn't need normalization, this also
-                    #allows the last prediction used in `render_at_the_end`
-                    # if t > 0 and self.add_strk_tanh:
-                    if self.spline_decoder:
+                    if self.add_strk_tanh:
                         canvas = util.normalize_pixel_values(
                                         canvas, 
                                         method='tanh', 
@@ -1035,8 +1031,7 @@ class Guide(template.Guide):
                                         method='tanh',
                                         slope=add_strk_tanh_slope[:, :, t:t+1]
                                         ).squeeze(2)
-                if self.exec_guid_type == "residual" or\
-                    self.residual_pixel_count:
+                if self.use_residual or self.residual_pixel_count:
                     # compute the residual
                     residual = torch.clamp(imgs - canvas, min=0.).detach()
 
@@ -1139,11 +1134,19 @@ class Guide(template.Guide):
                                     util.get_affine_matrix_from_param(
                                             z_where.view(prod(shp), -1), 
                                             z_where_type=self.z_where_type))
+        trans_rsd = None
+        if residual != None:
+            trans_rsd = util.spatial_transform(
+                            residual.view(prod(shp), *img_dim), 
+                            util.get_affine_matrix_from_param(
+                            z_where.view(prod(shp), -1), 
+                            z_where_type=self.z_where_type)
+                        ).view(*shp, *img_dim)
         
         wt_mlp_in, h_c = self.get_wt_mlp_in(
                                             trans_imgs.view(*shp, *img_dim), 
+                                            trans_rsd,
                                             canvas_embed,
-                                            residual_embed, 
                                             p_state)
         z_what, z_what_lprb, z_what_pms = self.get_z_c(wt_mlp_in, 
                                                        p_state, 
@@ -1158,7 +1161,7 @@ class Guide(template.Guide):
                     p_state.z_where.detach().view(prod(shp), -1), 
                     p_state.z_what.detach().view(prod(shp), -1),
                     ]
-        if self.execution_guided:
+        if self.use_canvas:
             bl_input.append(canvas_embed.detach().view(prod(shp), -1)) 
         bl_input = torch.cat(bl_input, dim=1)
         bl_h = self.bl_rnn(bl_input, p_state.bl_h.view(prod(shp), -1))
@@ -1415,15 +1418,13 @@ class Guide(template.Guide):
         '''
         mask_prev = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
 
-        if self.execution_guided:
-            # if exec_guid_type == 'residual', canvas stores the difference
-            # if exec_guid_type == 'canvas-so-far', canvas stores the cummulative
+        if self.use_canvas:
             if self.intr_ll:
                 canvas = torch.zeros(ptcs, bs, self.max_strks + 1, *self.img_dim, 
                                                         device=imgs.device)
             else:
                 canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
-            if self.exec_guid_type == 'residual':
+            if self.use_residual:
                 residual = imgs.detach().clone()
             else:
                 residual = None
@@ -1452,7 +1453,7 @@ class Guide(template.Guide):
         Return:
             sampled_img [n_samples, bs, 1, res, res]
         '''
-        if self.execution_guided:
+        if self.use_canvas:
             out = self.forward(cond_img)
             cond_img = character_conditioned_sampling(guide_out=out, 
                                             decoder=self.internal_decoder)
