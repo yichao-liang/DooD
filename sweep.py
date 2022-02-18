@@ -43,7 +43,7 @@ if __name__ == '__main__':
     # Not in final list: AIR+seq_prir
     # all_exp_args['AIR+seq_prir'] = models_2_cmd['AIR+seq_prir']
 
-    exp_name = "Full-spDec-simple_pres"
+    exp_name = "Full-neuralDec-fixed_prir-noEG"
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
     for n, args in all_exp_args.items():

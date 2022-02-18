@@ -249,7 +249,7 @@ def get_args_parser():
         help='if specified then True',
     )
     parser.add_argument(
-        '--sep_where_pres_mlp',
+        '--sep_where_pres_net',
         action='store_true',
         help='if specified then True',
     )

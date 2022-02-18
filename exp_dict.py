@@ -156,7 +156,24 @@ exp_dict = {
             '--use_residual',
         ],
     'Full': full_model_args,
+    # model that doesn't collapse, a.k.a. baseline:
+    'Full-neuralDec-fixed_prir-noEG-sepPrWr': full_no_canvas +\
+        [
+            '--no_spline_renderer',
+            '--prior_dist', 'Independent',
+            '--no_maxnorm',
+            '--no_sgl_strk_tanh',
+            '--sep_where_pres_net',
+            '--log_param',
+        ],
     # this shouldn't collapse from conclusion from investigation into collapse
+    'Full-spDec-fxPrior-noEG-anLr-sepPrWr': full_no_canvas +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr',
+            '--sep_where_pres_net',
+            '--log_param',
+        ],
     'Full-spDec-fxPrior-noEG-anLr': full_no_canvas +\
         [
             '--prior_dist', 'Independent',
@@ -170,7 +187,7 @@ exp_dict = {
             '--no_maxnorm',
             '--no_sgl_strk_tanh',
         ],  
-    # model that doesn't collapse:
+    # model that doesn't collapse, a.k.a. baseline:
     'Full-neuralDec-fixed_prir-noEG': full_no_canvas +\
         [
             '--no_spline_renderer',

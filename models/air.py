@@ -356,7 +356,6 @@ class Guide(template.Guide):
                     use_canvas=use_canvas,
                     use_residual=use_residual,
                     feature_extractor_sharing=feature_extractor_sharing,
-                    z_what_dim=self.z_what_dim,
                     z_what_in_pos=z_what_in_pos,
                     prior_dist=prior_dist,
                     target_in_pos=target_in_pos,

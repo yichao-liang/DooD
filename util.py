@@ -523,6 +523,7 @@ def init(run_args, device):
                     spline_decoder=not run_args.no_spline_renderer,
                     render_method=run_args.render_method,
                     intermediate_likelihood=run_args.intermediate_likelihood,
+                    sep_where_pres_net=run_args.sep_where_pres_net,
                     # comment out for eval old models
                     # dependent_prior=run_args.dependent_prior
                                     ).to(device)
@@ -553,7 +554,7 @@ def init(run_args, device):
                 dependent_prior=run_args.dependent_prior,
                 residual_pixel_count=run_args.residual_pixel_count,
                 spline_decoder=not run_args.no_spline_renderer,
-                sep_where_pres_mlp=run_args.sep_where_pres_mlp,
+                sep_where_pres_net=run_args.sep_where_pres_net,
                 render_at_the_end=run_args.render_at_the_end,
                 simple_pres=run_args.simple_pres,
                 simple_arch=run_args.simple_arch,
@@ -581,7 +582,7 @@ def init(run_args, device):
                         z_what_in_pos=run_args.z_what_in_pos,
                         prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
-                        sep_where_pres_mlp=run_args.sep_where_pres_mlp,
+                        sep_where_pres_net=run_args.sep_where_pres_net,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(

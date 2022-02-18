@@ -6,6 +6,7 @@ from numpy import prod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Independent, Normal, Laplace, Bernoulli
 
 
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
@@ -15,7 +16,6 @@ GenState = namedtuple('GenState', 'h_l h_c z_pres z_where z_what')
 
 class Guide(nn.Module):
     def __init__(self,
-                z_what_dim,
                 max_strks=2, 
                 img_dim=[1,28,28],
                 hidden_dim=256, 
@@ -34,7 +34,7 @@ class Guide(nn.Module):
                 dependent_prior=False,
                 spline_decoder=True,
                 residual_pixel_count=False,
-                sep_where_pres_mlp=True,
+                sep_where_pres_net=True,
                 simple_pres=False,
                 simple_arch=False,
                 residual_no_target=False,
@@ -97,7 +97,7 @@ class Guide(nn.Module):
                                             mlp_hidden_dim=hidden_dim,
                                             num_mlp_layers=1)
         if not self.feature_extractor_sharing:
-            self.glimpse_feature_extractor = util.init_cnn(
+            self.trans_img_feature_extractor = util.init_cnn(
                                             n_in_channels=1,
                                             n_mid_channels=16,#32, 
                                             n_out_channels=32,#64,
@@ -106,11 +106,22 @@ class Guide(nn.Module):
                                                 self.feature_extractor_out_dim,
                                             mlp_hidden_dim=256,
                                             num_mlp_layers=1)
+        if use_residual:
+            self.residual_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=256,
+                                                num_mlp_layers=1)
 
 
+        self.sep_where_pres_net = sep_where_pres_net
         # 2.1 pres_where_rnn
+        self.pr_wr_rnn_in = ['z_pres', 'z_where']
         self.pr_wr_rnn_in_dim = self.z_pres_dim + self.z_where_dim
-        self.pr_wr_rnn_in = []
 
         if self.z_what_in_pos == 'z_where_rnn':
             self.pr_wr_rnn_in.append('z_what')
@@ -129,10 +140,17 @@ class Guide(nn.Module):
             assert False, "not recommanded unless in ablation"
             self.pr_wr_rnn_in.append('residual')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        
+            
         self.pr_wr_rnn_hid_dim = hidden_dim
-        self.pr_wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
-                                          self.pr_wr_rnn_hid_dim)
+        if sep_where_pres_net:
+            self.pr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
+                                            self.pr_wr_rnn_hid_dim)
+
+            self.wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
+                                           self.pr_wr_rnn_hid_dim)
+        else:
+            self.pr_wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
+                                            self.pr_wr_rnn_hid_dim)
 
         # 2.2 pres_where_mlp
         if self.simple_pres:
@@ -150,22 +168,12 @@ class Guide(nn.Module):
         if self.target_in_pos == 'MLP' and self.use_residual:
             self.pr_wr_mlp_in.append('residual')
             self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
-            self.residual_feature_extractor = util.init_cnn(
-                                                n_in_channels=1,
-                                                n_mid_channels=16,#32, 
-                                                n_out_channels=32,#64,
-                                                cnn_out_dim=self.cnn_out_dim,
-                                                mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                                mlp_hidden_dim=256,
-                                                num_mlp_layers=1)
 
         self.residual_pixel_count = residual_pixel_count
         if residual_pixel_count:
             self.pr_wr_mlp_in.append('residual_pixel_count')
             self.pr_wr_mlp_in_dim += 1
             
-        self.sep_where_pres_mlp = sep_where_pres_mlp
 
         # 3.1. what_rnn
         self.wt_rnn_in = []
@@ -224,26 +232,31 @@ class Guide(nn.Module):
         return F.softplus(self.rsd_power)
 
     def get_img_features(self, imgs, canvas, residual):
+        '''
+        Args:
+            imgs [ptcs, bs, 1, res, res'''
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
         
         # embed image
         img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim
                                                             )).view(*shp, -1)
-        if canvas is not None:
+        canvas_embed, residual_embed, rsd_ratio = None, None, None
+        if self.use_canvas:
             canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), 
                                                     *img_dim)).view(*shp, -1)
 
             if self.use_residual:
                 residual_embed = self.residual_feature_extractor(residual.view(
                                         prod(shp), *img_dim)).view(*shp, -1)
-            else: residual_embed = None
-        else: canvas_embed, residual_embed = None, None
-        return img_embed, canvas_embed, residual_embed
+            if self.simple_pres or self.residual_pixel_count:
+                rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
+                
+        return img_embed, canvas_embed, residual_embed, rsd_ratio
 
         
     def get_pr_wr_mlp_in(self, img_embed, canvas_embed, residual_embed, 
-                        residual, p_state):
+                        rsd_ratio, p_state):
         '''Get the input for `pr_wr_mlp` from the current img and p_state
         Args:
             img_embed [ptcs, bs, embed_dim]
@@ -260,6 +273,7 @@ class Guide(nn.Module):
         # Style RNN input
         rnn_in = [p_state.z_pres.view(prod(shp), -1), 
                   p_state.z_where.view(prod(shp), -1)]
+
         if 'z_what' in self.pr_wr_rnn_in:
             rnn_in.append(p_state.z_what.view(prod(shp), -1))
         if 'canvas' in self.pr_wr_rnn_in:
@@ -269,47 +283,71 @@ class Guide(nn.Module):
         if 'residual' in self.pr_wr_rnn_in:
             rnn_in.append(residual_embed.view(prod(shp), -1))
         rnn_in = torch.cat(rnn_in, dim=1)
-        h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
+
+        if self.sep_where_pres_net:
+            h_pr = self.pr_rnn(rnn_in, p_state.h_l[0].view(prod(shp), -1))
+            h_wr = self.wr_rnn(rnn_in, p_state.h_l[1].view(prod(shp), -1))
+        else:
+            h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
 
         # Style MLP input
-        mlp_in = []
-        if 'h' in self.pr_wr_mlp_in:
-            mlp_in.append(h_l)
-        if 'target' in self.pr_wr_mlp_in:
-            mlp_in.append(img_embed.view(prod(shp), -1))
-        if 'residual' in self.pr_wr_mlp_in:
-            mlp_in.append(residual_embed.view(prod(shp), -1))
-        if 'residual_pixel_count' in self.pr_wr_mlp_in:
-            residual_pcount = residual.sum([2,3,4]) / prod(self.img_dim)
-            mlp_in.append(residual_pcount.view(prod(shp), 1))
-        mlp_in = torch.cat(mlp_in, dim=1)
+        if self.sep_where_pres_net:
+            pr_mlp_in, wr_mlp_in = [], []
+            if 'h' in self.pr_wr_mlp_in:
+                pr_mlp_in.append(h_pr), wr_mlp_in.append(h_wr)
+            if 'target' in self.pr_wr_mlp_in:
+                pr_mlp_in.append(img_embed.view(prod(shp), -1))
+                wr_mlp_in.append(img_embed.view(prod(shp), -1))
+            if 'residual' in self.pr_wr_mlp_in:
+                pr_mlp_in.append(residual_embed.view(prod(shp), -1))
+                wr_mlp_in.append(residual_embed.view(prod(shp), -1))
+            if 'residual_pixel_count' in self.pr_wr_mlp_in:
+                pr_mlp_in.append(rsd_ratio.view(prod(shp), 1))
+                wr_mlp_in.append(rsd_ratio.view(prod(shp), 1))
+            pr_mlp_in = torch.cat(pr_mlp_in, dim=1).view(*shp, -1)
+            wr_mlp_in = torch.cat(wr_mlp_in, dim=1).view(*shp, -1)
+            mlp_in = (pr_mlp_in, wr_mlp_in)
+        else:
+            mlp_in = []
+            if 'h' in self.pr_wr_mlp_in:
+                mlp_in.append(h_l)
+            if 'target' in self.pr_wr_mlp_in:
+                mlp_in.append(img_embed.view(prod(shp), -1))
+            if 'residual' in self.pr_wr_mlp_in:
+                mlp_in.append(residual_embed.view(prod(shp), -1))
+            if 'residual_pixel_count' in self.pr_wr_mlp_in:
+                mlp_in.append(rsd_ratio.view(prod(shp), 1))
+            mlp_in = torch.cat(mlp_in, dim=1).view(*shp, -1)
 
-        return (rnn_in.view(*shp, -1), h_l.view(*shp, -1),
-                mlp_in.view(*shp, -1))
+        if self.sep_where_pres_net:
+            h_l = (h_pr.view(*shp, -1), h_wr.view(*shp, -1))
+        else:
+            h_l = h_l.view(*shp, -1)
+
+        return (rnn_in.view(*shp, -1), h_l, mlp_in)
         
     def get_wt_mlp_in(self, trans_imgs, trans_rsd, canvas_embed, p_state):
         '''Get the input for the wt_mlp
         Args:
             trans_imgs: [ptcs, bs, *img_dim]
+            trans_rsd: [ptcs, bs, *img_dim]
             canvas_embed: [ptcs, bs, em_dim]
-            residual_embed: [ptcs, bs, em_dim]
             p_state
         Return:
             wt_mlp_in: [ptcs, bs, in_dim]
             h_c: [ptcs, bs, in_dim]
         '''
         # Sample z_what, get log_prob
-        ptcs, bs = shp = trans_imgs.shape[:2]
-        img_dim = trans_imgs.shape[2:]
+        shp, img_dim = trans_imgs.shape[:2], trans_imgs.shape[2:]
 
         # [bs, pts_per_strk, 2, 1]
         if self.feature_extractor_sharing:
             trans_tar_em = self.img_feature_extractor(trans_imgs.view(prod(shp), 
                                                                     *img_dim))
         else:
-            trans_tar_em = self.glimpse_feature_extractor(trans_imgs.view(prod(
+            trans_tar_em = self.trans_img_feature_extractor(trans_imgs.view(prod(
                                                                 shp), *img_dim))
-        if trans_rsd != None:
+        if self.use_residual:
             trans_rsd_em = self.residual_feature_extractor(
                                             trans_rsd.view(prod(shp), *img_dim))
             
@@ -338,5 +376,122 @@ class Guide(nn.Module):
 
         return mlp_in.view(*shp, -1), h_c.view(*shp, -1)
 
+    def sample_pr_wr(self, p_state, z_pres_p, z_where_loc, z_where_scale):
+        shp = z_pres_p.shape[:2]
+
+        # If previous z_pres is 0, force z_pres to 0
+        z_pres_p = z_pres_p * p_state.z_pres
+        # Numerical stability -> added to net output
+        eps = 1e-12
+        z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
+
+        # Sample z_pres
+        assert z_pres_p.shape == torch.Size([*shp, 1])
+        z_pres_post = Independent(Bernoulli(z_pres_p), 
+                                        reinterpreted_batch_ndims=1)
+        assert (z_pres_post.event_shape == torch.Size([1]) and
+                z_pres_post.batch_shape == torch.Size([*shp]))
+        # z_pres: [ptcs, bs, 1]
+        z_pres = z_pres_post.sample()
+
+        # If previous z_pres is 0, then this z_pres should also be 0.
+        # However, this is sampled from a Bernoulli whose probability is at
+        # least eps. In the unlucky event that the sample is 1, we force this
+        # to 0 as well.
+        z_pres = z_pres * p_state.z_pres
+
+        # log prob: log q(z_pres[i] | x, z_{<i}) if z_pres[i-1]=1, else 0
+        # Mask with p_state.z_pres instead of z_pres. 
+        # Keep if prev == 1, curr == 0 or 1; remove if prev == 0
+        z_pres_lprb = z_pres_post.log_prob(z_pres).unsqueeze(-1) * p_state.z_pres
+        
+        # Sample z_where, get log_prob
+        assert z_where_loc.shape == torch.Size([*shp, self.z_where_dim])
+        z_where_post = Independent(Normal(z_where_loc, z_where_scale),
+                                                    reinterpreted_batch_ndims=1)
+        assert (z_where_post.event_shape == torch.Size([self.z_where_dim]) and
+                z_where_post.batch_shape == torch.Size([*shp]))        
+        # z_where: [ptcs, bs, z_where_dim]
+        z_where = z_where_post.rsample()
+
+        # constrain sample
+        # if not self.constrain_param:
+        #     z_where = constrain_z_where(self.z_where_type, 
+        #                                 z_where.view(prod(shp), -1), 
+        #                                 clamp=True)
+        #     z_where = z_where.view(*shp, -1)
+                                                            
+        z_where_lprb = z_where_post.log_prob(z_where).unsqueeze(-1) * z_pres
+        # z_where_lprb = z_where_lprb.squeeze()
+        return z_pres, z_where, z_pres_lprb, z_where_lprb
+    
+    def sample_wt(self, z_what_loc, z_what_std, z_pres):
+        shp = z_what_loc.shape[:2]
+        z_what_post = Independent(Normal(z_what_loc, z_what_std), 
+                                                    reinterpreted_batch_ndims=2)
+        assert (z_what_post.event_shape == torch.Size([self.pts_per_strk, 2]) 
+                and z_what_post.batch_shape == torch.Size([*(shp)]))
+
+        # [ptcs, bs, pts_per_strk, 2] 
+        z_what = z_what_post.rsample()
+        # constrain samples
+        # if not self.constrain_param:
+        #     z_what = constrain_z_what(z_what, clamp=True)
+
+        # log_prob(z_what): [ptcs, bs, 1]
+        # z_pres: [ptcs, bs, 1]
+        z_what_lprb = z_what_post.log_prob(z_what).unsqueeze(-1) * z_pres
+        # z_what_lprb = z_what_lprb.squeeze()
+        return z_what, z_what_lprb
+
+    def record_step_result(self, result, shp, t,
+                                z_pres_pms, z_where_pms, z_what_pms,
+                                z_pres_smpl, z_where_smpl, z_what_smpl,
+                                z_pres_lprb, z_where_lprb, z_what_lprb,
+                                baseline_value, sigmas, 
+                                sgl_strk_tanh_slope, add_strk_tanh_slope, 
+                        ):
+        ptcs, bs = shp
+        state = result['state']
+        assert (state.z_pres.shape == torch.Size([ptcs, bs, 1]) and
+                state.z_what.shape == 
+                        torch.Size([ptcs, bs, self.pts_per_strk, 2]) and
+                state.z_where.shape == 
+                        torch.Size([ptcs, bs, self.z_where_dim]))
+
+        # Update and store the information
+        # z_pres: [ptcs, bs, 1]
+        z_pres_smpl[:, :, t] = state.z_pres.squeeze(-1)
+        # z_what: [ptcs * bs, pts_per_strk, 2];
+        z_what_smpl[:, :, t] = state.z_what
+        # z_where: [ptcs, bs, z_where_dim]
+        z_where_smpl[:, :, t] = state.z_where
+
+        assert (result['z_pres_pms'].shape == torch.Size([ptcs, bs, 1])
+            and result['z_what_pms'].shape == torch.Size([ptcs, bs, 
+                                                self.pts_per_strk, 2, 2]) 
+            and result['z_where_pms'].shape == torch.Size([ptcs, bs, 
+                                                self.z_where_dim, 2]))
+        z_pres_pms[:, :, t] = result['z_pres_pms'].squeeze(-1)
+        z_what_pms[:, :, t] = result['z_what_pms']
+        z_where_pms[:, :, t] = result['z_where_pms']
+
+        assert (result['z_pres_lprb'].shape == torch.Size([ptcs, bs, 1]) and
+                result['z_what_lprb'].shape == torch.Size([ptcs, bs, 1]) and
+                result['z_where_lprb'].shape == torch.Size([ptcs, bs, 1]))
+        z_pres_lprb[:, :, t] = result['z_pres_lprb'].squeeze(-1)
+        z_what_lprb[:, :, t] = result['z_what_lprb'].squeeze(-1)
+        z_where_lprb[:, :, t] = result['z_where_lprb'].squeeze(-1)
+        baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
+
+        sigmas[:, :, t] = result['sigma'].squeeze(-1)
+        sgl_strk_tanh_slope[:, :, t] = result['slope'][0].squeeze(-1)
+        add_strk_tanh_slope[:, :, t] = result['slope'][1].squeeze(-1)
+
+        return (z_pres_pms, z_where_pms, z_what_pms,
+                z_pres_smpl, z_where_smpl, z_what_smpl,
+                z_pres_lprb, z_where_lprb, z_what_lprb,
+                baseline_value, sigmas, 
+                sgl_strk_tanh_slope, add_strk_tanh_slope)
 
 
