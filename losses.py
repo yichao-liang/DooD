@@ -103,8 +103,6 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     # log_prior = ZLogProb(**log_prior_)
     # divide by beta
     log_likelihood = log_likelihood / beta
-    
-
 
     if args.no_baseline:
         bl_value = 0.
@@ -151,8 +149,8 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         # div by img_dim and clip grad works for independent prior
         # but not for sequential
         baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
-                            reduction='none')
-        baseline_loss = baseline_loss * mask_prev.detach() # [bs, n_strks]
+                                   reduction='none')
+        baseline_loss = baseline_loss * mask_prev # [bs, n_strks]
         baseline_loss = baseline_loss.sum(2)
         loss = model_loss + baseline_loss # [bs, ]
 

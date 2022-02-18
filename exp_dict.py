@@ -174,18 +174,26 @@ exp_dict = {
             '--sep_where_pres_net',
             '--log_param',
         ],
+    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--z_where_type', '3',
+            '--anneal_lr',
+        ],
+    # 2 minimal models that collapse:
     'Full-spDec-fxPrior-noEG-anLr': full_no_canvas +\
         [
             '--prior_dist', 'Independent',
+            '--z_where_type', '3',
             '--anneal_lr',
         ],
-    # a minimal model that collapse:
     'Full-neuralDec-fixed_prir-useCanvas': full_model_args +\
         [
             '--no_spline_renderer',
             '--prior_dist', 'Independent',
             '--no_maxnorm',
             '--no_sgl_strk_tanh',
+            '--anneal_lr',
         ],  
     # model that doesn't collapse, a.k.a. baseline:
     'Full-neuralDec-fixed_prir-noEG': full_no_canvas +\

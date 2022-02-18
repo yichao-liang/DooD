@@ -424,7 +424,7 @@ class Guide(nn.Module):
         z_where_lprb = z_where_post.log_prob(z_where).unsqueeze(-1) * z_pres
         # z_where_lprb = z_where_lprb.squeeze()
         return z_pres, z_where, z_pres_lprb, z_where_lprb
-    
+
     def sample_wt(self, z_what_loc, z_what_std, z_pres):
         shp = z_what_loc.shape[:2]
         z_what_post = Independent(Normal(z_what_loc, z_what_std), 
@@ -488,7 +488,8 @@ class Guide(nn.Module):
         sgl_strk_tanh_slope[:, :, t] = result['slope'][0].squeeze(-1)
         add_strk_tanh_slope[:, :, t] = result['slope'][1].squeeze(-1)
 
-        return (z_pres_pms, z_where_pms, z_what_pms,
+        return (state,
+                z_pres_pms, z_where_pms, z_what_pms,
                 z_pres_smpl, z_where_smpl, z_what_smpl,
                 z_pres_lprb, z_where_lprb, z_what_lprb,
                 baseline_value, sigmas, 

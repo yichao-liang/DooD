@@ -965,7 +965,8 @@ class Guide(template.Guide):
                 canvas_ = canvas[:, :, t]
             result = self.inference_step(state, imgs, canvas_, residual)
 
-            (z_pres_pms, z_where_pms, z_what_pms,
+            (state, 
+            z_pres_pms, z_where_pms, z_what_pms,
             z_pres_smpl, z_where_smpl, z_what_smpl,
             z_pres_lprb, z_where_lprb, z_what_lprb,
             baseline_value, sigmas, sgl_strk_tanh_slope, add_strk_tanh_slope) =\

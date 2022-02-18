@@ -145,7 +145,7 @@ def train(model, optimizer, scheduler, stats, data_loader, args, writer,
 
             optimizer.step()
             if args.anneal_lr:
-                scheduler.step(loss_tuple.log_posterior.mean())
+                scheduler.step(loss_tuple.log_posterior.detach().mean())
 
             stats = log_stat(args, stats, iteration, loss, loss_tuple)
 

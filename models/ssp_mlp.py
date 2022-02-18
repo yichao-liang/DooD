@@ -61,7 +61,7 @@ class RendererParamMLP(nn.Module):
         self.seq.linear_modules[-1].weight.data.zero_()
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-                        torch.tensor([-10,10,10], dtype=torch.float))
+                        torch.tensor([6,2,2], dtype=torch.float))
 
         elif not self.sgl_strk_tanh and not self.maxnorm:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
