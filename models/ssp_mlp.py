@@ -62,8 +62,8 @@ class RendererParamMLP(nn.Module):
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                         # works well with no canvas
-                        # torch.tensor([-2,2,2], dtype=torch.float))
-                        torch.tensor([2,2,2], dtype=torch.float))
+                        torch.tensor([-2,2,2], dtype=torch.float))
+                        # torch.tensor([2,2,2], dtype=torch.float))
 
         elif not self.sgl_strk_tanh and not self.maxnorm:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
