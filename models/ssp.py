@@ -811,6 +811,7 @@ class Guide(template.Guide):
                         simple_pres=False,
                         simple_arch=False,
                         residual_no_target=False,
+                        canvas_only_to_zwhere=False,
                 ):
         '''
         Args:
@@ -842,6 +843,7 @@ class Guide(template.Guide):
                 simple_pres=simple_pres,
                 simple_arch=simple_arch,
                 residual_no_target=residual_no_target,
+                canvas_only_to_zwhere=canvas_only_to_zwhere,
                 )
         # Parameters
         self.constrain_param = constrain_param

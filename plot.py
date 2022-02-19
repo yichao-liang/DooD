@@ -114,7 +114,7 @@ def plot_reconstructions(imgs:torch.Tensor,
                                     guide_out.decoder_param.slope[1][:, :, -1]
         recon_glimpse = generative_model.renders_glimpses(latent.z_what)
         recon_glimpse = recon_glimpse.squeeze(0)
-        if args.use_canvas:
+        if args.use_canvas and guide_out.canvas is not None:
             if guide.intr_ll is not None:
                 recon_img = guide_out.canvas[0, :, -1].expand(n,3,res,res)
             else:
@@ -173,7 +173,7 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         recon_img = display_transform(recon_img)
         # pre canvas for debugging execution guided
-        if args.use_canvas:
+        if args.use_canvas and guide_out.canvas is not None:
             if args.use_residual:
                 # just reuse the name cum_canvas; this is actually just the
                 # final residual

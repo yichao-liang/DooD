@@ -174,11 +174,24 @@ exp_dict = {
             '--sep_where_pres_net',
             '--log_param',
         ],
+    # we can potentially also use it detach canvas before passing to both rnn
+    # and return no canvas
     'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
             '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+        ],
+    # use canvas by passing it only to zwhere but not zwhat, see above for 
+    # another way
+    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--z_where_type', '3',
+            '--anneal_lr',
+            '--canvas_only_to_zwhere',
             '--log_param',
         ],
     # 2 minimal models that collapse from early exp:
@@ -186,7 +199,7 @@ exp_dict = {
         [
             '--no_spline_renderer',
             '--prior_dist', 'Independent',
-            # '--z_where_type', '3',
+            '--z_where_type', '3',
             '--no_maxnorm',
             '--no_sgl_strk_tanh',
             '--anneal_lr',

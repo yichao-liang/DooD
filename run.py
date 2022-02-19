@@ -277,6 +277,11 @@ def get_args_parser():
     parser.add_argument('--residual_no_target', action='store_true',
                         help='''if true then only residual is passed, not target
                         and residual''')
+    parser.add_argument('--canvas_only_to_zwhere', action='store_true',
+                        help='''only pass canvas to z_where (z_pres) rnn, not
+                        z_what rnn. Because for the model with spline decoder,
+                        fixed prior pass it to both makes the model unable to 
+                        start doing good quality reconstructions''')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

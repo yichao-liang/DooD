@@ -559,6 +559,7 @@ def init(run_args, device):
                 simple_pres=run_args.simple_pres,
                 simple_arch=run_args.simple_arch,
                 residual_no_target=run_args.residual_no_target,
+                canvas_only_to_zwhere=run_args.canvas_only_to_zwhere,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -682,7 +683,7 @@ def init_optimizer(run_args, model):
             }
         ]) 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='max',factor=0.1, patience=5000, threshold=25, 
+            optimizer, mode='max',factor=0.1, patience=5000, threshold=30, 
             min_lr=[1e-4, 1e-3], threshold_mode='abs'
         )
     else:

@@ -38,6 +38,7 @@ class Guide(nn.Module):
                 simple_pres=False,
                 simple_arch=False,
                 residual_no_target=False,
+                canvas_only_to_zwhere=False,
                 ):
         super().__init__()
         
@@ -183,7 +184,7 @@ class Guide(nn.Module):
             self.wt_rnn_in.append('z_what')
             self.wt_rnn_in_dim += self.z_what_dim
         # Target (transformed)
-        if self.use_canvas:
+        if self.use_canvas and not canvas_only_to_zwhere:
             self.wt_rnn_in.append('canvas')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
 

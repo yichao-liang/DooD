@@ -89,6 +89,7 @@ class RendererParamMLP(nn.Module):
 
         # add slope
         if self.sgl_strk_tanh:
+            # works well with no canvas
             add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
         else:
             add_slope = F.softplus(z[:, 2:3]) + 1e-3
