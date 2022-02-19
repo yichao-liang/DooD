@@ -179,24 +179,28 @@ exp_dict = {
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
             '--anneal_lr',
+            '--log_param',
         ],
-    # 2 minimal models that collapse:
+    # 2 minimal models that collapse from early exp:
+    'Full-neuralDec-fxPrior-useCanvas-anLr': full_model_args +\
+        [
+            '--no_spline_renderer',
+            '--prior_dist', 'Independent',
+            # '--z_where_type', '3',
+            '--no_maxnorm',
+            '--no_sgl_strk_tanh',
+            '--anneal_lr',
+            '--log_param',
+        ],  
     'Full-spDec-fxPrior-noEG-anLr': full_no_canvas +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
             '--anneal_lr',
+            '--log_param',
         ],
-    'Full-neuralDec-fixed_prir-useCanvas': full_model_args +\
-        [
-            '--no_spline_renderer',
-            '--prior_dist', 'Independent',
-            '--no_maxnorm',
-            '--no_sgl_strk_tanh',
-            '--anneal_lr',
-        ],  
     # model that doesn't collapse, a.k.a. baseline:
-    'Full-neuralDec-fixed_prir-noEG': full_no_canvas +\
+    'Full-neuralDec-fxPrior-noEG': full_no_canvas +\
         [
             '--no_spline_renderer',
             '--prior_dist', 'Independent',

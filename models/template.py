@@ -251,7 +251,7 @@ class Guide(nn.Module):
                                         prod(shp), *img_dim)).view(*shp, -1)
             if self.simple_pres or self.residual_pixel_count:
                 rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
-                
+               
         return img_embed, canvas_embed, residual_embed, rsd_ratio
 
         
@@ -443,56 +443,3 @@ class Guide(nn.Module):
         z_what_lprb = z_what_post.log_prob(z_what).unsqueeze(-1) * z_pres
         # z_what_lprb = z_what_lprb.squeeze()
         return z_what, z_what_lprb
-
-    def record_step_result(self, result, shp, t,
-                                z_pres_pms, z_where_pms, z_what_pms,
-                                z_pres_smpl, z_where_smpl, z_what_smpl,
-                                z_pres_lprb, z_where_lprb, z_what_lprb,
-                                baseline_value, sigmas, 
-                                sgl_strk_tanh_slope, add_strk_tanh_slope, 
-                        ):
-        ptcs, bs = shp
-        state = result['state']
-        assert (state.z_pres.shape == torch.Size([ptcs, bs, 1]) and
-                state.z_what.shape == 
-                        torch.Size([ptcs, bs, self.pts_per_strk, 2]) and
-                state.z_where.shape == 
-                        torch.Size([ptcs, bs, self.z_where_dim]))
-
-        # Update and store the information
-        # z_pres: [ptcs, bs, 1]
-        z_pres_smpl[:, :, t] = state.z_pres.squeeze(-1)
-        # z_what: [ptcs * bs, pts_per_strk, 2];
-        z_what_smpl[:, :, t] = state.z_what
-        # z_where: [ptcs, bs, z_where_dim]
-        z_where_smpl[:, :, t] = state.z_where
-
-        assert (result['z_pres_pms'].shape == torch.Size([ptcs, bs, 1])
-            and result['z_what_pms'].shape == torch.Size([ptcs, bs, 
-                                                self.pts_per_strk, 2, 2]) 
-            and result['z_where_pms'].shape == torch.Size([ptcs, bs, 
-                                                self.z_where_dim, 2]))
-        z_pres_pms[:, :, t] = result['z_pres_pms'].squeeze(-1)
-        z_what_pms[:, :, t] = result['z_what_pms']
-        z_where_pms[:, :, t] = result['z_where_pms']
-
-        assert (result['z_pres_lprb'].shape == torch.Size([ptcs, bs, 1]) and
-                result['z_what_lprb'].shape == torch.Size([ptcs, bs, 1]) and
-                result['z_where_lprb'].shape == torch.Size([ptcs, bs, 1]))
-        z_pres_lprb[:, :, t] = result['z_pres_lprb'].squeeze(-1)
-        z_what_lprb[:, :, t] = result['z_what_lprb'].squeeze(-1)
-        z_where_lprb[:, :, t] = result['z_where_lprb'].squeeze(-1)
-        baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
-
-        sigmas[:, :, t] = result['sigma'].squeeze(-1)
-        sgl_strk_tanh_slope[:, :, t] = result['slope'][0].squeeze(-1)
-        add_strk_tanh_slope[:, :, t] = result['slope'][1].squeeze(-1)
-
-        return (state,
-                z_pres_pms, z_where_pms, z_what_pms,
-                z_pres_smpl, z_where_smpl, z_what_smpl,
-                z_pres_lprb, z_where_lprb, z_what_lprb,
-                baseline_value, sigmas, 
-                sgl_strk_tanh_slope, add_strk_tanh_slope)
-
-
