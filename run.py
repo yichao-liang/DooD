@@ -282,6 +282,13 @@ def get_args_parser():
                         z_what rnn. Because for the model with spline decoder,
                         fixed prior pass it to both makes the model unable to 
                         start doing good quality reconstructions''')
+    parser.add_argument('--detach_canvas_so_far', action='store_true',
+                        help='''detach canvas-so-far from the computation graph 
+                        before passing into the rnn at each step, in the end, 
+                        a None canvas is returned and the latent variables are 
+                        used to render out recons. This simplifies the 
+                        gradient graph.
+                        Not using this is DISENCOURAGED.''')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

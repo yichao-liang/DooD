@@ -812,6 +812,7 @@ class Guide(template.Guide):
                         simple_arch=False,
                         residual_no_target=False,
                         canvas_only_to_zwhere=False,
+                        detach_canvas_so_far=True,
                 ):
         '''
         Args:
@@ -844,6 +845,7 @@ class Guide(template.Guide):
                 simple_arch=simple_arch,
                 residual_no_target=residual_no_target,
                 canvas_only_to_zwhere=canvas_only_to_zwhere,
+                detach_canvas_so_far=detach_canvas_so_far,
                 )
         # Parameters
         self.constrain_param = constrain_param
@@ -1016,15 +1018,26 @@ class Guide(template.Guide):
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 if self.intr_ll is None:
-                    canvas_so_far = canvas + canvas_step
-                    if self.add_strk_tanh:
-                        canvas_so_far = util.normalize_pixel_values(
-                                        canvas_so_far, 
+                    canvas = canvas + canvas_step
+                    # not using detach_canvas is disencouraged
+                    if self.add_strk_tanh and not self.detach_canvas_so_far:
+                        canvas = util.normalize_pixel_values(
+                                        canvas, 
                                         method='tanh', 
                                         slope=add_strk_tanh_slope[:, :, t])
-                    # if self.render_at_the_end:
-                    #     canvas = canvas.detach()
-                    canvas = canvas_so_far
+                    # in case of detach_canvas_so_far, the return canvas is
+                    # None. The last add_strk_slope is thus used twice, 1 for 
+                    # the last step, one for rendering the whole recon. We can
+                    # potentially improve it by the following modification. 
+                    # This isn't good when canvas is not detached because it
+                    # complicates the gradient graph
+                    if self.add_strk_tanh and t > 0 and self.detach_canvas_so_far:
+                        canvas = util.normalize_pixel_values(
+                                        canvas, 
+                                        method='tanh', 
+                                        slope=add_strk_tanh_slope[:, :, t-1])
+                    if self.detach_canvas_so_far:
+                        canvas = canvas.detach()
                 else:
                     canvas_so_far = (canvas[:, :, t:t+1] +
                                      canvas_step.unsqueeze(2))
@@ -1085,7 +1098,7 @@ class Guide(template.Guide):
                            decoder_param=DecoderParam(
                                sigma=sigmas,
                                slope=(sgl_strk_tanh_slope, add_strk_tanh_slope)),
-                           canvas=canvas,
+                           canvas=None if self.detach_canvas_so_far else canvas,
                            residual=residual,
                            z_prior=ZLogProb(
                                z_pres=z_pres_prir,

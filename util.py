@@ -560,6 +560,7 @@ def init(run_args, device):
                 simple_arch=run_args.simple_arch,
                 residual_no_target=run_args.residual_no_target,
                 canvas_only_to_zwhere=run_args.canvas_only_to_zwhere,
+                detach_canvas_so_far=run_args.detach_canvas_so_far,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'

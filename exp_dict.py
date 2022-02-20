@@ -174,9 +174,9 @@ exp_dict = {
             '--sep_where_pres_net',
             '--log_param',
         ],
-    # we can potentially also use it detach canvas before passing to both rnn
-    # and return no canvas
-    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+    # we can potentially also use: 1) a detach canvas before passing to both rnn
+    # and 2)return no canvas
+    'Full-spDec-fxPrior-useDetachCanvas-anLr': full_model_args +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',

@@ -43,7 +43,7 @@ if __name__ == '__main__':
     # Not in final list: AIR+seq_prir
     # all_exp_args['AIR+seq_prir'] = models_2_cmd['AIR+seq_prir']
 
-    exp_name = "Full-neuralDec-fxPrior-useCanvas-anLr"
+    exp_name = "Full-spDec-fxPrior-useDetachCanvas-anLr"
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
     for n, args in all_exp_args.items():
@@ -54,7 +54,7 @@ if __name__ == '__main__':
                      '--tb_dir', f'./log/full-eg/{model_name}',
 
                     '--seed', f'{run_args.seed}',
-                    '--continue_training',
+                    # '--continue_training',
                     ])
         subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
         print(f"==> Done training {n}\n")

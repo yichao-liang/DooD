@@ -258,13 +258,13 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
     return SequentialLoss(overall_loss=loss, 
-                                model_loss=model_loss,
-                                baseline_loss=baseline_loss,
-                                neg_reinforce_term=neg_reinforce_term,
-                                neg_elbo=-elbo,
-                                neg_log_likelihood=-log_likelihood,
-                                neg_log_prior=-log_prior_z, 
-                                log_posterior=log_post_z)
+                            model_loss=model_loss,
+                            baseline_loss=baseline_loss,
+                            neg_reinforce_term=neg_reinforce_term,
+                            neg_elbo=-elbo,
+                            neg_log_likelihood=-log_likelihood,
+                            neg_log_prior=-log_prior_z, 
+                            log_posterior=log_post_z)
 
 
 def get_loss_base(generative_model, guide, imgs, loss="nll"):

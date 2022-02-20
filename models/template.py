@@ -39,6 +39,7 @@ class Guide(nn.Module):
                 simple_arch=False,
                 residual_no_target=False,
                 canvas_only_to_zwhere=False,
+                detach_canvas_so_far=True,
                 ):
         super().__init__()
         
@@ -58,6 +59,7 @@ class Guide(nn.Module):
                                             "use_canvas = True"
         self.dependent_prior = dependent_prior
         self.spline_decoder = spline_decoder
+        self.detach_canvas_so_far = detach_canvas_so_far
         self.simple_pres = simple_pres
         if use_residual:
             assert use_canvas, "residual needs canvas to be computed"
