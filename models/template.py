@@ -403,7 +403,7 @@ class Guide(nn.Module):
 
         if self.constrain_z_pres_param_this_step:
             # this should used be false, but set true occationally from the loss
-            # to encourage samples of 0s.
+            # script to encourage samples of 0s.
             z_pres = Independent(Bernoulli(torch.zeros_like(z_pres_p)+0.4),
                                            reinterpreted_batch_ndims=1).sample()
 

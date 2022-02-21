@@ -31,6 +31,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         beta (float): beta term as in beta-VAE
     '''
     if args.constrain_z_pres_param and iteration > 9001 and iteration < 14000:
+        # the second clause is some experimental condition
         guide.constrain_z_pres_param_this_ite = True
     else: guide.constrain_z_pres_param_this_ite = False
 

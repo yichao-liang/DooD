@@ -142,7 +142,7 @@ exp_dict = {
     'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
         [
             '--prior_dist', 'Independent',
-            # '--z_where_type', '3',
+            '--z_where_type', '3',
             '--anneal_lr',
             '--detach_canvas_so_far',
             '--log_param',
@@ -230,7 +230,7 @@ exp_dict = {
         ],
     # use canvas by passing it only to zwhere but not zwhat, see above for 
     # another way
-    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+    'Full-spDec-fxPrior-useUndetachetachCanvas-anLr': full_model_args +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -239,7 +239,7 @@ exp_dict = {
             '--log_param',
         ],
     # 2 minimal models that collapse from early exp:
-    'Full-neuralDec-fxPrior-useCanvas-anLr': full_model_args +\
+    'Full-neuralDec-fxPrior-useUndetachCanvas-anLr': full_model_args +\
         [
             '--no_spline_renderer',
             '--prior_dist', 'Independent',

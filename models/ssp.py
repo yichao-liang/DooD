@@ -963,6 +963,7 @@ class Guide(template.Guide):
 
             if self.constrain_z_pres_param_this_ite and t >= 2:
                 self.constrain_z_pres_param_this_step = True
+                # some experimental condition
             else: self.constrain_z_pres_param_this_step = False
 
             # Do one inference step and save results
