@@ -282,7 +282,6 @@ class Guide(nn.Module):
         # Style RNN input
         rnn_in = [p_state.z_pres.view(prod(shp), -1), 
                   p_state.z_where.view(prod(shp), -1)]
-
         if 'z_what' in self.pr_wr_rnn_in:
             rnn_in.append(p_state.z_what.view(prod(shp), -1))
         if 'canvas' in self.pr_wr_rnn_in:

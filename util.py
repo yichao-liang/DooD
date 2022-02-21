@@ -755,10 +755,6 @@ def load_checkpoint(path, device):
     stats = checkpoint["stats"]
     return model, optimizer, scheduler, stats, data_loader, run_args
 
-ClfStats = collections.namedtuple("ClfStats", ['trn_accuracy', 'tst_accuracy'])
-Stats = collections.namedtuple("Stats", ["trn_losses", "trn_elbos", 
-                                            "tst_losses", "tst_elbos"])
-
 
 def save_baseline_posterior(
     path,

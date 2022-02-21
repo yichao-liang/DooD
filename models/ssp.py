@@ -52,9 +52,6 @@ class GenerativeModel(nn.Module):
                                                 sgl_strk_tanh=True,
                                                 add_strk_tanh=True,
                                                 constrain_param=True,
-                                                fixed_prior=True,
-                                                spline_decoder=True,
-                                                render_method='bounded',
                                                 intermediate_likelihood=None,
                                                 dependent_prior=False,
                                                 feature_extractor_out_dim=256,
@@ -1327,6 +1324,7 @@ class Guide(template.Guide):
         ptcs, bs = imgs.shape[:2]
 
         # Init model state for performing inference
+<<<<<<< HEAD
         if self.sep_where_pres_net:
             h_l = (torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
                                device=imgs.device),
@@ -1334,9 +1332,9 @@ class Guide(template.Guide):
                                device=imgs.device))
         else:
             h_l = torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
-                               device=imgs.device)
         state = GuideState(
-            h_l=h_l,
+            h_l=torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, device=imgs.device),
+>>>>>>> 12f3d0d3476f5242d9364abfdd958a334db6871e
             h_c=torch.zeros(ptcs, bs, self.wt_rnn_hid_dim, device=imgs.device),
             bl_h=torch.zeros(ptcs, bs, self.bl_hid_dim, device=imgs.device),
             z_pres=torch.ones(ptcs, bs, 1, device=imgs.device),
