@@ -693,7 +693,7 @@ def init_optimizer(run_args, model):
         optimizer = torch.optim.Adam(parameters, lr=run_args.lr)
     return optimizer, scheduler
 
-def save_checkpoint(path, model, optimizer, stats, run_args=None):
+def save_checkpoint(path, model, optimizer, schedular, stats, run_args=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     if run_args.model_type == 'MWS':
@@ -716,6 +716,7 @@ def save_checkpoint(path, model, optimizer, stats, run_args=None):
                 "generative_model_state_dict": generative_model.state_dict(),
                 "guide_state_dict": guide.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "schedular_state_dict": schedular.state_dict(),
                 "stats": stats,
                 "run_args": run_args,
             },
@@ -725,13 +726,14 @@ def save_checkpoint(path, model, optimizer, stats, run_args=None):
 
 
 def load_checkpoint(path, device):
+    scheduler = None
     try:
         checkpoint = torch.load(path, map_location=device)
     except Exception as e:
         print(e)
         print(f"failed loading {path}")
     run_args = checkpoint["run_args"]
-    model, optimizer, stats, data_loader = init(run_args, device)
+    model, optimizer, scheduler, stats, data_loader = init(run_args, device)
 
     if run_args.model_type == 'MWS':
         generative_model, guide, memory = model
@@ -751,7 +753,7 @@ def load_checkpoint(path, device):
 
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     stats = checkpoint["stats"]
-    return model, optimizer, stats, data_loader, run_args
+    return model, optimizer, scheduler, stats, data_loader, run_args
 
 ClfStats = collections.namedtuple("ClfStats", ['trn_accuracy', 'tst_accuracy'])
 Stats = collections.namedtuple("Stats", ["trn_losses", "trn_elbos", 

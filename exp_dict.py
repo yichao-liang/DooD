@@ -136,6 +136,18 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
+    # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
+    # is already able to learn a variable number of strokes.
+    # Now exp fxPrior model that uses 4dim z_where and residual
+    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            # '--z_where_type', '3',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            # '--save_history_ckpt',
+        ],
     # Feb 17
     'Full-fixed_prir-useRsd-anLr': full_model_args +\
         [
@@ -165,6 +177,38 @@ exp_dict = {
             '--no_sgl_strk_tanh',
             '--sep_where_pres_net',
             '--log_param',
+        ],
+    'Full-spDec-fxPrior-useCanvas-anLr-sepPrWr': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--z_where_type', '3',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            '--constrain_z_pres_param',
+            '--sep_where_pres_net',
+            '--save_history_ckpt',
+        ],
+    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--z_where_type', '3',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            # '--save_history_ckpt',
+        ],
+    # exp with constraining z_pres_param, as normally it doesn't produce 0s once
+    # converged
+    'Full-spDec-fxPrior-useCanvas-anLr-consPres': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--z_where_type', '3',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            '--constrain_z_pres_param',
+            '--save_history_ckpt',
         ],
     # this shouldn't collapse from conclusion from investigation into collapse
     'Full-spDec-fxPrior-noEG-anLr-sepPrWr': full_no_canvas +\

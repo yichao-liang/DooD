@@ -961,6 +961,10 @@ class Guide(template.Guide):
             # state.z_pres: [ptcs, bs, 1]
             mask_prev[:, :, t] = state.z_pres.squeeze()
 
+            if self.constrain_z_pres_param_this_ite and t >= 2:
+                self.constrain_z_pres_param_this_step = True
+            else: self.constrain_z_pres_param_this_step = False
+
             # Do one inference step and save results
             if self.intr_ll is None:
                 result = self.inference_step(p_state=state, imgs=imgs, 
@@ -1251,6 +1255,7 @@ class Guide(template.Guide):
         z_pres_p = z_pres_p.view(*shp, -1)
         z_where_loc = z_where_loc.view(*shp, -1)
         z_where_scale = z_where_scale.view(*shp, -1)
+
 
         if self.sep_where_pres_net:
             sigma, strk_slope, add_slope = self.renderer_param_mlp(

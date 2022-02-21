@@ -289,6 +289,9 @@ def get_args_parser():
                         used to render out recons. This simplifies the 
                         gradient graph.
                         Not using this is DISENCOURAGED.''')
+    parser.add_argument('--constrain_z_pres_param', action='store_true',
+                        help='''constrain the z_pres parameters according to the
+                        schedule in loss.py''')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

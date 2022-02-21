@@ -158,7 +158,7 @@ def train(model, optimizer, scheduler, stats, data_loader, args, writer,
             # Save Checkpoint
             if iteration % args.save_interval == 0 or iteration == \
                                                             args.num_iterations:
-                save(args, iteration, model, optimizer, stats)
+                save(args, iteration, model, optimizer, scheduler, stats)
             
             # End training based on `iteration`
             iteration += 1
@@ -172,7 +172,7 @@ def train(model, optimizer, scheduler, stats, data_loader, args, writer,
         #     test_model(model, stats, val_loader, args, epoch=epoch, writer=writer)
     writer.close()
     
-    save(args, iteration, model, optimizer, stats)
+    save(args, iteration, model, optimizer, scheduler, stats)
     return model
 
 def test_model(model, stats, test_loader, args, save_imgs_dir=None, epoch=None, 
@@ -342,7 +342,7 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
             util.logging.info(f"Iteration {iteration} | Loss = {stats.trn_losses[-1]:.3f}")
     return stats
 
-def save(args, iteration, model, optimizer, stats):
+def save(args, iteration, model, optimizer, scheduler, stats):
     # save iteration.pt
     if args.save_history_ckpt:
         util.save_checkpoint(
@@ -350,6 +350,7 @@ def save(args, iteration, model, optimizer, stats):
             checkpoint_iteration=iteration),
             model,
             optimizer,
+            scheduler,
             stats,
             run_args=args,
         )
@@ -358,6 +359,7 @@ def save(args, iteration, model, optimizer, stats):
         util.get_checkpoint_path(args),
         model,
         optimizer,
+        scheduler,
         stats,
         run_args=args,
     )

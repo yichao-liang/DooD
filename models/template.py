@@ -74,6 +74,10 @@ class Guide(nn.Module):
         if residual_no_target:
             assert use_residual,\
                     "residual_no_target requires execution guide and residual"
+        # when this is set to True by the outside, self.constrain_z_pres_param
+        # will be set on the last timestep of the reconstruction
+        self.constrain_z_pres_param_this_ite = False
+        self.constrain_z_pres_param_this_step = False
 
 
         # Internal renderer
@@ -385,8 +389,8 @@ class Guide(nn.Module):
         # If previous z_pres is 0, force z_pres to 0
         z_pres_p = z_pres_p * p_state.z_pres
         # Numerical stability -> added to net output
-        eps = 1e-12
-        z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
+        # eps = 1e-12
+        # z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
 
         # Sample z_pres
         assert z_pres_p.shape == torch.Size([*shp, 1])
@@ -396,6 +400,12 @@ class Guide(nn.Module):
                 z_pres_post.batch_shape == torch.Size([*shp]))
         # z_pres: [ptcs, bs, 1]
         z_pres = z_pres_post.sample()
+
+        if self.constrain_z_pres_param_this_step:
+            # this should used be false, but set true occationally from the loss
+            # to encourage samples of 0s.
+            z_pres = Independent(Bernoulli(torch.zeros_like(z_pres_p)+0.4),
+                                           reinterpreted_batch_ndims=1).sample()
 
         # If previous z_pres is 0, then this z_pres should also be 0.
         # However, this is sampled from a Bernoulli whose probability is at
