@@ -255,7 +255,7 @@ def init_z_where(z_where_type):
                                                 torch.ones(4)/5, 4),
                            '4_rotate': ZWhereParam(
                                                 torch.tensor([.8,0,0,0]),
-                                                torch.tensor([0.2,1,1,1]), 4),
+                                                torch.tensor([.2,.2,.2,.2]), 4),
                                                 # torch.ones(4)/5, 4),
                            '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
                                                 torch.ones(5)/5, 5),
