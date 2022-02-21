@@ -185,7 +185,7 @@ exp_dict = {
             '--anneal_lr',
             '--detach_canvas_so_far',
             '--log_param',
-            '--constrain_z_pres_param',
+            # '--constrain_z_pres_param',
             '--sep_where_pres_net',
             '--save_history_ckpt',
         ],

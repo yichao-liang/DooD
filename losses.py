@@ -108,30 +108,28 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     #     log_prior_[z] = log_prior[i] * beta
     # log_prior = ZLogProb(**log_prior_)
     # divide by beta
-    log_likelihood = log_likelihood / beta
+
+    # sign correction for the loss in reinforce -- keep it positive
+    reinforce_ll = log_likelihood.detach()
+    # correct_reinforce_loss = True
+    # mean_ll = log_likelihood.mean()
+    # if mean_ll < 0 and correct_reinforce_loss:
+    #     if iteration == 1:
+    #         min_ll = log_likelihood.min()
+    #     corrected_ll = log_likelihood + min_ll.abs
+
+    reinforce_ll = reinforce_ll / beta
 
     if args.no_baseline:
         bl_value = 0.
-    # -- old
     bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                     for prob in log_post], dim=-1).sum(-1)
     bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                     for prob in log_prior], dim=-1).sum(-1)
     # this is like -ELBO
-    bl_target = bl_target - log_likelihood[:, :, None]
+    bl_target = bl_target - reinforce_ll[:, :, None]
     bl_target = (bl_target * mask_prev)
     reinforce_loss = bl_target - bl_value
-    # -- new: instead of subtract bl_value from after cumsum, do it before 
-    #         cumsum
-    # log_post_sum = torch.cat([prob.unsqueeze(-1) for prob 
-    #                             in log_post], dim=-1).sum(-1)
-    # kl_sum = log_post_sum - torch.cat([prob.unsqueeze(-1) for prob 
-    #                             in log_prior], dim=-1).sum(-1)
-    # kl_sum_ = kl_sum - bl_value
-    # kl_cumsum = kl_sum_.flip(-1).cumsum(-1).flip(-1)
-    # reinforce_loss = kl_cumsum - log_likelihood[:, :, None]
-    # reinforce_loss = reinforce_loss * mask_prev.detach()
-    # bl_target = kl_sum - log_likelihood[:, :, None]
 
     # The "REINFORCE"  term in the gradient is: [ptcs, bs,]; 
     # bl_target is the negative elbo
@@ -165,6 +163,9 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         with torch.no_grad():
             if writer_tag is None:
                 writer_tag = ''
+            writer.add_scalar(
+                f"{writer_tag}Train curves/neg_log_likelihood in reinforce",
+                -reinforce_ll.mean(), iteration)
             writer.add_scalar(f"{writer_tag}Train curves/beta", beta, 
                               iteration)
             writer.add_scalar(f"{writer_tag}Train curves/reinforce variance",
