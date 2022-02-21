@@ -118,7 +118,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         # if mean_ll < 0: # only when <0 or commented out
         if iteration == 0:
             # use generative_model to store min_ll
-            generative_model.min_ll = reinforce_ll.min()
+            generative_model.min_ll = reinforce_ll.mean()
         # correct version that should be always positive, hence the negative
         # version should be always negative.
         reinforce_ll = reinforce_ll + generative_model.min_ll.abs()

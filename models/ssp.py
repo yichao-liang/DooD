@@ -1179,7 +1179,7 @@ class Guide(template.Guide):
                     p_state.z_where.detach().view(prod(shp), -1), 
                     p_state.z_what.detach().view(prod(shp), -1),
                     ]
-        if self.use_canvas:
+        if 'canvas' in self.bl_in:
             bl_input.append(canvas_embed.detach().view(prod(shp), -1)) 
         bl_input = torch.cat(bl_input, dim=1)
         bl_h = self.bl_rnn(bl_input, p_state.bl_h.view(prod(shp), -1))

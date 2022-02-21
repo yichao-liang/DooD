@@ -222,12 +222,14 @@ class Guide(nn.Module):
             self.wt_mlp_in_dim += self.feature_extractor_out_dim
 
         # 4. baseline
+        self.bl_in = []
         self.bl_hid_dim = bl_rnn_hid_dim
         self.bl_in_dim = (self.feature_extractor_out_dim  + 
                           self.z_pres_dim + 
                           self.z_where_dim +
                           self.z_what_dim)
         if self.use_canvas:
+            self.bl_in.append('canvas')
             self.bl_in_dim += self.feature_extractor_out_dim
         self.bl_rnn = torch.nn.GRUCell(self.bl_in_dim, self.bl_hid_dim)
         self.bl_regressor = util.init_mlp(in_dim=self.bl_hid_dim,
