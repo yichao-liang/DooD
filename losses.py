@@ -109,14 +109,20 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     # log_prior = ZLogProb(**log_prior_)
     # divide by beta
 
-    # sign correction for the loss in reinforce -- keep it positive
     reinforce_ll = log_likelihood.detach()
-    # correct_reinforce_loss = True
-    # mean_ll = log_likelihood.mean()
-    # if mean_ll < 0 and correct_reinforce_loss:
-    #     if iteration == 1:
-    #         min_ll = log_likelihood.min()
-    #     corrected_ll = log_likelihood + min_ll.abs
+
+    # sign correction for the loss in reinforce -- keep it positive
+    correct_reinforce_loss = True
+    if correct_reinforce_loss:
+        # mean_ll = reinforce_ll.mean() # only when <0 else commented out
+        # if mean_ll < 0: # only when <0 or commented out
+        if iteration == 0:
+            # use generative_model to store min_ll
+            generative_model.min_ll = reinforce_ll.min()
+        # correct version that should be always positive, hence the negative
+        # version should be always negative.
+        reinforce_ll = reinforce_ll + generative_model.min_ll.abs()
+        
 
     reinforce_ll = reinforce_ll / beta
 

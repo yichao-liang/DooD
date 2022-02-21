@@ -13,8 +13,8 @@
 #SBATCH --mail-type=end
 #SBATCH --mail-type=fail
 #SBATCH --mail-user=ycliang6@gmail.edu
-#SBATCH --output=output/S-%x.%j.out
-#SBATCH --error=output/S-%x.%j.err
+#SBATCH --output=output/%x.%j.out
+#SBATCH --error=output/%x.%j.err
 
 source activate glot
 cd /om2/user/ycliang/hierarchical/handwritten_characters
