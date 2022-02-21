@@ -139,10 +139,9 @@ exp_dict = {
     # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
     # is already able to learn a variable number of strokes.
     # Now exp fxPrior model that uses 4dim z_where and residual
-    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr-4wr': full_model_args +\
         [
             '--prior_dist', 'Independent',
-            '--z_where_type', '3',
             '--anneal_lr',
             '--detach_canvas_so_far',
             '--log_param',
