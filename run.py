@@ -289,6 +289,11 @@ def get_args_parser():
                         used to render out recons. This simplifies the 
                         gradient graph.
                         Not using this is DISENCOURAGED.''')
+    parser.add_argument('--detach_embed_ratio', action='store_true',
+                        help='''detach the embedding of canvas, residual and 
+                        residual ratio, if they are used. If true when using 
+                        residual, the cnn will be shared between residual and 
+                        img''')
     parser.add_argument('--constrain_z_pres_param', action='store_true',
                         help='''constrain the z_pres parameters according to the
                         schedule in loss.py''')

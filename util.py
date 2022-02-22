@@ -255,7 +255,7 @@ def init_z_where(z_where_type):
                                                 torch.ones(4)/5, 4),
                            '4_rotate': ZWhereParam(
                                                 torch.tensor([.8,0,0,0]),
-                                                torch.tensor([.2,.2,.2,.2]), 4),
+                                                torch.tensor([.2,.2,.2,.4]), 4),
                                                 # torch.ones(4)/5, 4),
                            '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
                                                 torch.ones(5)/5, 5),
@@ -561,6 +561,7 @@ def init(run_args, device):
                 residual_no_target=run_args.residual_no_target,
                 canvas_only_to_zwhere=run_args.canvas_only_to_zwhere,
                 detach_canvas_so_far=run_args.detach_canvas_so_far,
+                detach_embed_ratio=run_args.detach_embed_ratio,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'

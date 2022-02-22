@@ -139,6 +139,43 @@ exp_dict = {
     # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
     # is already able to learn a variable number of strokes.
     # Now exp fxPrior model that uses 4dim z_where and residual
+    'Full-spDec-sqPrior-anLr': full_no_canvas +\
+        [
+            '--anneal_lr',
+            '--log_param',
+         ],
+    'Full-spDec-fxPrior-useDetachCanvRsd-anLr-wr4': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_embed_ratio',
+            # '--save_history_ckpt',
+        ],
+    'Full-spDec-fxPrior-useRsd-anLr-wr4-simplePres': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--simple_pres',
+            # '--save_history_ckpt',
+        ],
+    'Full-spDec-fxPrior-useRsd-anLr-wr4': full_model_args +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr',
+            '--detach_canvas_so_far',
+            '--log_param',
+            '--use_residual',
+            '--residual_pixel_count',
+            # '--save_history_ckpt',
+        ],
     'Full-spDec-fxPrior-useCanvas-anLr-wr4': full_model_args +\
         [
             '--prior_dist', 'Independent',

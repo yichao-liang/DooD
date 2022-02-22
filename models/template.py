@@ -40,6 +40,7 @@ class Guide(nn.Module):
                 residual_no_target=False,
                 canvas_only_to_zwhere=False,
                 detach_canvas_so_far=True,
+                detach_embed_ratio=True,
                 ):
         super().__init__()
         
@@ -60,6 +61,8 @@ class Guide(nn.Module):
         self.dependent_prior = dependent_prior
         self.spline_decoder = spline_decoder
         self.detach_canvas_so_far = detach_canvas_so_far
+        self.detach_embed_ratio = detach_embed_ratio
+
         self.simple_pres = simple_pres
         if use_residual:
             assert use_canvas, "residual needs canvas to be computed"
@@ -113,7 +116,8 @@ class Guide(nn.Module):
                                                 self.feature_extractor_out_dim,
                                             mlp_hidden_dim=256,
                                             num_mlp_layers=1)
-        if use_residual:
+        if use_residual and not detach_embed_ratio:
+            # if detach_embed_ratio, not gradient is produced to learn this
             self.residual_feature_extractor = util.init_cnn(
                                                 n_in_channels=1,
                                                 n_mid_channels=16,#32, 
@@ -255,11 +259,20 @@ class Guide(nn.Module):
             canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), 
                                                     *img_dim)).view(*shp, -1)
 
+            if self.detach_embed_ratio: canvas_embed = canvas_embed.detach()
+
             if self.use_residual:
-                residual_embed = self.residual_feature_extractor(residual.view(
-                                        prod(shp), *img_dim)).view(*shp, -1)
+                if self.detach_embed_ratio:
+                    residual_embed = self.img_feature_extractor(
+                            residual.view(prod(shp), *img_dim)).view(*shp, -1
+                                                                    ).detach()
+                else:
+                    residual_embed = self.residual_feature_extractor(
+                            residual.view(prod(shp), *img_dim)).view(*shp, -1)
             if self.simple_pres or self.residual_pixel_count:
                 rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
+
+                if self.detach_embed_ratio: rsd_ratio = rsd_ratio.detach()
                
         return img_embed, canvas_embed, residual_embed, rsd_ratio
 
@@ -357,8 +370,12 @@ class Guide(nn.Module):
             trans_tar_em = self.trans_img_feature_extractor(trans_imgs.view(prod(
                                                                 shp), *img_dim))
         if self.use_residual:
-            trans_rsd_em = self.residual_feature_extractor(
-                                            trans_rsd.view(prod(shp), *img_dim))
+            if self.detach_embed_ratio:
+                trans_rsd_em = self.img_feature_extractor(
+                                trans_rsd.view(prod(shp), *img_dim)).detach()
+            else:
+                trans_rsd_em = self.residual_feature_extractor(
+                                trans_rsd.view(prod(shp), *img_dim))
             
         # z_what RNN input
         wt_rnn_in = []

@@ -173,18 +173,17 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         recon_img = display_transform(recon_img)
         # pre canvas for debugging execution guided
-        if args.use_canvas and guide_out.canvas is not None:
-            if args.use_residual:
-                # just reuse the name cum_canvas; this is actually just the
-                # final residual
-                cum_canvas = display_transform(guide_out.residual[0].expand(n, 3, res, res))
+        if args.use_residual:
+            # just reuse the name cum_canvas; this is actually just the
+            # final residual
+            cum_canvas = display_transform(guide_out.residual[0].expand(n, 3, res, res))
+        elif args.use_canvas and guide_out.canvas is not None:
+            if guide.intr_ll is not None:
+                cum_canvas = display_transform(guide_out.canvas[0, :, -1
+                                                ].expand(n, 3, res,res))
             else:
-                if guide.intr_ll is not None:
-                    cum_canvas = display_transform(guide_out.canvas[0, :, -1
-                                                    ].expand(n, 3, res,res))
-                else:
-                    cum_canvas = display_transform(guide_out.canvas[0].expand(
-                                                            n, 3, res, res))
+                cum_canvas = display_transform(guide_out.canvas[0].expand(
+                                                        n, 3, res, res))
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)
         # comparision: [n, 3, res * (1_for_target + n_strks_stn + 1_for_recon), res]
