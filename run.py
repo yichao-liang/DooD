@@ -289,14 +289,22 @@ def get_args_parser():
                         used to render out recons. This simplifies the 
                         gradient graph.
                         Not using this is DISENCOURAGED.''')
-    parser.add_argument('--detach_embed_ratio', action='store_true',
-                        help='''detach the embedding of canvas, residual and 
-                        residual ratio, if they are used. If true when using 
-                        residual, the cnn will be shared between residual and 
-                        img''')
+    parser.add_argument('--detach_canvas_embed', action='store_true',
+                        help='''detach the embedding of canvas, if it's used. 
+                        The feature extractor cnn will not be updated through 
+                        the gradient from canvas''')
+    parser.add_argument('--detach_rsd_embed', action='store_true',
+                        help='''detach the embedding of residual and 
+                        residual ratio, if they are used. 
+                        If False, residual will have a seperate cnn, thereby 
+                        avoid interfereing with the learning for the other image
+                        cnn;
+                        If True, residual and img will share cnn, but there
+                        won't be gradient from residual_embed to cnn.''')
     parser.add_argument('--constrain_z_pres_param', action='store_true',
                         help='''constrain the z_pres parameters according to the
                         schedule in loss.py''')
+    # parser.add_argument('--half_1s')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

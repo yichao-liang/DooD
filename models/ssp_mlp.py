@@ -116,7 +116,14 @@ class PresWhereMLP(nn.Module):
             self.seq.linear_modules[-1].weight.data.zero_()
             # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+                # this works normally -> init to all steps; and 
+                # works to constrain #steps with β4 -> init to 1 step
                 [4, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+                # works to constrain #steps with β3 -> init to 1 step
+                # [2, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+                # works with β2  -> init to 1 step
+                # (init to 2 didn't work)
+                # [1, 4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
 
             # AIR constrain
             # self.seq.linear_modules[-1].weight.data.zero_()

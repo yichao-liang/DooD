@@ -561,7 +561,8 @@ def init(run_args, device):
                 residual_no_target=run_args.residual_no_target,
                 canvas_only_to_zwhere=run_args.canvas_only_to_zwhere,
                 detach_canvas_so_far=run_args.detach_canvas_so_far,
-                detach_embed_ratio=run_args.detach_embed_ratio,
+                detach_canvas_embed=run_args.detach_canvas_embed,
+                detach_rsd_embed=run_args.detach_rsd_embed,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'

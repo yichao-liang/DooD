@@ -813,7 +813,8 @@ class Guide(template.Guide):
                         residual_no_target=False,
                         canvas_only_to_zwhere=False,
                         detach_canvas_so_far=True,
-                        detach_embed_ratio=True,
+                        detach_canvas_embed=True,
+                        detach_rsd_embed=True,
                 ):
         '''
         Args:
@@ -847,7 +848,8 @@ class Guide(template.Guide):
                 residual_no_target=residual_no_target,
                 canvas_only_to_zwhere=canvas_only_to_zwhere,
                 detach_canvas_so_far=detach_canvas_so_far,
-                detach_embed_ratio=detach_embed_ratio,
+                detach_canvas_embed=detach_canvas_embed,
+                detach_rsd_embed=detach_rsd_embed,
                 )
         # Parameters
         self.constrain_param = constrain_param
