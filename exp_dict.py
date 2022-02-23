@@ -136,16 +136,35 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
-    # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
-    # is already able to learn a variable number of strokes.
-    # Now exp fxPrior model that uses 4dim z_where and residual
-    # works 250k+
-    'Full-spDec-sqPrior-useCanv-anLr': full_model_args +\
+    # Feb 23
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr': full_model_args +\
         [
             '--anneal_lr',
             '--log_param',
             '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_ll',
+            '--sep_where_pres_net',
          ],
+    'Full-spDec-sqPrior-useDetachRsd-normRfLoss': full_model_args +\
+        [
+            # '--anneal_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+         ],
+    # the below used update_reinforce_ll = True in loss
+    # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
+    # is already able to learn a variable number of strokes.
+    # Now exp fxPrior model that uses 4dim z_where and residual
+    # works 250k+
     'Full-spDec-sqPrior-useDetachRsd-anLr': full_model_args +\
         [
             '--anneal_lr',
@@ -155,6 +174,7 @@ exp_dict = {
             '--use_residual',
             '--residual_pixel_count',
             '--detach_rsd_embed',
+            '--update_reinforce_ll',
          ],
     # works 250k+
     'Full-spDec-sqPrior-useDetachCanvRsd-anLr': full_model_args +\
@@ -167,12 +187,22 @@ exp_dict = {
             '--residual_pixel_count',
             '--detach_rsd_embed',
             '--detach_canvas_embed',
+            '--update_reinforce_ll',
+         ],
+    # works 250k+
+    'Full-spDec-sqPrior-useCanv-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--update_reinforce_ll',
          ],
     # works 300k+
     'Full-spDec-sqPrior-noEG-anLr': full_no_canvas +\
         [
             '--anneal_lr',
             '--log_param',
+            '--update_reinforce_ll',
          ],
     # works 300k+
     'Full-spDec-fxPrior-useDetachCanvRsd-anLr-wr4': full_model_args +\

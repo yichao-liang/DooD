@@ -265,8 +265,6 @@ def get_args_parser():
                                      help='if specified then True.')
     parser.add_argument('--no_add_strk_tanh', action='store_true', 
                                      help='if specified then True.')
-    parser.add_argument('--no_baseline', action='store_true',
-                        help='if specified then True, not use baseline net')
     parser.add_argument('--simple_pres', action='store_true',
                         help='''if specified, use residual pixel as z_pres param
                         specifically, z_pres_prob = residual ** r where r is
@@ -304,6 +302,16 @@ def get_args_parser():
     parser.add_argument('--constrain_z_pres_param', action='store_true',
                         help='''constrain the z_pres parameters according to the
                         schedule in loss.py''')
+    # parser.add_argument('--update_reinforce_ll', action='store_true',
+    #                      help='whether to modify the reinforce likelihood')
+    parser.add_argument('--update_reinforce_loss', action='store_true',
+                        help='''whether to center and normalize the reinforce loss
+                        as in NVIL paper''')
+    parser.add_argument('--update_reinforce_ll', action='store_true',
+                        help='''doing this can reduce initial fluctuation, and
+                        this wihout updating the reinforce_loss have been shown
+                        to allow running to 300k iteration with lr scheduler.
+                        ''')
     # parser.add_argument('--half_1s')
 
     # Baseline network
