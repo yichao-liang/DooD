@@ -91,7 +91,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     elbo = - log_post_z + generative_joint_log_prob
     assert elbo.shape == torch.Size([k, *imgs.shape[:-3]])
 
-    # bl_target size: [batch_size, max_strks]
+    # reinforce_sgnl size: [batch_size, max_strks]
     # sum_{i=t}^T [ KL[i] - log p(x | z) ] 
     # =sum_{i=t}^T [ log_post - log_prior - log p(x | z)]
     # for all steps up to (and including) the first z_pres=0
@@ -112,36 +112,54 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     reinforce_ll = log_likelihood.detach()
 
     # sign correction for the loss in reinforce -- keep it positive
-    correct_reinforce_loss = True
-    if correct_reinforce_loss:
-        # mean_ll = reinforce_ll.mean() # only when <0 else commented out
-        # if mean_ll < 0: # only when <0 or commented out
+    # deprecated; now using update_reinforce_loss;
+    # we have shown that using this help with initialize to good reconstruction
+    update_reinforce_ll = True
+    if update_reinforce_ll:
         if iteration == 0:
             # use generative_model to store min_ll
             generative_model.min_ll = reinforce_ll.mean()
-        # correct version that should be always positive, hence the negative
-        # version should be always negative.
-        reinforce_ll = reinforce_ll + generative_model.min_ll.abs()
+        # centering
+        reinforce_ll = reinforce_ll - generative_model.min_ll
         
 
     reinforce_ll = reinforce_ll / beta
 
     if args.no_baseline:
         bl_value = 0.
-    bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+    reinforce_sgnl = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                     for prob in log_post], dim=-1).sum(-1)
-    bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+    reinforce_sgnl -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                     for prob in log_prior], dim=-1).sum(-1)
     # this is like -ELBO
-    bl_target = bl_target - reinforce_ll[:, :, None]
-    bl_target = (bl_target * mask_prev)
-    reinforce_loss = bl_target - bl_value
+    reinforce_sgnl = reinforce_sgnl - reinforce_ll[:, :, None]
+
+    # addition:
+    # todo: should this be before or after masking?
+    update_reinforce_loss = False
+    if update_reinforce_loss:
+        # todo: should this be for each time step or for all elements?
+        signal_mean = reinforce_sgnl.mean()
+        signal_std = reinforce_sgnl.std()
+        reinforce_sgnl = (reinforce_sgnl - signal_mean) / max(1, signal_std)
+
+    # Q: check whether to keep masking; masking result in z_pres 0 has no gradient
+    # A: Shouldn't be mask out as we want sample 0s to have learning signals
+    # when masked with z_pres, no 0 has gradients
+    # when masked with mask_prev, the first pres=0 has gradients
+    reinforce_sgnl = (reinforce_sgnl * mask_prev)
+
+
+    # this is still updated reinforce_sgnl; purly created for later convinence
+    reinforce_sgnl_ = reinforce_sgnl - bl_value
 
     # The "REINFORCE"  term in the gradient is: [ptcs, bs,]; 
     # bl_target is the negative elbo
     # bl_value: [ptcs, bs, max_strks]; z_pres [ptcs, bs, max_strks]; 
     # (bl_target - bl_value) * gradient[z_pres_posterior]
-    neg_reinforce_term = (reinforce_loss).detach() * log_post.z_pres
+    neg_reinforce_term = (reinforce_sgnl_).detach() * log_post.z_pres
+    # Q: check whether to keep masking
+    # A: 
     neg_reinforce_term = neg_reinforce_term * mask_prev
     neg_reinforce_term = neg_reinforce_term.sum(2) # [ptcs, bs, ]
 
@@ -158,7 +176,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         # MSE as baseline loss: [ptcs, bs, n_strks]
         # div by img_dim and clip grad works for independent prior
         # but not for sequential
-        baseline_loss = F.mse_loss(bl_value, bl_target.detach(), 
+        baseline_loss = F.mse_loss(bl_value, reinforce_sgnl.detach(), 
                                    reduction='none')
         baseline_loss = baseline_loss * mask_prev # [ptcs, bs, n_strks]
         baseline_loss = baseline_loss.sum(2)
@@ -175,7 +193,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
             writer.add_scalar(f"{writer_tag}Train curves/beta", beta, 
                               iteration)
             writer.add_scalar(f"{writer_tag}Train curves/reinforce variance",
-                              reinforce_loss.detach().var(), iteration)
+                              reinforce_sgnl_.detach().var(), iteration)
             # loss
             for n, log_prob in zip(log_post._fields, log_post):
                 writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
