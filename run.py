@@ -312,6 +312,10 @@ def get_args_parser():
                         this wihout updating the reinforce_loss have been shown
                         to allow running to 300k iteration with lr scheduler.
                         ''')
+    parser.add_argument('--anneal_non_pr_net_lr', action='store_true',
+                        help='''only useable when sep_wr_pr_net is used, this
+                        allows different learning rate scheduling on pr net and 
+                        the rest''')
     # parser.add_argument('--half_1s')
 
     # Baseline network

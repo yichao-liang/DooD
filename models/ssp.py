@@ -1141,7 +1141,7 @@ class Guide(template.Guide):
                                 self.get_img_features(imgs, canvas, residual)
 
         # Predict z_pres, z_where from target and canvas
-        pr_wr_rnn_in, h_l, pr_wr_mlp_in = self.get_pr_wr_mlp_in(img_embed, 
+        pr_wr_mlp_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
                                                                 canvas_embed, 
                                                                 residual_embed, 
                                                                 rsd_ratio,
@@ -1472,12 +1472,13 @@ class Guide(template.Guide):
             if n.split("_")[0] != 'bl':
                 yield p
 
-    def get_z_what_net_params(self):
+    def pr_net_param(self):
         for n, p in self.named_parameters():
-            if n.split("_")[1] == 'what':
+            if n.split("_")[0] == 'pr':
                 yield p
-
-    def no_style_mlp_air_parameters(self):
+    
+    def non_pr_net_air_param(self):
         for n, p in self.named_parameters():
-            if n.split("_")[0] != 'bl' and n.split('.')[0] != 'pr_wr_mlp':
+            word = n.split("_")[0]
+            if word != 'pr' and word != 'bl':
                 yield p

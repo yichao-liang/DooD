@@ -367,7 +367,7 @@ class Guide(nn.Module):
         else:
             h_l = h_l.view(*shp, -1)
 
-        return (rnn_in.view(*shp, -1), h_l, mlp_in)
+        return mlp_in, h_l
         
     def get_wt_mlp_in(self, trans_imgs, trans_rsd, canvas_embed, p_state):
         '''Get the input for the wt_mlp

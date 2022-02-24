@@ -136,6 +136,21 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
+    # Feb 24
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
     # Feb 23
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anLr': full_model_args +\
         [

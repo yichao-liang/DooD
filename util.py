@@ -653,27 +653,39 @@ def init_optimizer(run_args, model):
             }
         ])
     elif run_args.model_type == 'Sequential':
-        train_style_mlp = True
         if run_args.use_canvas or run_args.prior_dist == 'Sequential':
-            if train_style_mlp:
-                air_parameters = itertools.chain(
-                                             guide.air_params(), 
-                                             guide.internal_decoder.parameters(),
-                                             generative_model.parameters())
-            else:
-                air_parameters = itertools.chain(
-                                             guide.no_style_mlp_air_parameters(), 
-                                             guide.internal_decoder.parameters(),
-                                             generative_model.parameters())
-        else:
-            if train_style_mlp:
-                air_parameters = itertools.chain(guide.air_params(), 
-                                                generative_model.parameters())
-            else:
-                air_parameters = itertools.chain(
-                                            guide.no_style_mlp_air_parameters(),
+            if run_args.anneal_non_pr_net_lr:
+                assert run_args.sep_where_pres_net, "sep lrs needs sep nets"
+                pr_net_param = guide.pr_net_param()
+                none_pr_air_param = itertools.chain(
+                                            guide.non_pr_net_air_param(),
+                                            guide.internal_decoder.parameters(),
                                             generative_model.parameters())
-        optimizer = torch.optim.Adam([
+            air_parameters = itertools.chain(
+                                            guide.air_params(), 
+                                            guide.internal_decoder.parameters(),
+                                            generative_model.parameters())
+        else:
+            air_parameters = itertools.chain(guide.air_params(), 
+                                                generative_model.parameters())
+        if run_args.anneal_non_pr_net_lr:
+            optimizer = torch.optim.Adam([
+            {'params': none_pr_air_param, 
+             'lr': run_args.lr,
+             'weight_decay': run_args.weight_decay},
+            {'params': pr_net_param, 
+             'lr': run_args.lr,
+             'weight_decay': run_args.weight_decay},
+            {'params': guide.baseline_params(),
+             'lr': run_args.bl_lr,
+             'weight_decay': run_args.weight_decay,}
+            ])
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max',factor=0.1, patience=5000, threshold=30, 
+            min_lr=[1e-4, 1e-3, 1e-3], threshold_mode='abs'
+            )
+        else:
+            optimizer = torch.optim.Adam([
             {
                 'params': air_parameters, 
                 'lr': run_args.lr,
@@ -684,11 +696,11 @@ def init_optimizer(run_args, model):
                 'lr': run_args.bl_lr,
                 'weight_decay': run_args.weight_decay,
             }
-        ]) 
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            ]) 
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max',factor=0.1, patience=5000, threshold=30, 
             min_lr=[1e-4, 1e-3], threshold_mode='abs'
-        )
+            )
     else:
         parameters = itertools.chain(guide.parameters(), 
                                      generative_model.parameters())

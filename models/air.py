@@ -534,7 +534,7 @@ class Guide(template.Guide):
         img_embed, canvas_embed, residual_embed = self.get_img_features(
                                                         imgs, canvas, residual)
         # Predict z_pres, z_where from target and canvas
-        pr_wr_rnn_in, pr_wr_mlp_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
+        pr_wr_mlp_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
                                                                 canvas_embed,
                                                                 residual_embed,
                                                                 residual, 
