@@ -137,6 +137,19 @@ full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
     # Feb 23
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr': full_model_args +\
         [
             '--anneal_lr',
@@ -147,6 +160,18 @@ exp_dict = {
             '--residual_pixel_count',
             '--detach_rsd_embed',
             '--update_reinforce_ll',
+            '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss': full_model_args +\
+        [
+            # '--anneal_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
     'Full-spDec-sqPrior-useDetachRsd-normRfLoss': full_model_args +\

@@ -240,9 +240,11 @@ class GenerativeModel(nn.Module):
             dist: batch_shape=[ptcs, bs]; event_shape=[]
         '''
         if self.sep_where_pres_net and self.prior_dist == 'Sequential':
-            raise NotImplementedError
-        if self.prior_dist == "Sequential" and h_l is not None:
-            mlp_in = h_l.view(prod(bs), -1)
+            h_l = h_l[0]
+
+        if self.prior_dist == "Sequential":
+            assert h_l != None, "need hidden states!"
+            mlp_in = h_l.view(prod(bs), -1).clone()
             if glmp_eb is not None:
                 mlp_in = torch.cat([h_l.view(prod(bs), -1),
                                        glmp_eb.view(prod(bs), -1)], dim=-1)
@@ -277,8 +279,12 @@ class GenerativeModel(nn.Module):
             glmp_eb [n_ptcs, bs, feature_dim]
 
         '''
-        if self.prior_dist == "Sequential" and h_l is not None:
-            mlp_in = h_l.view(prod(bs), -1)
+        if self.sep_where_pres_net and self.prior_dist == 'Sequential':
+            h_l = h_l[1]
+
+        if self.prior_dist == "Sequential":
+            assert h_l != None, "need hidden states!"
+            mlp_in = h_l.view(prod(bs), -1).clone()
             if glmp_eb is not None:
                 mlp_in = torch.cat([h_l.view(prod(bs), -1),
                                        glmp_eb.view(prod(bs), -1)], dim=-1)
@@ -1081,7 +1087,7 @@ class Guide(template.Guide):
                                         ).log_prob(z_pres_smpl[:, :, t].clone()
                                         ) * mask_prev[:, :, t].clone()
                 z_where_prir[:, :, t] = self.internal_decoder.transformation_dist(
-                                        h_l.clone(), [*shp], glmp_eb
+                                        h_l, [*shp], glmp_eb
                                         ).log_prob(z_where_smpl[:, :, t].clone()
                                         ) * z_pres_smpl[:, :, t].clone()
                 z_what_prir[:, :, t] = self.internal_decoder.control_points_dist(

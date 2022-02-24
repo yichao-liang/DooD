@@ -43,7 +43,7 @@ if __name__ == '__main__':
     # Not in final list: AIR+seq_prir
     # all_exp_args['AIR+seq_prir'] = models_2_cmd['AIR+seq_prir']
 
-    exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr"
+    exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss"
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
     for n, args in all_exp_args.items():
@@ -51,7 +51,7 @@ if __name__ == '__main__':
         # args.remove('--use_canvas')
         model_name = n + f'-β{run_args.beta}-{run_args.seed}'
         args.extend(['--save_model_name', model_name,
-                     '--tb_dir', f'./log/full/{model_name}',
+                     '--tb_dir', f'./log/full_bu/{model_name}',
                      '--beta', f'{run_args.beta}',
 
                     '--seed', f'{run_args.seed}',
