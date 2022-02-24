@@ -295,23 +295,42 @@ class Guide(nn.Module):
         '''
         ptcs, bs = shp = img_embed.shape[:2]
         # Style RNN input
-        rnn_in = [p_state.z_pres.view(prod(shp), -1), 
-                  p_state.z_where.view(prod(shp), -1)]
-
-        if 'z_what' in self.pr_wr_rnn_in:
-            rnn_in.append(p_state.z_what.view(prod(shp), -1))
-        if 'canvas' in self.pr_wr_rnn_in:
-            rnn_in.append(canvas_embed.view(prod(shp), -1)) 
-        if 'target' in self.pr_wr_rnn_in:
-            rnn_in.append(img_embed.view(prod(shp), -1))
-        if 'residual' in self.pr_wr_rnn_in:
-            rnn_in.append(residual_embed.view(prod(shp), -1))
-        rnn_in = torch.cat(rnn_in, dim=1)
 
         if self.sep_where_pres_net:
-            h_pr = self.pr_rnn(rnn_in, p_state.h_l[0].view(prod(shp), -1))
-            h_wr = self.wr_rnn(rnn_in, p_state.h_l[1].view(prod(shp), -1))
+            pr_rnn_in = [p_state.z_pres.view(prod(shp), -1), 
+                         p_state.z_where.view(prod(shp), -1).detach()]
+            wr_rnn_in = [p_state.z_pres.view(prod(shp), -1).detach(), 
+                         p_state.z_where.view(prod(shp), -1)]
+
+            if 'z_what' in self.pr_wr_rnn_in:
+                pr_rnn_in.append(p_state.z_what.view(prod(shp), -1))
+                wr_rnn_in.append(p_state.z_what.view(prod(shp), -1))
+            if 'canvas' in self.pr_wr_rnn_in:
+                pr_rnn_in.append(canvas_embed.view(prod(shp), -1)) 
+                wr_rnn_in.append(canvas_embed.view(prod(shp), -1)) 
+            if 'target' in self.pr_wr_rnn_in:
+                pr_rnn_in.append(img_embed.view(prod(shp), -1))
+                wr_rnn_in.append(img_embed.view(prod(shp), -1))
+            if 'residual' in self.pr_wr_rnn_in:
+                pr_rnn_in.append(residual_embed.view(prod(shp), -1))
+                wr_rnn_in.append(residual_embed.view(prod(shp), -1))
+            pr_rnn_in = torch.cat(pr_rnn_in, dim=1)
+            wr_rnn_in = torch.cat(wr_rnn_in, dim=1)
+            h_pr = self.pr_rnn(pr_rnn_in, p_state.h_l[0].view(prod(shp), -1))
+            h_wr = self.wr_rnn(wr_rnn_in, p_state.h_l[1].view(prod(shp), -1))
         else:
+            rnn_in = [p_state.z_pres.view(prod(shp), -1), 
+                    p_state.z_where.view(prod(shp), -1)]
+
+            if 'z_what' in self.pr_wr_rnn_in:
+                rnn_in.append(p_state.z_what.view(prod(shp), -1))
+            if 'canvas' in self.pr_wr_rnn_in:
+                rnn_in.append(canvas_embed.view(prod(shp), -1)) 
+            if 'target' in self.pr_wr_rnn_in:
+                rnn_in.append(img_embed.view(prod(shp), -1))
+            if 'residual' in self.pr_wr_rnn_in:
+                rnn_in.append(residual_embed.view(prod(shp), -1))
+            rnn_in = torch.cat(rnn_in, dim=1)
             h_l = self.pr_wr_rnn(rnn_in, p_state.h_l.view(prod(shp), -1))
 
         # Style MLP input
