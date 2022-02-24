@@ -655,7 +655,8 @@ def init_optimizer(run_args, model):
     elif run_args.model_type == 'Sequential':
         if run_args.use_canvas or run_args.prior_dist == 'Sequential':
             if run_args.anneal_non_pr_net_lr:
-                assert run_args.sep_where_pres_net, "sep lrs needs sep nets"
+                assert run_args.sep_where_pres_net != run_args.simple_pres,\
+                        "sep lrs needs sep nets"
                 pr_net_param = guide.pr_net_param()
                 none_pr_air_param = itertools.chain(
                                             guide.non_pr_net_air_param(),

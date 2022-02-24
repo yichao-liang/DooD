@@ -137,6 +137,39 @@ full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
     # Feb 24
+    # Q: what's the diff between simple_pres + sep_wr_pre vs just simple_pres?
+    # A: not much but should use just simple_pres as it would require the z_pres
+    # prior would need the hidden states.
+    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anNonPrLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            # '--sep_where_pres_net',
+            '--simple_pres',
+         ],
+    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            # '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            # '--sep_where_pres_net',
+            '--simple_pres',
+         ],
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': full_model_args +\
         [
             '--anneal_lr',

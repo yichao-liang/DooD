@@ -291,6 +291,9 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                     
                                 
                 # z posterior parameters
+                if args.simple_pres:
+                    writer.add_scalar(f"{writer_tag}Train curves/pr_rsd_power",
+                                guide.get_pr_rsd_power().detach(), iteration)
                 z_pres_pms = guide_out.z_pms.z_pres.detach()
                 writer.add_scalar(f"{writer_tag}Train curves/minimal z_pres.p",
                                 z_pres_pms.min(), iteration)

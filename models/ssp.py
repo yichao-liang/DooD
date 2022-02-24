@@ -1260,7 +1260,7 @@ class Guide(template.Guide):
         if self.simple_pres:
             # in this case the predictions above are ignored
             assert rsd_ratio is not None
-            z_pres_p = rsd_ratio.detach() ** self.get_rsd_power()
+            z_pres_p = rsd_ratio.detach() ** self.get_pr_rsd_power()
 
 
         z_pres_p = z_pres_p.view(*shp, -1)
@@ -1474,7 +1474,8 @@ class Guide(template.Guide):
 
     def pr_net_param(self):
         for n, p in self.named_parameters():
-            if n.split("_")[0] == 'pr':
+            w1, w2 = n.split("_")[:2]
+            if w1 == 'pr' and w2 != 'wr':
                 yield p
     
     def non_pr_net_air_param(self):

@@ -167,7 +167,7 @@ class Guide(nn.Module):
 
         # 2.2 pres_where_mlp
         if self.simple_pres:
-            self.rsd_power = torch.nn.Parameter(torch.zeros(1)-5., 
+            self.pr_rsd_power = torch.nn.Parameter(torch.zeros(1)-5., 
                                                         requires_grad=True)
         self.pr_wr_mlp_in = []
         self.pr_wr_mlp_in_dim = 0
@@ -243,8 +243,9 @@ class Guide(nn.Module):
                                           hidden_dim=bl_mlp_hid_dim,
                                           num_layers=num_bl_layers)
 
-    def get_rsd_power(self):
-        return F.softplus(self.rsd_power)
+    def get_pr_rsd_power(self):
+        # return F.softplus(self.pr_rsd_power)
+        return F.sigmoid(self.pr_rsd_power)
 
     def get_img_features(self, imgs, canvas, residual):
         '''
