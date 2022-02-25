@@ -125,10 +125,20 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
 
     reinforce_ll = reinforce_ll / beta
 
-    bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
-                    for prob in log_post], dim=-1).sum(-1)
-    bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
-                    for prob in log_prior], dim=-1).sum(-1)
+    if args.global_reinforce_signal:
+        # ptcs, bs, n_strks
+        bl_target = torch.cat([prob.sum(-1, keepdim=True) 
+                        for prob in log_post], dim=-1).sum(-1, keepdim=True)
+        bl_target -= torch.cat([prob.sum(-1, keepdim=True)
+                        for prob in log_prior], dim=-1).sum(-1, keepdim=True)
+        bl_target = bl_target.repeat(1, 1, args.strokes_per_img)
+        bl_value = bl_value[:, :, -2: -1].repeat(1, 1, args.strokes_per_img)
+    else:
+        bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+                        for prob in log_post], dim=-1).sum(-1)
+        bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
+                        for prob in log_prior], dim=-1).sum(-1)
+
     # this is like -ELBO
     bl_target = bl_target - reinforce_ll[:, :, None]
 
@@ -150,7 +160,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         signal_var = ( ( (reinforce_sgnl - signal_mean) * mask_prev) ** 2
                        ).sum() / num_nonzero
         if iteration == 0: 
-            guide.c, guide.v = c, v
+            guide.c, guide.v = signal_mean, signal_var
         guide.c = alpha * guide.c + (1 - alpha) * signal_mean
         guide.v = alpha * guide.v + (1 - alpha) * signal_var
         # Q: should this be for each time step or for all elements?
@@ -310,7 +320,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                         iteration)
                 if guide.z_where_type == '4_rotate':
                     writer.add_histogram(
-                        "f{writer_tag}Parameters/z_where_posterior.loc.rotate",
+                        f"{writer_tag}Parameters/z_where_posterior.loc.rotate",
                         guide_out.z_pms.z_where.detach()[:, :, :, 3, 0], 
                         iteration)
                 writer.add_histogram(

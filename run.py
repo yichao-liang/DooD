@@ -316,6 +316,9 @@ def get_args_parser():
                         help='''only useable when sep_wr_pr_net is used, this
                         allows different learning rate scheduling on pr net and 
                         the rest''')
+    parser.add_argument('--global_reinforce_signal', action='store_true',
+                        help='''This concerns, for REINFORCE, at time t, whether
+                        to include the KL loss from z^<t.''')
     # parser.add_argument('--half_1s')
 
     # Baseline network

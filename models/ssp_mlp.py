@@ -200,7 +200,8 @@ class PresMLP(nn.Module):
         self.seq.linear_modules[-1].weight.data.zero_()
         # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-            [4], dtype=torch.float)) 
+            # [1], dtype=torch.float)) 
+            [4], dtype=torch.float))
     def forward(self, h):
         z = self.seq(h)
         z_pres_p = util.constrain_parameter(z, min=1e-12, max=1-(1e-12))

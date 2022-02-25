@@ -167,7 +167,7 @@ class Guide(nn.Module):
 
         # 2.2 pres_where_mlp
         if self.simple_pres:
-            self.pr_rsd_power = torch.nn.Parameter(torch.zeros(1)-5., 
+            self.pr_rsd_power = torch.nn.Parameter(torch.zeros(1)+5., 
                                                         requires_grad=True)
         self.pr_wr_mlp_in = []
         self.pr_wr_mlp_in_dim = 0

@@ -136,6 +136,22 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
+    # Feb 25
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normGlobalRfLoss-anNonPrLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            '--global_reinforce_signal',
+            '--sep_where_pres_net',
+         ],
     # Feb 24
     # Q: what's the diff between simple_pres + sep_wr_pre vs just simple_pres?
     # A: not much but should use just simple_pres as it would require the z_pres
