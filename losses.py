@@ -132,7 +132,11 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
         bl_target -= torch.cat([prob.sum(-1, keepdim=True)
                         for prob in log_prior], dim=-1).sum(-1, keepdim=True)
         bl_target = bl_target.repeat(1, 1, args.strokes_per_img)
-        bl_value = bl_value[:, :, -2: -1].repeat(1, 1, args.strokes_per_img)
+        
+        last_t = mask_prev.sum(-1).int().squeeze(0) - 1
+        bl_value = bl_value.index_select(-1, last_t)[:, :, 0:1].repeat(
+                                                    1, 1, args.strokes_per_img)
+        # bl_value = bl_value[:, :, -1].repeat(1, 1, args.strokes_per_img)
     else:
         bl_target = torch.cat([prob.flip(-1).cumsum(-1).flip(-1).unsqueeze(-1)
                         for prob in log_post], dim=-1).sum(-1)
