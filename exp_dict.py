@@ -136,7 +136,118 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
+    # 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': full_model_args +\
+    #     [
+    #         '--anneal_lr',
+    #         '--anneal_non_pr_net_lr',
+    #         '--log_param',
+    #         '--detach_canvas_so_far',
+    #         '--no_pres_rnn'
+
+    #         '--use_residual',
+    #         '--residual_pixel_count',
+    #         '--detach_rsd_embed',
+    #         # '--update_reinforce_ll',
+    #         '--update_reinforce_loss',
+    #         '--sep_where_pres_net',
+    #      ],
+    # Feb 26
+    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            # '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--no_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--no_detach_rsd',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss': full_model_args +\
+        [
+            # '--anneal_lr',
+            # '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--no_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--no_detach_rsd',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-unDetachCanvRsd-sepPrWrNet-noRnn-normRfLoss': full_model_args +\
+        [
+            # '--anneal_lr',
+            # '--anneal_non_pr_net_lr',
+            '--log_param',
+            # '--detach_canvas_so_far',
+            '--no_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            # '--detach_rsd_embed',
+            '--no_detach_rsd',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
     # Feb 25
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss': full_model_args +\
+        [
+            # '--anneal_lr',
+            # '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--no_pres_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
+    # The 3 models with no_post_rnn, with +detachCanv, + anLr progressivly.
+    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss-anLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--no_post_rnn',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+        ],
+    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss': full_model_args +\
+        [
+            '--no_post_rnn',
+            '--log_param',
+            '--detach_canvas_so_far',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+        ],
+    'Full-spDec-sqPrior-no_post_rnn-normRfLoss': full_model_args +\
+        [
+            '--no_post_rnn',
+            '--log_param',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+        ],
+    # current not working very well
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normGlobalRfLoss-anNonPrLr': full_model_args +\
         [
             '--anneal_lr',
@@ -153,6 +264,22 @@ exp_dict = {
             '--sep_where_pres_net',
          ],
     # Feb 24
+    # this with β4 is able to learn variables strokes ~3/5 seeds
+    # the current best model
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            '--log_param',
+            '--detach_canvas_so_far',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            # '--update_reinforce_ll',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
     # Q: what's the diff between simple_pres + sep_wr_pre vs just simple_pres?
     # A: not much but should use just simple_pres as it would require the z_pres
     # prior would need the hidden states.
@@ -186,21 +313,7 @@ exp_dict = {
             # '--sep_where_pres_net',
             '--simple_pres',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': full_model_args +\
-        [
-            '--anneal_lr',
-            '--anneal_non_pr_net_lr',
-            '--log_param',
-            '--detach_canvas_so_far',
-
-            '--use_residual',
-            '--residual_pixel_count',
-            '--detach_rsd_embed',
-            # '--update_reinforce_ll',
-            '--update_reinforce_loss',
-            '--sep_where_pres_net',
-         ],
-    # Feb 23
+    # Feb 23 
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anLr': full_model_args +\
         [
             '--anneal_lr',
@@ -214,6 +327,7 @@ exp_dict = {
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
+    # 500k
     'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr': full_model_args +\
         [
             '--anneal_lr',
@@ -253,7 +367,7 @@ exp_dict = {
     # Feb 21: shown yesterday that Full-spDec-fxPrior-useCanvas-anLr-β3
     # is already able to learn a variable number of strokes.
     # Now exp fxPrior model that uses 4dim z_where and residual
-    # works 250k+
+    # works 400k+
     'Full-spDec-sqPrior-useDetachRsd-anLr': full_model_args +\
         [
             '--anneal_lr',
@@ -353,9 +467,9 @@ exp_dict = {
             '--prior', "Independent",
             '--use_residual',
         ],
-    'Full-spDec-simple_arch': full_model_args +\
+    'Full-spDec-noPost_rnn': full_model_args +\
         [
-            '--simple_arch',
+            '--no_post_rnn',
             '--log_param',
             '--use_residual',
         ],

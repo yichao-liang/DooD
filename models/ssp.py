@@ -59,6 +59,8 @@ class GenerativeModel(nn.Module):
                                                 dependent_prior=False,
                                                 feature_extractor_out_dim=256,
                                                 sep_where_pres_net=False,
+                                                no_pres_rnn=False,
+                                                no_rnn=False,
                                                     ):
         super().__init__()
         self.max_strks = max_strks
@@ -78,6 +80,8 @@ class GenerativeModel(nn.Module):
                                         "use_canvas = True"
         self.dependent_prior = dependent_prior
         self.sep_where_pres_net = sep_where_pres_net
+        self.no_pres_rnn = no_pres_rnn
+        self.no_rnn = no_rnn
 
         # Prior parameters
         self.prior_dist = prior_dist
@@ -125,6 +129,10 @@ class GenerativeModel(nn.Module):
             if self.dependent_prior: 
                 self.style_in_dim += feature_extractor_out_dim
 
+            if self.no_pres_rnn or self.no_rnn:
+                self.z_pres_prob = torch.nn.Parameter(
+                                torch.zeros(self.max_strks)+.99, 
+                                requires_grad=True)
             self.gen_style_mlp = PresWherePriorMLP(
                                                 in_dim=self.style_in_dim,
                                                 z_where_type=z_where_type,
@@ -200,6 +208,7 @@ class GenerativeModel(nn.Module):
         Return:
             dist event_shape: [pts_per_strk, 2]
         '''
+
         if self.prior_dist == "Sequential" and h_c is not None:
             loc, std = self.gen_zhwat_mlp(h_c.view(prod(bs), -1))
             # [bs, pts_per_strk, 2]
@@ -244,12 +253,18 @@ class GenerativeModel(nn.Module):
 
         if self.prior_dist == "Sequential":
             assert h_l != None, "need hidden states!"
-            mlp_in = h_l.view(prod(bs), -1).clone()
-            if glmp_eb is not None:
-                mlp_in = torch.cat([h_l.view(prod(bs), -1),
-                                       glmp_eb.view(prod(bs), -1)], dim=-1)
-            z_pres_p, _, _ = self.gen_style_mlp(mlp_in)
-            z_pres_p = z_pres_p.squeeze(-1)
+            
+            if self.no_pres_rnn or self.no_rnn:
+                z_pres_p = self.z_pres_prob.expand(*bs)
+                z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, 
+                                                              max=1-(1e-12))
+            else:
+                mlp_in = h_l.view(prod(bs), -1).clone()
+                if glmp_eb is not None:
+                    mlp_in = torch.cat([h_l.view(prod(bs), -1),
+                                        glmp_eb.view(prod(bs), -1)], dim=-1)
+                z_pres_p, _, _ = self.gen_style_mlp(mlp_in)
+                z_pres_p = z_pres_p.squeeze(-1)
         elif self.prior_dist == "Independent":
             z_pres_p = self.z_pres_prob.expand(*bs)
             if not self.fixed_prior:
@@ -815,12 +830,15 @@ class Guide(template.Guide):
                         sep_where_pres_net=False,
                         render_at_the_end=False,
                         simple_pres=False,
-                        simple_arch=False,
+                        no_post_rnn=False,
                         residual_no_target=False,
                         canvas_only_to_zwhere=False,
                         detach_canvas_so_far=True,
                         detach_canvas_embed=True,
+                        detach_rsd=True,
                         detach_rsd_embed=True,
+                        no_pres_rnn=False,
+                        no_rnn=False,
                 ):
         '''
         Args:
@@ -850,12 +868,15 @@ class Guide(template.Guide):
                 residual_pixel_count=residual_pixel_count,
                 sep_where_pres_net=sep_where_pres_net,
                 simple_pres=simple_pres,
-                simple_arch=simple_arch,
+                no_post_rnn=no_post_rnn,
                 residual_no_target=residual_no_target,
                 canvas_only_to_zwhere=canvas_only_to_zwhere,
                 detach_canvas_so_far=detach_canvas_so_far,
                 detach_canvas_embed=detach_canvas_embed,
+                detach_rsd=detach_rsd,
                 detach_rsd_embed=detach_rsd_embed,
+                no_pres_rnn=no_pres_rnn,
+                no_rnn=no_rnn,
                 )
         # Parameters
         self.constrain_param = constrain_param
@@ -889,12 +910,12 @@ class Guide(template.Guide):
         # Style_mlp:
         #   rnn hidden state -> (z_pres, z_where dist parameters)
         if self.sep_where_pres_net:
-            self.where_mlp = WhereMLP(in_dim=self.pr_wr_mlp_in_dim,
+            self.where_mlp = WhereMLP(in_dim=self.wr_mlp_in_dim,
                                   z_where_type=self.z_where_type,
                                   z_where_dim=self.z_where_dim,
                                   hidden_dim=hidden_dim,
                                   num_layers=num_mlp_layers,) 
-            self.pres_mlp = PresMLP(in_dim=self.pr_wr_mlp_in_dim,
+            self.pres_mlp = PresMLP(in_dim=self.pr_mlp_in_dim,
                                 hidden_dim=hidden_dim,
                                 num_layers=num_mlp_layers)
         else:
@@ -906,8 +927,12 @@ class Guide(template.Guide):
                                       constrain_param=constrain_param,
                                       spline_decoder=spline_decoder,
                                       )
+        if self.sep_where_pres_net:
+            render_mlp_in_dim = self.wr_mlp_in_dim
+        else:
+            render_mlp_in_dim = self.pr_wr_mlp_in_dim
         self.renderer_param_mlp = RendererParamMLP(
-                                      in_dim=self.pr_wr_mlp_in_dim,
+                                      in_dim=render_mlp_in_dim,
                                       hidden_dim=hidden_dim,
                                       num_layers=num_mlp_layers,
                                       maxnorm=self.maxnorm,
@@ -1063,7 +1088,9 @@ class Guide(template.Guide):
                                         ).squeeze(2)
                 if self.use_residual or self.residual_pixel_count:
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas, min=0.).detach()
+                    residual = torch.clamp(imgs - canvas, min=0.)
+                    if self.detach_rsd:
+                        residual = residual.detach()
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
@@ -1076,12 +1103,21 @@ class Guide(template.Guide):
                     
                 h_l, h_c = state.h_l, state.h_c
                 if self.sep_where_pres_net:
+                    # if self.no_pres_rnn: 
+                    #     # in this case h_l[0] z_pres_rnn is not learned
+                    #     h_l[0] = h_l[1]
+                    
                     h_prs, h_wrs = h_ls
                     h_prs[:, :, t], h_wrs[:, :, t] = h_l[0], h_l[1]
                     h_cs[:, :, t] = h_c
                     h_ls = h_prs, h_wrs
                 else:
                     h_ls[:, :, t], h_cs[:, :, t] = h_l, h_c
+                if self.no_rnn:
+                    h_l = h_c = self.img_feature_extractor(
+                                canvas.view(prod(shp), *img_dim)).view(*shp, -1)
+                    h_l = [h_l, h_l]
+
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(
                                         h_l, [*shp], glmp_eb
                                         ).log_prob(z_pres_smpl[:, :, t].clone()

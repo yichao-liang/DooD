@@ -36,12 +36,16 @@ class Guide(nn.Module):
                 residual_pixel_count=False,
                 sep_where_pres_net=True,
                 simple_pres=False,
-                simple_arch=False,
+                no_post_rnn=False,
                 residual_no_target=False,
                 canvas_only_to_zwhere=False,
                 detach_canvas_so_far=True,
                 detach_canvas_embed=True,
+                detach_rsd=True,
                 detach_rsd_embed=True,
+                no_pres_rnn=False,
+                detach_target_at_pr_mlp=False,
+                no_rnn=False,
                 ):
         super().__init__()
         
@@ -63,7 +67,13 @@ class Guide(nn.Module):
         self.spline_decoder = spline_decoder
         self.detach_canvas_so_far = detach_canvas_so_far
         self.detach_canvas_embed = detach_canvas_embed
+        self.detach_rsd = detach_rsd
         self.detach_rsd_embed = detach_rsd_embed
+        self.no_pres_rnn = no_pres_rnn
+        self.no_rnn = no_rnn
+        if no_pres_rnn:
+            assert sep_where_pres_net, "need to have seperate where pres net"+\
+                "to get h for zpres prior and renderer_mlp_in"
 
         self.simple_pres = simple_pres
         if use_residual:
@@ -71,10 +81,10 @@ class Guide(nn.Module):
         if simple_pres:
             assert use_residual,\
                     "simple_pres requires execution guide and residual"
-        self.simple_arch = simple_arch
-        if simple_arch:
+        self.no_post_rnn = no_post_rnn
+        if no_post_rnn:
             assert use_residual,\
-                    "simple_arch requires execution guide and residual"
+                    "no_post_rnn requires execution guide and residual"
         self.residual_no_target = residual_no_target
         if residual_no_target:
             assert use_residual,\
@@ -84,6 +94,9 @@ class Guide(nn.Module):
         self.constrain_z_pres_param_this_ite = False
         self.constrain_z_pres_param_this_step = False
 
+        self.detach_target_at_pr_mlp = detach_target_at_pr_mlp
+        if self.no_pres_rnn or self.no_post_rnn or self.no_rnn:
+            self.detach_target_at_pr_mlp = True
 
         # Internal renderer
         self.use_canvas = use_canvas
@@ -169,23 +182,34 @@ class Guide(nn.Module):
         if self.simple_pres:
             self.pr_rsd_power = torch.nn.Parameter(torch.zeros(1)+5., 
                                                         requires_grad=True)
-        self.pr_wr_mlp_in = []
-        self.pr_wr_mlp_in_dim = 0
-        if not self.simple_arch:
-            self.pr_wr_mlp_in = ['h']
-            self.pr_wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+        self.pr_mlp_in = []
+        self.pr_mlp_in_dim = 0
+        self.wr_mlp_in = []
+        self.wr_mlp_in_dim = 0
+        if not self.no_post_rnn and not self.no_rnn:
+            if not self.no_pres_rnn:
+                self.pr_mlp_in = ['h']
+                self.pr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+            self.wr_mlp_in = ['h']
+            self.wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
         if self.target_in_pos == 'MLP' and not self.residual_no_target:
-            self.pr_wr_mlp_in.append('target')
-            self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
+            self.pr_mlp_in.append('target')
+            self.pr_mlp_in_dim += self.feature_extractor_out_dim
+            self.wr_mlp_in.append('target')
+            self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
         if self.target_in_pos == 'MLP' and self.use_residual:
-            self.pr_wr_mlp_in.append('residual')
-            self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
+            self.pr_mlp_in.append('residual')
+            self.pr_mlp_in_dim += self.feature_extractor_out_dim
+            self.wr_mlp_in.append('residual')
+            self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
         self.residual_pixel_count = residual_pixel_count
         if residual_pixel_count:
-            self.pr_wr_mlp_in.append('residual_pixel_count')
-            self.pr_wr_mlp_in_dim += 1
+            self.pr_mlp_in.append('residual_pixel_count')
+            self.pr_mlp_in_dim += 1
+            self.wr_mlp_in.append('residual_pixel_count')
+            self.wr_mlp_in_dim += 1
             
 
         # 3.1. what_rnn
@@ -217,7 +241,7 @@ class Guide(nn.Module):
         # 3.2 wt_mlp: instantiated in specific modules
         self.wt_mlp_in = []
         self.wt_mlp_in_dim = 0
-        if not self.simple_arch:
+        if not self.no_post_rnn:
             self.wt_mlp_in = ['h']
             self.wt_mlp_in_dim += self.wt_rnn_hid_dim
         if self.target_in_pos == 'MLP' and not self.residual_no_target:
@@ -337,16 +361,24 @@ class Guide(nn.Module):
         # Style MLP input
         if self.sep_where_pres_net:
             pr_mlp_in, wr_mlp_in = [], []
-            if 'h' in self.pr_wr_mlp_in:
-                pr_mlp_in.append(h_pr), wr_mlp_in.append(h_wr)
-            if 'target' in self.pr_wr_mlp_in:
-                pr_mlp_in.append(img_embed.view(prod(shp), -1))
+            if 'h' in self.pr_mlp_in: pr_mlp_in.append(h_pr)
+            if 'h' in self.wr_mlp_in: wr_mlp_in.append(h_wr)
+
+            if 'target' in self.pr_mlp_in:
+                if self.detach_target_at_pr_mlp:
+                    pr_mlp_in.append(img_embed.detach().view(prod(shp), -1))
+                else:
+                    pr_mlp_in.append(img_embed.view(prod(shp), -1))
+            if 'target' in self.wr_mlp_in:
                 wr_mlp_in.append(img_embed.view(prod(shp), -1))
-            if 'residual' in self.pr_wr_mlp_in:
+                
+            if 'residual' in self.pr_mlp_in:
                 pr_mlp_in.append(residual_embed.view(prod(shp), -1))
+            if 'residual' in self.wr_mlp_in:
                 wr_mlp_in.append(residual_embed.view(prod(shp), -1))
-            if 'residual_pixel_count' in self.pr_wr_mlp_in:
+            if 'residual_pixel_count' in self.pr_mlp_in:
                 pr_mlp_in.append(rsd_ratio.view(prod(shp), 1))
+            if 'residual_pixel_count' in self.wr_mlp_in:
                 wr_mlp_in.append(rsd_ratio.view(prod(shp), 1))
             pr_mlp_in = torch.cat(pr_mlp_in, dim=1).view(*shp, -1)
             wr_mlp_in = torch.cat(wr_mlp_in, dim=1).view(*shp, -1)

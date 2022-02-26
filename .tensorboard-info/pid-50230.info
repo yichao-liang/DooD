@@ -1,0 +1,10 @@
+{
+    "cache_key": "eyJhcmd1bWVudHMiOlsiLS1wb3J0PTkwMDAiLCItLWhvc3QiLCIwLjAuMC4wIiwiLS1tYXhfcmVsb2FkX3RocmVhZHM9OCIsIi0tbG9nZGlyPWxvZy9mdWxsIl0sImNvbmZpZ3VyZV9rd2FyZ3MiOnt9LCJ3b3JraW5nX2RpcmVjdG9yeSI6Ii9uZXQvdmFzdC1zdG9yYWdlL3NjcmF0Y2gvdmFzdC90ZW5lbmJhdW0veWNsaWFuZy9oaWVyYXJjaGljYWwvaGFuZHdyaXR0ZW5fY2hhcmFjdGVycyJ9",
+    "db": "",
+    "logdir": "log/full",
+    "path_prefix": "",
+    "pid": 50230,
+    "port": 9000,
+    "start_time": 1645889184,
+    "version": "2.8.0"
+}
