@@ -223,6 +223,11 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                 writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
                                     log_prob.detach().sum(-1).mean(), 
                                     iteration)
+            # z posterior samples
+            z_pres_smpls = guide_out.z_smpl.z_pres.detach()
+            writer.add_scalar(f"{writer_tag}Train curves/# of 0s in z_pres",
+                np.prod(z_pres_smpls.shape) - z_pres_smpls.sum(),
+                iteration)
 
             if args.log_param:
                 # this includes: renderer parameters, prior parameters,
@@ -345,10 +350,6 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                         iteration)
 
                 # z posterior samples
-                z_pres_smpls = guide_out.z_smpl.z_pres.detach()
-                writer.add_scalar(f"{writer_tag}Train curves/# of 0s in z_pres",
-                    np.prod(z_pres_smpls.shape) - z_pres_smpls.sum(),
-                    iteration)
                 writer.add_histogram(f"{writer_tag}Samples/z_pres",
                                 z_pres_smpls, iteration)
                 writer.add_histogram(f"{writer_tag}Samples/z_where.scale",

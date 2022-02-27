@@ -1057,7 +1057,9 @@ class Guide(template.Guide):
                                         z_what_smpl[:, :, t:t+1],
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
+                
                 if self.intr_ll is None:
+                    prev_canv = canvas
                     canvas = canvas + canvas_step
                     # not using detach_canvas is disencouraged
                     if self.add_strk_tanh and not self.detach_canvas_so_far:
@@ -1103,10 +1105,6 @@ class Guide(template.Guide):
                     
                 h_l, h_c = state.h_l, state.h_c
                 if self.sep_where_pres_net:
-                    # if self.no_pres_rnn: 
-                    #     # in this case h_l[0] z_pres_rnn is not learned
-                    #     h_l[0] = h_l[1]
-                    
                     h_prs, h_wrs = h_ls
                     h_prs[:, :, t], h_wrs[:, :, t] = h_l[0], h_l[1]
                     h_cs[:, :, t] = h_c
@@ -1115,7 +1113,7 @@ class Guide(template.Guide):
                     h_ls[:, :, t], h_cs[:, :, t] = h_l, h_c
                 if self.no_rnn:
                     h_l = h_c = self.img_feature_extractor(
-                                canvas.view(prod(shp), *img_dim)).view(*shp, -1)
+                            prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
                     h_l = [h_l, h_l]
 
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(

@@ -391,15 +391,16 @@ def init(run_args, device):
 
         trn_dataset = datasets.MNIST(root='./data', train=True, download=True,
                 transform=transforms.Compose([
-                # transforms.RandomRotation(30, fill=(0,)),
-                transforms.Resize([res,res], antialias=True),
-                transforms.ToTensor(),
+                    transforms.Resize([120, 120], antialias=True),
+                    transforms.RandomRotation(30, fill=(0,)),
+                    transforms.Resize([res, res], antialias=True),
+                    transforms.ToTensor(),
                 #transforms.Normalize((0.1307,), (0.3081,))
             ]))
         val_dataset = datasets.MNIST(root='./data', train=False, download=False,
                 transform=transforms.Compose([
-                transforms.Resize([res,res], antialias=True),
-                transforms.ToTensor(),
+                    transforms.Resize([res,res], antialias=True),
+                    transforms.ToTensor(),
                 #transforms.Normalize((0.1307,), (0.3081,))
             ]))
 

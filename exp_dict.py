@@ -270,13 +270,12 @@ exp_dict = {
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
-            '--log_param',
+            # '--log_param',
             '--detach_canvas_so_far',
 
             '--use_residual',
             '--residual_pixel_count',
             '--detach_rsd_embed',
-            # '--update_reinforce_ll',
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],

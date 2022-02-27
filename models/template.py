@@ -71,7 +71,7 @@ class Guide(nn.Module):
         self.detach_rsd_embed = detach_rsd_embed
         self.no_pres_rnn = no_pres_rnn
         self.no_rnn = no_rnn
-        if no_pres_rnn:
+        if no_pres_rnn or no_rnn:
             assert sep_where_pres_net, "need to have seperate where pres net"+\
                 "to get h for zpres prior and renderer_mlp_in"
 

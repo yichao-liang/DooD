@@ -353,7 +353,7 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
                                                 z_what_to_keep=5000):
     '''
     Args:
-        ckpt_path: path to checkpoint
+        ckpt_path: full path to checkpoint
         title: title for the plot and also saving
         save_dir: dir to save the figure to
         z_what_to_keep: we stop after generating more than this number. If none
@@ -364,7 +364,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     # Load checkpoint ----------------------------------------------------------
     util.logging.info("Loading the checkpoint...")
     device = util.get_device()
-    model, _, _, data_loader, run_args = util.load_checkpoint(ckpt_path, device)
+    model, _,_,_, data_loader, run_args = util.load_checkpoint(ckpt_path, 
+                                                               device)
     _, guide = model
     data_loader, _ = data_loader
 
@@ -372,8 +373,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     util.logging.info("Generating z_what and curves...")
     all_latents = []
     all_curves = []
-    num_steps_per_strk = 500
-    bezier = Bezier(res=28, steps=num_steps_per_strk, method='bounded')
+    num_steps_per_strk = 100
+    bezier = Bezier(res=28, steps=num_steps_per_strk, method='base')
     bs = data_loader.batch_size
     n_strks = guide.max_strks
     pts_per_strk = guide.pts_per_strk
@@ -385,7 +386,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
             imgs = imgs.to(device)
             guide_out = guide(imgs)
             bs = imgs.shape[0]
-            z_pres, z_what, z_where = guide_out.z_smpl
+            z_pres, z_what, _ = guide_out.z_smpl
+            z_pres, z_what = z_pres.squeeze(0), z_what.squeeze(0)
             
             # Create curves
             steps = torch.linspace(0, 1, bezier.steps).to(z_what.device)
@@ -412,7 +414,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     # Generate visualization plot ----------------------------------------------
     # t-sne z_whats
     util.logging.info("Generating t-sne embeddings...")
-    all_z_whats_embedded = TSNE(n_components=2).fit_transform(all_z_whats)
+    all_z_whats_embedded = TSNE(n_components=2, init='pca', learning_rate='auto'
+                                ).fit_transform(all_z_whats)
 
     # plot the curves
     util.logging.info("Generating curve images...")
