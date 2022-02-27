@@ -156,7 +156,7 @@ exp_dict = {
         [
             '--anneal_lr',
             # '--anneal_non_pr_net_lr',
-            '--log_param',
+            # '--log_param',
             '--detach_canvas_so_far',
             '--no_rnn',
 
@@ -171,7 +171,7 @@ exp_dict = {
         [
             # '--anneal_lr',
             # '--anneal_non_pr_net_lr',
-            '--log_param',
+            # '--log_param',
             '--detach_canvas_so_far',
             '--no_rnn',
 
@@ -186,7 +186,7 @@ exp_dict = {
         [
             # '--anneal_lr',
             # '--anneal_non_pr_net_lr',
-            '--log_param',
+            # '--log_param',
             # '--detach_canvas_so_far',
             '--no_rnn',
 

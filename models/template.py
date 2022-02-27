@@ -241,7 +241,7 @@ class Guide(nn.Module):
         # 3.2 wt_mlp: instantiated in specific modules
         self.wt_mlp_in = []
         self.wt_mlp_in_dim = 0
-        if not self.no_post_rnn:
+        if not self.no_post_rnn and not self.no_rnn:
             self.wt_mlp_in = ['h']
             self.wt_mlp_in_dim += self.wt_rnn_hid_dim
         if self.target_in_pos == 'MLP' and not self.residual_no_target:

@@ -269,25 +269,6 @@ def get_args_parser():
                         help='''if specified, use residual pixel as z_pres param
                         specifically, z_pres_prob = residual ** r where r is
                         a positive integer''')
-    parser.add_argument('--no_post_rnn', action='store_true',
-                        help='''if specified, only use residual for passing
-                        sequential information for the guide, not RNNs. The RNNs
-                        are still used in sequential prior setting for the prior
-                        MLPs. The target image is also detached before pres MLP
-                        to avoid influences of REINFORCE to the CNN.''')
-    parser.add_argument('--no_rnn', action='store_true', 
-                        help='''This is used with sequential prior. 
-                        For prior, we have:
-                            a MLP for z_where and z_what respectively that 
-                            inputs the canvas so far; outputs the prior 
-                            distribution parameters a vector of learnable 
-                            parameter for z_pres that’s instance independent.
-                        For posterior, we have:
-                            an MLP for z_pres, z_where z_what respectively that 
-                            inputs residual and (optionally) the target; outputs 
-                            the posterior parameters.
-                            Shared between them, we have a CNN for extracting 
-                            the image embeddings.''')
     parser.add_argument('--residual_no_target', action='store_true',
                         help='''if true then only residual is passed, not target
                         and residual''')
@@ -336,6 +317,25 @@ def get_args_parser():
     parser.add_argument('--global_reinforce_signal', action='store_true',
                         help='''This concerns, for REINFORCE, at time t, whether
                         to include the KL loss from z^<t.''')
+    parser.add_argument('--no_post_rnn', action='store_true',
+                        help='''if specified, only use residual for passing
+                        sequential information for the guide, not RNNs. The RNNs
+                        are still used in sequential prior setting for the prior
+                        MLPs. The target image is also detached before pres MLP
+                        to avoid influences of REINFORCE to the CNN.''')
+    parser.add_argument('--no_rnn', action='store_true', 
+                        help='''This is used with sequential prior. 
+                        For prior, we have:
+                            a MLP for z_where and z_what respectively that 
+                            inputs the canvas so far; outputs the prior 
+                            distribution parameters a vector of learnable 
+                            parameter for z_pres that’s instance independent.
+                        For posterior, we have:
+                            an MLP for z_pres, z_where z_what respectively that 
+                            inputs residual and (optionally) the target; outputs 
+                            the posterior parameters.
+                            Shared between them, we have a CNN for extracting 
+                            the image embeddings.''')
     parser.add_argument('--no_pres_rnn', action='store_true',
                         help='''remove pres rnn, keep the z_pres MLP for 
                         posterior param prediction, and use a num_strks-dim

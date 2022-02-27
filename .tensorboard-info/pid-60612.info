@@ -3,8 +3,8 @@
     "db": "",
     "logdir": "log/full-beta",
     "path_prefix": "",
-    "pid": 51264,
+    "pid": 60612,
     "port": 9000,
-    "start_time": 1645955259,
+    "start_time": 1645965163,
     "version": "2.8.0"
 }

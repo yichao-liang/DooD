@@ -830,13 +830,13 @@ class Guide(template.Guide):
                         sep_where_pres_net=False,
                         render_at_the_end=False,
                         simple_pres=False,
-                        no_post_rnn=False,
                         residual_no_target=False,
                         canvas_only_to_zwhere=False,
                         detach_canvas_so_far=True,
                         detach_canvas_embed=True,
                         detach_rsd=True,
                         detach_rsd_embed=True,
+                        no_post_rnn=False,
                         no_pres_rnn=False,
                         no_rnn=False,
                 ):
@@ -1103,6 +1103,7 @@ class Guide(template.Guide):
                                         ).view(prod(shp), *img_dim)
                     glmp_eb = self.img_feature_extractor(glmps).view(*shp, -1)
                     
+                # log the hidden states
                 h_l, h_c = state.h_l, state.h_c
                 if self.sep_where_pres_net:
                     h_prs, h_wrs = h_ls
@@ -1111,7 +1112,9 @@ class Guide(template.Guide):
                     h_ls = h_prs, h_wrs
                 else:
                     h_ls[:, :, t], h_cs[:, :, t] = h_l, h_c
+                
                 if self.no_rnn:
+                    # use feature as hidden states
                     h_l = h_c = self.img_feature_extractor(
                             prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
                     h_l = [h_l, h_l]

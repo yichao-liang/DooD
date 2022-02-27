@@ -559,15 +559,15 @@ def init(run_args, device):
                 sep_where_pres_net=run_args.sep_where_pres_net,
                 render_at_the_end=run_args.render_at_the_end,
                 simple_pres=run_args.simple_pres,
-                no_post_rnn=run_args.no_post_rnn,
                 residual_no_target=run_args.residual_no_target,
                 canvas_only_to_zwhere=run_args.canvas_only_to_zwhere,
                 detach_canvas_so_far=run_args.detach_canvas_so_far,
                 detach_canvas_embed=run_args.detach_canvas_embed,
                 detach_rsd=not run_args.no_detach_rsd,
                 detach_rsd_embed=run_args.detach_rsd_embed,
-                no_pres_rnn=run_args.no_pres_rnn,
                 no_rnn=run_args.no_rnn,
+                # no_pres_rnn=run_args.no_pres_rnn,
+                # no_post_rnn=run_args.no_post_rnn,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
