@@ -414,7 +414,9 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     # Generate visualization plot ----------------------------------------------
     # t-sne z_whats
     util.logging.info("Generating t-sne embeddings...")
-    all_z_whats_embedded = TSNE(n_components=2, init='pca', learning_rate='auto'
+    all_z_whats_embedded = TSNE(n_components=2, 
+                                # init='pcacncel a', 
+                                learning_rate='auto'
                                 ).fit_transform(all_z_whats)
 
     # plot the curves

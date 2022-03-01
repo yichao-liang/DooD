@@ -29,15 +29,21 @@ from models.mws.handwritten_characters.losses import get_mws_loss
 #         new_optimizer = util.init_optimizer(args, model)
 #         return args, new_optimizer
 
-def increase_beta(args, model, iteration):
-    if args.increase_beta:
-        args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
-                                        cur_ite=iteration, heat_step=3e4,
-                                        init_ite=2e4)
-        return args
+# def increase_beta(args, model, iteration):
+#     if args.increase_beta:
+#         args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
+#                                         cur_ite=iteration, heat_step=3e4,
+#                                         init_ite=2e4)
+#         return args
         
-def train(model, optimizer, scheduler, stats, data_loader, args, writer, 
-            dataset_name=None):
+def train(model, 
+          optimizer, 
+          scheduler, 
+          stats, 
+          data_loader, 
+          args, 
+          writer, 
+          dataset_name=None):
 
     if args.model_type == 'MWS':
         num_iterations_so_far = len(stats.theta_losses)
@@ -170,6 +176,10 @@ def train(model, optimizer, scheduler, stats, data_loader, args, writer,
         # Test every epoch
         # if val_loader:
         #     test_model(model, stats, val_loader, args, epoch=epoch, writer=writer)
+        
+        # count epochs when test is not used
+        stats.tst_losses.append([])
+
     writer.close()
     
     save(args, iteration, model, optimizer, scheduler, stats)
@@ -236,7 +246,6 @@ def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer,
                                 generative_model=generative_model, 
                                 guide=guide,
                                 imgs=imgs, 
-                                loss_type=args.loss, 
                                 k=1,
                                 iteration=iteration,
                                 writer=writer,
@@ -253,6 +262,7 @@ def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer,
                                 iteration=iteration,
                                 writer=writer,
                                 beta=float(args.beta),
+                                args=args,
                                 )
     elif args.model_type == 'VAE':
         loss_tuple = losses.get_loss_vae(

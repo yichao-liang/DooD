@@ -21,7 +21,7 @@ from kornia.geometry.transform import invert_affine_transform, get_affine_matrix
 
 from models import base, ssp, air, vae#, mws
 # from data.omniglot_dataset.omniglot_dataset import TrainingDataset
-from data import synthetic, multimnist
+from data import synthetic, multimnist, cluster
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +31,106 @@ logging.basicConfig(
 )
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
+
+def init_dataloader(res, dataset, batch_size=64):
+    # Dataloader
+    # Train dataset
+    transform = transforms.Compose([
+                            # transforms.ToPILImage(mode=None),
+                            transforms.Resize([res,res], antialias=True),
+                            transforms.ToTensor(),
+                            ])
+    if dataset == "EMNIST":
+        trn_dataset = datasets.EMNIST(root='./data', train=True, split='balanced',
+                            transform=transform, download=True)
+        tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
+                            transform=transform, download=True)
+    elif dataset == "MNIST":
+        trn_dataset = datasets.MNIST(root='./data', train=True,
+                            transform=transform, download=True)
+        tst_dataset = datasets.MNIST(root='./data', train=False,
+                            transform=transform, download=True)    
+    elif dataset == 'KMNIST':
+        trn_dataset = datasets.KMNIST(root='./data', train=True,
+                            transform=transform, download=True)
+
+        tst_dataset = datasets.KMNIST(root='./data', train=False,
+                            transform=transform, download=True)
+    elif dataset == 'QMNIST':
+        trn_dataset = datasets.QMNIST(root='./data', train=True, compat=True,
+                            transform=transform, download=True)
+        tst_dataset = datasets.QMNIST(root='./data', train=False, compat=True,
+                            transform=transform, download=True)
+    elif dataset == 'Omniglot':
+        trn_dataset = datasets.Omniglot(root='./data', background=True,
+                            transform=transform, download=True)
+        tst_dataset = datasets.Omniglot(root='./data', background=False,
+                            transform=transform, download=True)        
+    elif dataset == 'Quickdraw':
+        from data.QuickDraw_pytorch.DataUtils.load_data import QD_Dataset
+        transform = transforms.Compose([
+                            transforms.ToPILImage(mode=None),
+                            transforms.Resize([res,res], antialias=True),
+                            transforms.ToTensor(),
+                            ])
+
+        trn_dataset = QD_Dataset(mtype="train", transform=transform,
+                            root="./data/QuickDraw_pytorch/Dataset")
+        tst_dataset = QD_Dataset(mtype="test", transform=transform,
+                            root="./data/QuickDraw_pytorch/Dataset")
+    else: raise NotImplementedError
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    random.seed(0)
+    train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
+                                                            num_workers=4)
+    test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, 
+                                                            num_workers=4)
+    
+    return train_loader, test_loader
+
+def init_classification_nets(guide, args, dataset, batch_size):
+    # Dataset
+    res = guide.res if args.save_model_name == 'MWS' else guide.img_dim[-1]
+    # source dataset
+    train_loader, test_loader = init_dataloader(res, dataset, 
+                                                batch_size=batch_size)
+    # latent variable dataset
+    train_loader, test_loader = cluster.get_lv_data_loader(
+                                                args.save_model_name,
+                                                guide, 
+                                                (train_loader, test_loader),
+                                                dataset_name=dataset)
+    # Model
+    if args.save_model_name == 'VAE':
+        classifier_in_dim = guide.z_dim
+    elif args.save_model_name == 'MWS':
+        classifier_in_dim = guide.num_arcs * 2
+    else:
+        classifier_in_dim = guide.max_strks * (guide.z_where_dim + 
+                                                     guide.z_what_dim)
+        # lv_classifier_in_dim = guide.z_where_dim + guide.z_what_dim
+    classifier_out_dim = test_loader.dataset.num_classes
+
+    lv_classifier = init_mlp(in_dim=classifier_in_dim, 
+                             out_dim=classifier_out_dim,
+                             hidden_dim=256,
+                             num_layers=0,).to(args.device)
+    # Optimizer
+    optimizer = torch.optim.Adam([
+        {
+            'params': lv_classifier.parameters(), 
+            'lr': 1e-5
+        }
+    ])
+    
+    # Stats
+    stats = ClfStats([], [])
+
+    return (lv_classifier, (train_loader, test_loader), 
+            optimizer, stats)
+
 
 def heat_weight(init_val, final_val, cur_ite, heat_step, init_ite=0):
     '''
@@ -375,19 +475,47 @@ transform = transforms.Compose([
 
 def init(run_args, device):  
     # Data
-    # breakpoint()
-    if run_args.dataset == 'omniglot':
-        data_loader = omniglot_dataset.init_training_data_loader(
-                                                run_args.data_dir, 
-                                                device=device,
-                                                batch_size=run_args.batch_size,
-                                                shuffle=False,  
-                                                mode="original",
-                                                one_substroke='angle',
-                                                use_interpolate=20)
-    elif run_args.dataset == 'MNIST' or run_args.dataset == 'mnist':
+    res = run_args.img_res
+    if run_args.dataset == 'Omniglot':
+        # data_loader = omniglot_dataset.init_training_data_loader(
+        #                                         run_args.data_dir, 
+        #                                         device=device,
+        #                                         batch_size=run_args.batch_size,
+        #                                         shuffle=False,  
+        #                                         mode="original",
+        #                                         one_substroke='angle',
+        #                                         use_interpolate=20)
+        trn_dataset = datasets.Omniglot(root='./data', background=True,
+                transform=transforms.Compose([
+                    # transforms.Resize([120, 120], antialias=True),
+                    # transforms.RandomRotation(30, fill=(1,)),
+                    transforms.Resize([res, res], antialias=True),
+                    transforms.ToTensor()
+                    ]),
+                    download=True)
+        val_dataset = datasets.Omniglot(root='./data', background=False,
+                transform=transforms.Compose([
+                    transforms.Resize([res,res], antialias=True),
+                    transforms.ToTensor()
+                    ]), 
+                    download=True)
+        train_loader = DataLoader(trn_dataset,
+                                batch_size=run_args.batch_size, 
+                                num_workers=2,
+                                shuffle=True,
+                                # sampler=trn_sampler
+                                )
+
+        valid_loader = DataLoader(val_dataset,
+                                batch_size=run_args.batch_size,
+                                num_workers=2,
+                                shuffle=True,
+                                # sampler=val_sampler
+                                )
+
+        data_loader = train_loader, valid_loader
+    elif run_args.dataset == 'MNIST':
         # Training and Testing dataset
-        res = run_args.img_res
 
         trn_dataset = datasets.MNIST(root='./data', train=True, download=True,
                 transform=transforms.Compose([
@@ -428,7 +556,6 @@ def init(run_args, device):
         # # idx = val_dataset.targets == 1
         # val_dataset.targets = val_dataset.targets[idx]
         # val_dataset.data= val_dataset.data[idx]
-
         train_loader = DataLoader(trn_dataset,
                                 batch_size=run_args.batch_size, 
                                 num_workers=2,
@@ -526,6 +653,7 @@ def init(run_args, device):
                     intermediate_likelihood=run_args.intermediate_likelihood,
                     sep_where_pres_net=run_args.sep_where_pres_net,
                     no_rnn=run_args.no_rnn,
+                    no_pres_rnn=run_args.no_pres_rnn,
                     # comment out for eval old models
                     # dependent_prior=run_args.dependent_prior
                                     ).to(device)
@@ -566,8 +694,8 @@ def init(run_args, device):
                 detach_rsd=not run_args.no_detach_rsd,
                 detach_rsd_embed=run_args.detach_rsd_embed,
                 no_rnn=run_args.no_rnn,
-                # no_pres_rnn=run_args.no_pres_rnn,
-                # no_post_rnn=run_args.no_post_rnn,
+                no_pres_rnn=run_args.no_pres_rnn,
+                no_post_rnn=run_args.no_post_rnn,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -591,7 +719,7 @@ def init(run_args, device):
                         z_what_in_pos=run_args.z_what_in_pos,
                         prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
-                        sep_where_pres_net=run_args.sep_where_pres_net,
+                        # sep_where_pres_net=run_args.sep_where_pres_net,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(
@@ -635,6 +763,7 @@ def init(run_args, device):
 
 def init_optimizer(run_args, model):
     # Model tuple
+    scheduler = None
     if run_args.model_type == 'MWS':
         (generative_model, guide, _) = model
     else:
@@ -732,14 +861,15 @@ def save_checkpoint(path, model, optimizer, schedular, stats, run_args=None):
     else:
         generative_model, guide = model
         torch.save(
-            {
-                "generative_model_state_dict": generative_model.state_dict(),
-                "guide_state_dict": guide.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "schedular_state_dict": schedular.state_dict(),
-                "stats": stats,
-                "run_args": run_args,
-            },
+        {
+        "generative_model_state_dict": generative_model.state_dict(),
+        "guide_state_dict": guide.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "schedular_state_dict": schedular.state_dict() if schedular != None\
+                                                       else None,
+        "stats": stats,
+        "run_args": run_args,
+        },
             path,
         )
     logging.info(f"Saved checkpoint to {path}")
@@ -753,6 +883,7 @@ def load_checkpoint(path, device):
         print(e)
         print(f"failed loading {path}")
     run_args = checkpoint["run_args"]
+    run_args.dataset = 'MNIST'
     model, optimizer, scheduler, stats, data_loader = init(run_args, device)
 
     if run_args.model_type == 'MWS':

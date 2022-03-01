@@ -62,7 +62,8 @@ def main(args):
                                 mws_args.log_interval
                                 )
 
-    train.train(model, optimizer, scheduler, stats, data_loader, args, writer)
+    train.train(model, optimizer, scheduler, stats, data_loader, args, writer,
+                dataset_name=args.dataset)
 
 def get_args_parser():
     import argparse
@@ -374,7 +375,7 @@ def get_args_parser():
                     # default="multimnist",
                     default='MNIST',
                     # default="generative_model",
-                    choices=['MNIST', 'omniglot', 'generative_model', 
+                    choices=['MNIST', 'Omniglot', 'generative_model', 
                     'multimnist'],
                     type=str, help=" ")
     parser.add_argument("--data-dir", 

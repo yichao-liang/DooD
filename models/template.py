@@ -34,7 +34,7 @@ class Guide(nn.Module):
                 dependent_prior=False,
                 spline_decoder=True,
                 residual_pixel_count=False,
-                sep_where_pres_net=True,
+                sep_where_pres_net=False,
                 simple_pres=False,
                 no_post_rnn=False,
                 residual_no_target=False,
@@ -50,6 +50,9 @@ class Guide(nn.Module):
         super().__init__()
         
         # Parameters
+        # for NVIL normalization
+        self.register_buffer("v", torch.tensor(0.))
+        self.register_buffer("c", torch.tensor(0.))
         self.max_strks = max_strks
         self.img_dim = img_dim
         self.img_numel = np.prod(img_dim)
@@ -160,10 +163,10 @@ class Guide(nn.Module):
 
         if self.target_in_pos == 'RNN' and not self.residual_no_target:
             self.pr_wr_rnn_in.append('target')
-            assert False, "not recommanded unless in ablation"
+            # assert False, "not recommanded unless in ablation"
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == 'RNN' and self.use_residual:
-            assert False, "not recommanded unless in ablation"
+            # assert False, "not recommanded unless in ablation"
             self.pr_wr_rnn_in.append('residual')
             self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
             
@@ -182,34 +185,54 @@ class Guide(nn.Module):
         if self.simple_pres:
             self.pr_rsd_power = torch.nn.Parameter(torch.zeros(1)+5., 
                                                         requires_grad=True)
-        self.pr_mlp_in = []
-        self.pr_mlp_in_dim = 0
-        self.wr_mlp_in = []
-        self.wr_mlp_in_dim = 0
-        if not self.no_post_rnn and not self.no_rnn:
-            if not self.no_pres_rnn:
-                self.pr_mlp_in = ['h']
-                self.pr_mlp_in_dim += self.pr_wr_rnn_hid_dim
-            self.wr_mlp_in = ['h']
-            self.wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
-        if self.target_in_pos == 'MLP' and not self.residual_no_target:
-            self.pr_mlp_in.append('target')
-            self.pr_mlp_in_dim += self.feature_extractor_out_dim
-            self.wr_mlp_in.append('target')
-            self.wr_mlp_in_dim += self.feature_extractor_out_dim
+        if self.sep_where_pres_net:
+            self.pr_mlp_in = []
+            self.pr_mlp_in_dim = 0
+            self.wr_mlp_in = []
+            self.wr_mlp_in_dim = 0
+            if not self.no_post_rnn and not self.no_rnn:
+                if not self.no_pres_rnn:
+                    self.pr_mlp_in = ['h']
+                    self.pr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+                self.wr_mlp_in = ['h']
+                self.wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+            if self.target_in_pos == 'MLP' and not self.residual_no_target:
+                self.pr_mlp_in.append('target')
+                self.pr_mlp_in_dim += self.feature_extractor_out_dim
+                self.wr_mlp_in.append('target')
+                self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
-        if self.target_in_pos == 'MLP' and self.use_residual:
-            self.pr_mlp_in.append('residual')
-            self.pr_mlp_in_dim += self.feature_extractor_out_dim
-            self.wr_mlp_in.append('residual')
-            self.wr_mlp_in_dim += self.feature_extractor_out_dim
+            if self.target_in_pos == 'MLP' and self.use_residual:
+                self.pr_mlp_in.append('residual')
+                self.pr_mlp_in_dim += self.feature_extractor_out_dim
+                self.wr_mlp_in.append('residual')
+                self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
-        self.residual_pixel_count = residual_pixel_count
-        if residual_pixel_count:
-            self.pr_mlp_in.append('residual_pixel_count')
-            self.pr_mlp_in_dim += 1
-            self.wr_mlp_in.append('residual_pixel_count')
-            self.wr_mlp_in_dim += 1
+            self.residual_pixel_count = residual_pixel_count
+            if residual_pixel_count:
+                self.pr_mlp_in.append('residual_pixel_count')
+                self.pr_mlp_in_dim += 1
+                self.wr_mlp_in.append('residual_pixel_count')
+                self.wr_mlp_in_dim += 1
+        else:
+            self.pr_wr_mlp_in = []
+            self.pr_wr_mlp_in_dim = 0
+            if not self.no_post_rnn and not self.no_rnn:
+                self.pr_wr_mlp_in.append('h')
+                self.pr_wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+            if self.target_in_pos == 'MLP' and not self.residual_no_target:
+                self.pr_wr_mlp_in.append('target')
+                self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
+
+            if self.target_in_pos == 'MLP' and self.use_residual:
+                self.pr_wr_mlp_in.append('residual')
+                self.pr_wr_mlp_in_dim += self.feature_extractor_out_dim
+
+            self.residual_pixel_count = residual_pixel_count
+            if residual_pixel_count:
+                self.pr_wr_mlp_in.append('residual_pixel_count')
+                self.pr_wr_mlp_in_dim += 1
+            
             
 
         # 3.1. what_rnn
@@ -227,10 +250,10 @@ class Guide(nn.Module):
         # the full model doesn't have target in at RNN
         if self.target_in_pos == "RNN" and not self.residual_no_target:
             self.wt_rnn_in.append('target')
-            assert False, "not recommanded unless in ablation"
+            # assert False, "not recommanded unless in ablation"
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == 'RNN' and self.use_residual:
-            assert False, "not recommanded unless in ablation"
+            # assert False, "not recommanded unless in ablation"
             self.wt_rnn_in.append('residual')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
 

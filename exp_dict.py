@@ -24,7 +24,7 @@ models_2_cmd = {
     'AIR': [
         '--model-type', 'AIR',
         '--prior_dist', 'Independent',
-        '--lr', '1e-4', 
+        '--lr', '1e-3', 
         '--bl_lr', '1e-3',
         '--z_where_type', '3',
         '--strokes_per_img', strokes_per_img,
@@ -136,21 +136,21 @@ full_no_canvas = args_from_kw_list(full_config)
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
-    # 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': full_model_args +\
-    #     [
-    #         '--anneal_lr',
-    #         '--anneal_non_pr_net_lr',
-    #         '--log_param',
-    #         '--detach_canvas_so_far',
-    #         '--no_pres_rnn'
+    # Feb 27
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr-intrll': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
 
-    #         '--use_residual',
-    #         '--residual_pixel_count',
-    #         '--detach_rsd_embed',
-    #         # '--update_reinforce_ll',
-    #         '--update_reinforce_loss',
-    #         '--sep_where_pres_net',
-    #      ],
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--intermediate_likelihood', 'Mean',
+         ],
     # Feb 26
     'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss-anLr': full_model_args +\
         [
@@ -278,6 +278,35 @@ exp_dict = {
             '--detach_rsd_embed',
             '--update_reinforce_loss',
             '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
+            '--no_pres_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-omni': full_model_args +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
+            '--no_pres_rnn',
+
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--dataset', 'Omniglot',
          ],
     # Q: what's the diff between simple_pres + sep_wr_pre vs just simple_pres?
     # A: not much but should use just simple_pres as it would require the z_pres
@@ -575,4 +604,5 @@ exp_dict = {
             '--no_maxnorm',
             '--no_sgl_strk_tanh',
         ],
+    **models_2_cmd
 }

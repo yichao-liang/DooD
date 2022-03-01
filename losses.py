@@ -21,9 +21,12 @@ SequentialLoss = namedtuple('SequentialLoss', ['overall_loss',
                                                 'neg_log_prior', 
                                                 'log_posterior'])
 
-def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
-                            iteration=0, writer=None, writer_tag=None, beta=1,
-                            args=None, c=0, v=0, alpha=0.8):
+def get_loss_sequential(generative_model, 
+                        guide, 
+                        imgs, 
+                        k=1,
+                        iteration=0, writer=None, writer_tag=None, beta=1,
+                        args=None, alpha=0.8):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -83,6 +86,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
     #     log_prior_[z] = log_prior[i] * beta
     # log_prior = ZLogProb(**log_prior_)
 
+    # log_likelihood = log_likelihood/beta
     # z_pres_prior_lprb, z_what_post_lprb, z_where_post_lprb = log_prior
     log_prior_z = torch.cat(
                         [prob.sum(-1, keepdim=True) for prob in 
@@ -376,7 +380,7 @@ def get_loss_sequential(generative_model, guide, imgs, loss_type='elbo', k=1,
                             log_posterior=log_post_z)
 
 
-def get_loss_base(generative_model, guide, imgs, loss="nll"):
+def get_loss_base(generative_model, guide, imgs, loss="elbo"):
     '''
     Args:
         loss (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -416,11 +420,11 @@ def get_loss_base(generative_model, guide, imgs, loss="nll"):
     else:
         raise NotImplementedError("not implemented")
 
-def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
+def get_loss_air(generative_model, guide, imgs, k=1,
                                                     iteration=0, 
                                                     writer=None,
-                                                    writer_tag=None,
-                                                    beta=1):
+                                                    writer_tag='',
+                                                    beta=1, args=None):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -437,7 +441,7 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
     # multi by beta
     log_post_ = {}
     for i, z in enumerate(log_post._fields):
-        log_post_[z] = log_post[i] * beta
+        log_post_[z] = log_post[i]
     log_post = ZLogProb(**log_post_)
     
     # Posterior log probability: [batch_size, max_strks] (before summing)
@@ -459,7 +463,7 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
     # multiply by beta
     log_prior_ = {}
     for i, z in enumerate(log_prior._fields):
-        log_prior_[z] = log_prior[i] * beta
+        log_prior_[z] = log_prior[i]
     log_prior = ZLogProb(**log_prior_)
 
     # z_pres_prior_lprb, z_what_post_lprb, z_where_post_lprb = log_prior
@@ -481,7 +485,7 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
     bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1
             ).unsqueeze(-1) for prob in log_prior], dim=-1).sum(-1)
         # this is like -ELBO
-    bl_target = bl_target - log_likelihood[:, :, None]
+    bl_target = bl_target - log_likelihood[:, :, None] / beta
     bl_target = (bl_target * mask_prev)
 
     # The "REINFORCE"  term in the gradient is: [bs,]; 
@@ -507,69 +511,75 @@ def get_loss_air(generative_model, guide, imgs, loss_type='elbo', k=1,
 
     loss = model_loss + baseline_loss # [bs, ]
     
-    if writer is not None:
-        with torch.no_grad():
-            if writer_tag is None:
-                writer_tag = ''
-            # loss
-            for n, log_prob in zip(log_post._fields, log_post):
-                writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
-                                    log_prob.detach().sum(-1).mean(), 
-                                    iteration)
-            for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
-                writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
-                                    log_prob.detach().sum(-1).mean(), 
-                                    iteration)
-            # z prior parameters
-            if generative_model.prior_dist == 'Sequential':
-                writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
-                            guide.internal_decoder.z_pres_p.detach(), 
-                            iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
-                            guide.internal_decoder.z_what_loc.detach(), 
-                            iteration)
-                writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
-                            guide.internal_decoder.z_what_std.detach(), 
-                            iteration)
-                writer.add_histogram(
-                            f"{writer_tag}Parameters/z_where_prior.loc.scale",
-                            guide.internal_decoder.z_where_loc.detach()[:, 0], 
-                            iteration)
-                writer.add_histogram(
-                            f"{writer_tag}Parameters/z_where_prior.loc.shift",
-                            guide.internal_decoder.z_where_loc.detach()[:, 1:3], 
-                            iteration)
-                if guide.z_where_type == '4_rotate':
-                    writer.add_histogram(
-                            f"{writer_tag}Parameters/z_where_prior.loc.rotate",
-                            guide.internal_decoder.z_where_loc.detach()[:, 3], 
-                            iteration)
-                writer.add_histogram(
-                            f"{writer_tag}Parameters/z_where_prior.std",
-                            guide.internal_decoder.z_where_std.detach(), 
-                            iteration)
+    z_pres_smpls = guide_out.z_smpl.z_pres.detach()
+    writer.add_scalar(f"{writer_tag}Train curves/# of 0s in z_pres",
+        np.prod(z_pres_smpls.shape) - z_pres_smpls.sum(),
+        iteration)
 
-            writer.add_histogram("Parameters/z_pres",
-                        guide_out.z_pms.z_pres.detach(), 
-                        iteration)
-            writer.add_histogram("Parameters/z_where_posterior.loc.scale",
-                        guide_out.z_pms.z_where.detach()[:, :, 0, 0], 
-                        iteration)
-            writer.add_histogram("Parameters/z_where_posterior.loc.shift",
-                        guide_out.z_pms.z_where.detach()[:, :, 1:, 0,], 
-                        iteration)
-            writer.add_histogram("Parameters/z_where_posterior.scale",
-                        guide_out.z_pms.z_where.detach()[:, :, :, 1], 
-                        iteration)
-            writer.add_histogram("Parameters/z_what_posterior.loc",
-                        guide_out.z_pms.z_what.detach()[:, :, :, 0], 
-                        iteration)
-            writer.add_histogram("Parameters/z_what_posterior.scale",
-                        guide_out.z_pms.z_what.detach()[:, :, :, 1], 
-                        iteration)
-        
-            writer.add_histogram("Parameters/img.loc", 
-                    generative_model.renders_imgs(latents), iteration)
+    if args.log_param:
+        if writer is not None:
+            with torch.no_grad():
+                if writer_tag is None:
+                    writer_tag = ''
+                # loss
+                for n, log_prob in zip(log_post._fields, log_post):
+                    writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
+                                        log_prob.detach().sum(-1).mean(), 
+                                        iteration)
+                for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
+                    writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
+                                        log_prob.detach().sum(-1).mean(), 
+                                        iteration)
+                # z prior parameters
+                if generative_model.prior_dist == 'Sequential':
+                    writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
+                                guide.internal_decoder.z_pres_p.detach(), 
+                                iteration)
+                    writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.loc",
+                                guide.internal_decoder.z_what_loc.detach(), 
+                                iteration)
+                    writer.add_histogram(f"{writer_tag}Parameters/z_what_prior.std",
+                                guide.internal_decoder.z_what_std.detach(), 
+                                iteration)
+                    writer.add_histogram(
+                                f"{writer_tag}Parameters/z_where_prior.loc.scale",
+                                guide.internal_decoder.z_where_loc.detach()[:, 0], 
+                                iteration)
+                    writer.add_histogram(
+                                f"{writer_tag}Parameters/z_where_prior.loc.shift",
+                                guide.internal_decoder.z_where_loc.detach()[:, 1:3], 
+                                iteration)
+                    if guide.z_where_type == '4_rotate':
+                        writer.add_histogram(
+                                f"{writer_tag}Parameters/z_where_prior.loc.rotate",
+                                guide.internal_decoder.z_where_loc.detach()[:, 3], 
+                                iteration)
+                    writer.add_histogram(
+                                f"{writer_tag}Parameters/z_where_prior.std",
+                                guide.internal_decoder.z_where_std.detach(), 
+                                iteration)
+
+                writer.add_histogram("Parameters/z_pres",
+                            guide_out.z_pms.z_pres.detach(), 
+                            iteration)
+                writer.add_histogram("Parameters/z_where_posterior.loc.scale",
+                            guide_out.z_pms.z_where.detach()[:, :, 0, 0], 
+                            iteration)
+                writer.add_histogram("Parameters/z_where_posterior.loc.shift",
+                            guide_out.z_pms.z_where.detach()[:, :, 1:, 0,], 
+                            iteration)
+                writer.add_histogram("Parameters/z_where_posterior.scale",
+                            guide_out.z_pms.z_where.detach()[:, :, :, 1], 
+                            iteration)
+                writer.add_histogram("Parameters/z_what_posterior.loc",
+                            guide_out.z_pms.z_what.detach()[:, :, :, 0], 
+                            iteration)
+                writer.add_histogram("Parameters/z_what_posterior.scale",
+                            guide_out.z_pms.z_what.detach()[:, :, :, 1], 
+                            iteration)
+            
+                writer.add_histogram("Parameters/img.loc", 
+                        generative_model.renders_imgs(latents), iteration)
 
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))

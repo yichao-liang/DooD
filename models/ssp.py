@@ -234,7 +234,7 @@ class GenerativeModel(nn.Module):
                 dist.batch_shape == torch.Size([*bs]))
         return dist
         
-    def presence_dist(self, h_l=None, bs=[1, 3], glmp_eb=None):
+    def presence_dist(self, h_l=None, bs=[1, 3], glmp_eb=None, t=0):
         '''(z_pres Prior) Batched presence distribution 
         It can be | sequential where it has to have h_l, or
                   | independent | with fixed prior, or
@@ -255,7 +255,7 @@ class GenerativeModel(nn.Module):
             assert h_l != None, "need hidden states!"
             
             if self.no_pres_rnn or self.no_rnn:
-                z_pres_p = self.z_pres_prob.expand(*bs)
+                z_pres_p = self.z_pres_prob[t].expand(*bs)
                 z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, 
                                                               max=1-(1e-12))
             else:
@@ -905,6 +905,8 @@ class Guide(template.Guide):
                                             dependent_prior=dependent_prior,
                                             spline_decoder=spline_decoder,
                                             sep_where_pres_net=sep_where_pres_net,
+                                            no_pres_rnn=no_pres_rnn,
+                                            no_rnn=no_rnn,
                                                 )
         # Inference networks
         # Style_mlp:
@@ -1073,7 +1075,8 @@ class Guide(template.Guide):
                     # potentially improve it by the following modification. 
                     # This isn't good when canvas is not detached because it
                     # complicates the gradient graph
-                    if self.add_strk_tanh and t > 0 and self.detach_canvas_so_far:
+                    if (self.add_strk_tanh and t > 0 and\
+                        self.detach_canvas_so_far):
                         canvas = util.normalize_pixel_values(
                                         canvas, 
                                         method='tanh', 
@@ -1120,7 +1123,7 @@ class Guide(template.Guide):
                     h_l = [h_l, h_l]
 
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(
-                                        h_l, [*shp], glmp_eb
+                                        h_l, [*shp], glmp_eb, t=t
                                         ).log_prob(z_pres_smpl[:, :, t].clone()
                                         ) * mask_prev[:, :, t].clone()
                 z_where_prir[:, :, t] = self.internal_decoder.transformation_dist(

@@ -345,7 +345,7 @@ class Guide(template.Guide):
                     prior_dist='Independent',
                     target_in_pos="RNN",
                     intermediate_likelihood=None,
-                    sep_where_pres_mlp=True,
+                    # sep_where_pres_mlp=True,
                                             ):
         # Parameters
         self.z_what_dim = z_what_dim
@@ -360,7 +360,7 @@ class Guide(template.Guide):
                     prior_dist=prior_dist,
                     target_in_pos=target_in_pos,
                     intermediate_likelihood=intermediate_likelihood,
-                    sep_where_pres_mlp=sep_where_pres_mlp,
+                    # sep_where_pres_mlp=sep_where_pres_mlp,
                     )
 
         # Internal renderer
@@ -374,13 +374,13 @@ class Guide(template.Guide):
                                             prior_dist=self.prior_dist,
                                             )
         # Inference networks
-        if self.sep_where_pres_mlp:
-            self.pr_mlp = PresMLP(in_dim=self.pr_wr_mlp_in_dim)
-            self.wr_mlp = WhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
-                                      z_where_type=self.z_where_type,
-                                      z_where_dim=self.z_where_dim)
-        else:
-            self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
+        # if self.sep_where_pres_mlp:
+        #     self.pr_mlp = PresMLP(in_dim=self.pr_wr_mlp_in_dim)
+        #     self.wr_mlp = WhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
+        #                               z_where_type=self.z_where_type,
+        #                               z_where_dim=self.z_where_dim)
+        # else:
+        self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim)
 
@@ -531,8 +531,8 @@ class Guide(template.Guide):
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
 
-        img_embed, canvas_embed, residual_embed = self.get_img_features(
-                                                        imgs, canvas, residual)
+        img_embed, canvas_embed, residual_embed, rsd_ratio =\
+                                self.get_img_features(imgs, canvas, residual)
         # Predict z_pres, z_where from target and canvas
         pr_wr_mlp_in, h_l = self.get_pr_wr_mlp_in(img_embed, 
                                                                 canvas_embed,
@@ -617,7 +617,7 @@ class Guide(template.Guide):
         ptcs, bs = shp = pr_wr_mlp_in.shape[:2]
 
         # Predict presence and location from h
-        if self.sep_where_pres_mlp:
+        if self.sep_where_pres_net:
             z_pres_p = self.pr_mlp(pr_wr_mlp_in.view(prod(shp), -1))
             z_where_loc, z_where_scale =\
                        self.wr_mlp(pr_wr_mlp_in.view(prod(shp), -1))

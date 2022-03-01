@@ -53,3 +53,9 @@
 51,Full-seperated_z,EMNIST,3.0,642.8816
 52,Full-seperated_z,QMNIST,3.0,457.04257
 53,Full-seperated_z,Omniglot,3.0,675.99646
+54,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,Quickdraw,2.0,793.68555
+55,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,MNIST,2.0,468.46945
+56,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,KMNIST,2.0,883.4714
+57,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,EMNIST,2.0,626.59143
+58,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,QMNIST,2.0,471.89294
+59,Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-β4-0,Omniglot,2.0,521.42834
