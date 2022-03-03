@@ -127,7 +127,8 @@ class GenerativeModel(nn.Module):
 
             self.style_in_dim = self.h_dim
             if self.dependent_prior: 
-                self.style_in_dim += feature_extractor_out_dim
+                # self.style_in_dim += feature_extractor_out_dim
+                self.style_in_dim += 10
 
             if self.no_pres_rnn or self.no_rnn:
                 self.z_pres_prob = torch.nn.Parameter(
@@ -839,6 +840,7 @@ class Guide(template.Guide):
                         no_post_rnn=False,
                         no_pres_rnn=False,
                         no_rnn=False,
+                        only_rsd_ratio_pres=False,
                 ):
         '''
         Args:
@@ -877,6 +879,7 @@ class Guide(template.Guide):
                 detach_rsd_embed=detach_rsd_embed,
                 no_pres_rnn=no_pres_rnn,
                 no_rnn=no_rnn,
+                only_rsd_ratio_pres=only_rsd_ratio_pres,
                 )
         # Parameters
         self.constrain_param = constrain_param
@@ -1101,10 +1104,18 @@ class Guide(template.Guide):
             if self.prior_dist == 'Sequential':
                 glmp_eb = None
                 if self.dependent_prior:
-                    glmps = self.internal_decoder.renders_glimpses(
+                    condition_by_img = False
+                    if condition_by_img:
+                        self.internal_decoder.sigma = sigmas[:, :, t:t+1].clone()
+                        self.internal_decoder.sgl_strk_tanh_slope = \
+                                    sgl_strk_tanh_slope[:, :, t:t+1]
+                        glmps = self.internal_decoder.renders_glimpses(
                                         state.z_what.unsqueeze(2)
                                         ).view(prod(shp), *img_dim)
-                    glmp_eb = self.img_feature_extractor(glmps).view(*shp, -1)
+                        glmp_eb = self.img_feature_extractor(glmps).view(*shp, 
+                                                                    -1).detach()
+                    else:
+                        glmp_eb = state.z_what.view(*shp, -1).detach()
                     
                 # log the hidden states
                 h_l, h_c = state.h_l, state.h_c

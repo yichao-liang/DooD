@@ -74,7 +74,6 @@ class PresWhereMLP(nn.Module):
         else: 
             raise NotImplementedError
         return z_pres_p, z_where_loc, z_where_scale
-    
 
 class WhatMLP(nn.Module):
     def __init__(self, in_dim=256, z_what_dim=50, hid_dim=512, num_layers=2):

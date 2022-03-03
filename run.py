@@ -343,6 +343,8 @@ def get_args_parser():
                         learnable vector for the z_pres prior prob. The target
                         image is also detached before pres MLP to avoid 
                         influences of REINFORCE to the CNN.''')
+    parser.add_argument('--only_rsd_ratio_pres', action='store_true',
+                        help="only input pres MLP the rsd-pixel ratio")
     # parser.add_argument('--half_1s')
 
     # Baseline network

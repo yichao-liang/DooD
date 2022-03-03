@@ -46,6 +46,8 @@ class Guide(nn.Module):
                 no_pres_rnn=False,
                 detach_target_at_pr_mlp=False,
                 no_rnn=False,
+                only_rsd_ratio_pres=False,
+                feature_extractor_type='CNN',
                 ):
         super().__init__()
         
@@ -113,71 +115,106 @@ class Guide(nn.Module):
         # -> res=50, 33856 when [1, 32, 64]; 16928 when [1, 16, 32]
         # -> res=28, 4608 when
         self.feature_extractor_sharing = feature_extractor_sharing
-        self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
-        self.feature_extractor_out_dim = 256
-        self.img_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=hidden_dim,
-                                            num_mlp_layers=1)
-        if not self.feature_extractor_sharing:
-            self.trans_img_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=256,
-                                            num_mlp_layers=1)
-        if use_residual and not detach_rsd_embed:
-            # if detach_rsd_embed, not gradient is produced to learn this
-            self.residual_feature_extractor = util.init_cnn(
+        if feature_extractor_type == 'reshape':
+            self.img_feature_extractor = lambda x: torch.reshape(
+                                                    x, (x.shape[0], -1))
+            self.feature_extractor_out_dim = 2500
+        else:
+            self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
+            self.feature_extractor_out_dim = 256
+            self.img_feature_extractor = util.init_cnn(
                                                 n_in_channels=1,
                                                 n_mid_channels=16,#32, 
                                                 n_out_channels=32,#64,
                                                 cnn_out_dim=self.cnn_out_dim,
                                                 mlp_out_dim=
-                                                self.feature_extractor_out_dim,
+                                                    self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=hidden_dim,
+                                                num_mlp_layers=1)
+            if not self.feature_extractor_sharing:
+                self.trans_img_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
                                                 mlp_hidden_dim=256,
                                                 num_mlp_layers=1)
+            if use_residual and not detach_rsd_embed:
+                # if detach_rsd_embed, not gradient is produced to learn this
+                self.residual_feature_extractor = util.init_cnn(
+                                                    n_in_channels=1,
+                                                    n_mid_channels=16,#32, 
+                                                    n_out_channels=32,#64,
+                                                    cnn_out_dim=self.cnn_out_dim,
+                                                    mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
+                                                    mlp_hidden_dim=256,
+                                                    num_mlp_layers=1)
 
 
         self.sep_where_pres_net = sep_where_pres_net
         # 2.1 pres_where_rnn
-        self.pr_wr_rnn_in = ['z_pres', 'z_where']
-        self.pr_wr_rnn_in_dim = self.z_pres_dim + self.z_where_dim
-
-        if self.z_what_in_pos == 'z_where_rnn':
-            self.pr_wr_rnn_in.append('z_what')
-            self.pr_wr_rnn_in_dim += self.z_what_dim
-        # Canvas: only default in full; adding the target, residual would 
-        # make the model not able to generate from prior
-        if self.use_canvas:
-            self.pr_wr_rnn_in.append('canvas')
-            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-
-        if self.target_in_pos == 'RNN' and not self.residual_no_target:
-            self.pr_wr_rnn_in.append('target')
-            # assert False, "not recommanded unless in ablation"
-            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-        if self.target_in_pos == 'RNN' and self.use_residual:
-            # assert False, "not recommanded unless in ablation"
-            self.pr_wr_rnn_in.append('residual')
-            self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
-            
-        self.pr_wr_rnn_hid_dim = hidden_dim
         if sep_where_pres_net:
-            self.pr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
+            self.pr_rnn_in = ['z_pres']
+            self.wr_rnn_in = ['z_where']
+            self.pr_rnn_in_dim = self.z_pres_dim
+            self.wr_rnn_in_dim = self.z_where_dim
+
+            if self.z_what_in_pos == 'z_where_rnn':
+                self.wr_rnn_in.append('z_what')
+                self.wr_rnn_in_dim += self.z_what_dim
+            # Canvas: only default in full; adding the target, residual would 
+            # make the model not able to generate from prior
+            if self.use_canvas:
+                self.pr_rnn_in.append('canvas')
+                self.pr_rnn_in_dim += self.feature_extractor_out_dim
+                self.wr_rnn_in.append('canvas')
+                self.wr_rnn_in_dim += self.feature_extractor_out_dim
+
+            if self.target_in_pos == 'RNN' and not self.residual_no_target:
+                self.pr_rnn_in.append('target')
+                self.wr_rnn_in.append('target')
+                # assert False, "not recommanded unless in ablation"
+                self.pr_rnn_in_dim += self.feature_extractor_out_dim
+                self.wr_rnn_in_dim += self.feature_extractor_out_dim
+            if self.target_in_pos == 'RNN' and self.use_residual:
+                # assert False, "not recommanded unless in ablation"
+                self.pr_rnn_in.append('residual')
+                self.pr_rnn_in_dim += self.feature_extractor_out_dim
+                self.wr_rnn_in.append('residual')
+                self.wr_rnn_in_dim += self.feature_extractor_out_dim
+                
+            self.pr_wr_rnn_hid_dim = hidden_dim
+            self.pr_rnn = torch.nn.GRUCell(self.pr_rnn_in_dim, 
                                             self.pr_wr_rnn_hid_dim)
 
-            self.wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
+            self.wr_rnn = torch.nn.GRUCell(self.wr_rnn_in_dim, 
                                            self.pr_wr_rnn_hid_dim)
         else:
+            self.pr_wr_rnn_in = ['z_pres', 'z_where']
+            self.pr_wr_rnn_in_dim = self.z_pres_dim + self.z_where_dim
+
+            if self.z_what_in_pos == 'z_where_rnn':
+                self.pr_wr_rnn_in.append('z_what')
+                self.pr_wr_rnn_in_dim += self.z_what_dim
+            # Canvas: only default in full; adding the target, residual would 
+            # make the model not able to generate from prior
+            if self.use_canvas:
+                self.pr_wr_rnn_in.append('canvas')
+                self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+
+            if self.target_in_pos == 'RNN' and not self.residual_no_target:
+                self.pr_wr_rnn_in.append('target')
+                # assert False, "not recommanded unless in ablation"
+                self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+            if self.target_in_pos == 'RNN' and self.use_residual:
+                # assert False, "not recommanded unless in ablation"
+                self.pr_wr_rnn_in.append('residual')
+                self.pr_wr_rnn_in_dim += self.feature_extractor_out_dim
+                
+            self.pr_wr_rnn_hid_dim = hidden_dim
             self.pr_wr_rnn = torch.nn.GRUCell(self.pr_wr_rnn_in_dim, 
                                             self.pr_wr_rnn_hid_dim)
 
@@ -190,21 +227,26 @@ class Guide(nn.Module):
             self.pr_mlp_in_dim = 0
             self.wr_mlp_in = []
             self.wr_mlp_in_dim = 0
+            
+            self.only_rsd_ratio_pres = only_rsd_ratio_pres
             if not self.no_post_rnn and not self.no_rnn:
                 if not self.no_pres_rnn:
                     self.pr_mlp_in = ['h']
                     self.pr_mlp_in_dim += self.pr_wr_rnn_hid_dim
                 self.wr_mlp_in = ['h']
                 self.wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
+
             if self.target_in_pos == 'MLP' and not self.residual_no_target:
-                self.pr_mlp_in.append('target')
-                self.pr_mlp_in_dim += self.feature_extractor_out_dim
+                if not self.only_rsd_ratio_pres:
+                    self.pr_mlp_in.append('target')
+                    self.pr_mlp_in_dim += self.feature_extractor_out_dim
                 self.wr_mlp_in.append('target')
                 self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
             if self.target_in_pos == 'MLP' and self.use_residual:
-                self.pr_mlp_in.append('residual')
-                self.pr_mlp_in_dim += self.feature_extractor_out_dim
+                if not self.only_rsd_ratio_pres:
+                    self.pr_mlp_in.append('residual')
+                    self.pr_mlp_in_dim += self.feature_extractor_out_dim
                 self.wr_mlp_in.append('residual')
                 self.wr_mlp_in_dim += self.feature_extractor_out_dim
 
@@ -345,22 +387,24 @@ class Guide(nn.Module):
         # Style RNN input
 
         if self.sep_where_pres_net:
-            pr_rnn_in = [p_state.z_pres.view(prod(shp), -1), 
-                         p_state.z_where.view(prod(shp), -1).detach()]
-            wr_rnn_in = [p_state.z_pres.view(prod(shp), -1).detach(), 
-                         p_state.z_where.view(prod(shp), -1)]
+            pr_rnn_in = [p_state.z_pres.view(prod(shp), -1)]
+            wr_rnn_in = [p_state.z_where.view(prod(shp), -1)]
 
-            if 'z_what' in self.pr_wr_rnn_in:
+            if 'z_what' in self.pr_rnn_in:
                 pr_rnn_in.append(p_state.z_what.view(prod(shp), -1))
+            if 'z_what' in self.wr_rnn_in:
                 wr_rnn_in.append(p_state.z_what.view(prod(shp), -1))
-            if 'canvas' in self.pr_wr_rnn_in:
+            if 'canvas' in self.pr_rnn_in:
                 pr_rnn_in.append(canvas_embed.view(prod(shp), -1)) 
+            if 'canvas' in self.wr_rnn_in:
                 wr_rnn_in.append(canvas_embed.view(prod(shp), -1)) 
-            if 'target' in self.pr_wr_rnn_in:
+            if 'target' in self.pr_rnn_in:
                 pr_rnn_in.append(img_embed.view(prod(shp), -1))
+            if 'target' in self.wr_rnn_in:
                 wr_rnn_in.append(img_embed.view(prod(shp), -1))
-            if 'residual' in self.pr_wr_rnn_in:
+            if 'residual' in self.pr_rnn_in:
                 pr_rnn_in.append(residual_embed.view(prod(shp), -1))
+            if 'residual' in self.wr_rnn_in:
                 wr_rnn_in.append(residual_embed.view(prod(shp), -1))
             pr_rnn_in = torch.cat(pr_rnn_in, dim=1)
             wr_rnn_in = torch.cat(wr_rnn_in, dim=1)

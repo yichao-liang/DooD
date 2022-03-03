@@ -171,7 +171,7 @@ class WhereMLP(nn.Module):
             self.seq.linear_modules[-1].weight.data.zero_()
             # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [4,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
+                [6,0,0,0, -4,-4,-4,-4], dtype=torch.float)) 
         elif z_where_type == '3':
             self.seq.linear_modules[-1].weight.data.zero_()
             # [pres, loc:scale,shift, std:scale,shift
@@ -201,7 +201,7 @@ class PresMLP(nn.Module):
         # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
             # [1], dtype=torch.float)) 
-            [4], dtype=torch.float))
+            [6], dtype=torch.float))
     def forward(self, h):
         z = self.seq(h)
         z_pres_p = util.constrain_parameter(z, min=1e-12, max=1-(1e-12))

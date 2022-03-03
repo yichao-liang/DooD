@@ -2,16 +2,25 @@
 strokes_per_img = '4'
 
 '''
-Our model = AIR + sequential prior
-                + canvas-so-far
-                + seperated z_{where, pre} and z_what (4-dim z_where)
-                + spline renderer
-                (+ input target at mlp, i.e., target_in_pos = 'RNN', for 
-                    writing-completion)
+Our model = AIR 
+        + sequential prior
+        + spline decoder
+        + intermediate rendering (canvas, residual, residual pixel ratio)
+        + separated z_{where, pre} and z_what
+        (
+            + 4-dim z_where vs 3 in AIR
+            + input target at MLP, as opposed to RNN, for more sensible 
+                generative model
+            + separated z_pres, z_where nets
+            + no RNN for z_pres 
+            + more constrained latent distribution
+            + learnable observation std
+            + capability with multi-sample learning/evaluation
+        )
 '''
 full_config = [
                 'sequential_prior',  
-                'spline_latent',  
+                'spline_decoder',  
                 'canvas',  
                 'seperated_z',
             ]
@@ -29,7 +38,8 @@ models_2_cmd = {
         '--z_where_type', '3',
         '--strokes_per_img', strokes_per_img,
         '--z_what_in_pos', 'z_where_rnn',
-        '--target_in_pos', 'RNN'
+        '--target_in_pos', 'RNN',
+        '--save_history_ckpt',
     ],
     'AIR4': [
         '--model-type', 'AIR',
@@ -60,84 +70,72 @@ def args_from_kw_list(kw_config):
     '''Get the arguments for running the full model/ablations from keywords
     '''
     args = []
-    # ---
+    args.extend(['--model-type', 'Sequential'])
+    # --- Prior distribution:
     args.append('--prior_dist')
     if 'sequential_prior' in kw_config:
-        args.extend(['Sequential'])
+        args.extend(['Sequential',
+                     '--dependent_prior'])
     else:
         args.extend(['Independent'])
-    # ---    
-    args.append('--model-type')
-    if 'spline_latent' in kw_config:
-        args.extend(['Sequential'])
+    # --- Spline decoder: 
+    if 'spline_decoder' in kw_config:
+        pass
     else:
-        args.extend(['AIR'])
-        args.extend(['--lr', '1e-4'])
-    # ---
+        args.extend([
+            '--no_spline_renderer',
+            '--no_maxnorm',
+            '--no_sgl_strk_tanh',
+            ])
+    # --- Intermediate rendering:
     if 'canvas' in kw_config:
-        args.extend(['--use_canvas'])
-    # ---
+        args.extend([
+            '--use_canvas', '--detach_canvas_so_far',
+            '--use_residual', '--residual_pixel_count', '--detach_rsd_embed',
+            ])
+    # --- z_what in position:
     args.append('--z_what_in_pos')
     if 'seperated_z' in kw_config:
         args.append('z_what_rnn')
     else:
         args.append('z_where_rnn')
+    # --- Extra terms:
+    args.extend(['--anneal_lr', '--anneal_non_pr_net_lr',
+                 '--no_pres_rnn',
+                 '--update_reinforce_loss',
+                 '--sep_where_pres_net',
+                 '--save_history_ckpt',
+                 ])
     return args
 
 def ablation_args():
     all_args = {}
     for ablation in full_config:
-        # if ablation == 'spline_latent':
-            # skipping Full-spline_latent b/c the model didn't work
-            # continue
         exp_config = full_config.copy()
         exp_config.remove(ablation)
         args = args_from_kw_list(exp_config)
-        if ablation == 'canvas':
-            args.append("--no_strk_tanh")
         # args.append("--no_maxnorm")
         all_args[f"Full-{ablation}"] = args
 
     return all_args
 
-# common options
-                    # '--no_spline_renderer',
-                    # '--prior', "Independent",
-                    # '--simple_pres',
-                    # '--z_what_in_pos', 'z_where_rnn',
-                    # '--target_in_pos', 'RNN',
-                    # '--z_where_type', '3',
-                    # '--no_baseline',
-                    # '--lr', '1e-3', 
-                    # '--sep_where_pres_mlp',
-                    # '--render_at_the_end',
-                    # '--beta', f'{run_args.beta}',
-                    # "--increase_beta",
-                    # '--final_beta', f'{run_args.final_beta}',
-                    # '--use_residual',
-                    # '--residual_pixel_count',
-                    # '--dependent_prior',
-                    # '--no_maxnorm',
-                    # '--no_sgl_strk_tanh',
-                    # '--no_add_strk_tanh',
-                    # "--anneal_lr",
-                    # '--continue_training',
-                    # "--log_grad",
-                    # "--log_param",
-                    # '--save_history_ckpt',
 
 # Record all experiment configs
-full_model_args = args_from_kw_list(full_config)
+# full_model_args = args_from_kw_list(full_config)
 # i.e. ['--prior_dist', 'Sequential', 
     #   '--model-type', 'Sequential', 
     #   '--z_what_in_pos', 'z_what_rnn',
     #   '--use_canvas']
-full_no_canvas = args_from_kw_list(full_config)
+basic_full_model = ['--prior_dist', 'Sequential', 
+                    '--model-type', 'Sequential', 
+                    '--use_canvas', 
+                    '--z_what_in_pos', 'z_what_rnn']
+full_no_canvas = basic_full_model.copy()
 full_no_canvas.remove('--use_canvas')
 
 exp_dict = {
     # Feb 27
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr-intrll': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr-intrll': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
@@ -152,7 +150,7 @@ exp_dict = {
             '--intermediate_likelihood', 'Mean',
          ],
     # Feb 26
-    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss-anLr': full_model_args +\
+    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss-anLr': basic_full_model +\
         [
             '--anneal_lr',
             # '--anneal_non_pr_net_lr',
@@ -167,7 +165,7 @@ exp_dict = {
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss': basic_full_model +\
         [
             # '--anneal_lr',
             # '--anneal_non_pr_net_lr',
@@ -182,7 +180,7 @@ exp_dict = {
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-unDetachCanvRsd-sepPrWrNet-noRnn-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-unDetachCanvRsd-sepPrWrNet-noRnn-normRfLoss': basic_full_model +\
         [
             # '--anneal_lr',
             # '--anneal_non_pr_net_lr',
@@ -198,7 +196,7 @@ exp_dict = {
             '--sep_where_pres_net',
          ],
     # Feb 25
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss': basic_full_model +\
         [
             # '--anneal_lr',
             # '--anneal_non_pr_net_lr',
@@ -214,7 +212,7 @@ exp_dict = {
             '--sep_where_pres_net',
          ],
     # The 3 models with no_post_rnn, with +detachCanv, + anLr progressivly.
-    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss-anLr': full_model_args +\
+    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--no_post_rnn',
@@ -226,7 +224,7 @@ exp_dict = {
             '--residual_pixel_count',
             '--detach_rsd_embed',
         ],
-    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-no_post_rnn-detachCanvas-normRfLoss': basic_full_model +\
         [
             '--no_post_rnn',
             '--log_param',
@@ -237,7 +235,7 @@ exp_dict = {
             '--residual_pixel_count',
             '--detach_rsd_embed',
         ],
-    'Full-spDec-sqPrior-no_post_rnn-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-no_post_rnn-normRfLoss': basic_full_model +\
         [
             '--no_post_rnn',
             '--log_param',
@@ -248,7 +246,7 @@ exp_dict = {
             '--detach_rsd_embed',
         ],
     # current not working very well
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normGlobalRfLoss-anNonPrLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normGlobalRfLoss-anNonPrLr': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
@@ -265,21 +263,24 @@ exp_dict = {
          ],
     # Feb 24
     # this with β4 is able to learn variables strokes ~3/5 seeds
-    # the current best model
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': full_model_args +\
+    # the current best model: v0
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
             # '--log_param',
             '--detach_canvas_so_far',
+            # '--no_pres_rnn',
 
+            # '--only_rsd_ratio_pres',
             '--use_residual',
             '--residual_pixel_count',
             '--detach_rsd_embed',
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': full_model_args +\
+    # v2
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
@@ -287,13 +288,68 @@ exp_dict = {
             '--detach_canvas_so_far',
             '--no_pres_rnn',
 
+            # '--only_rsd_ratio_pres',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--save_history_ckpt',
+         ],
+    # v2.1 dependent prior
+    'Full-spDec-sqPrior-dp-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr': basic_full_model +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
+            '--no_pres_rnn',
+
+            # '--only_rsd_ratio_pres',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+            '--dependent_prior',
+            '--save_history_ckpt',
+         ],
+    # v1
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-onlyRsdRatPr-'+\
+        'normRfLoss-anNonPrLr': basic_full_model +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
+            # '--no_pres_rnn',
+
+            '--only_rsd_ratio_pres',
             '--use_residual',
             '--residual_pixel_count',
             '--detach_rsd_embed',
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr-omni': full_model_args +\
+    # v3
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-'+\
+        'onlyRsdRatPr-normRfLoss-anNonPrLr': basic_full_model +\
+        [
+            '--anneal_lr',
+            '--anneal_non_pr_net_lr',
+            # '--log_param',
+            '--detach_canvas_so_far',
+            '--no_pres_rnn',
+
+            '--only_rsd_ratio_pres',
+            '--use_residual',
+            '--residual_pixel_count',
+            '--detach_rsd_embed',
+            '--update_reinforce_loss',
+            '--sep_where_pres_net',
+         ],
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-'+\
+        'normRfLoss-anNonPrLr-omni': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
@@ -311,7 +367,7 @@ exp_dict = {
     # Q: what's the diff between simple_pres + sep_wr_pre vs just simple_pres?
     # A: not much but should use just simple_pres as it would require the z_pres
     # prior would need the hidden states.
-    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anNonPrLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anNonPrLr': basic_full_model +\
         [
             '--anneal_lr',
             '--anneal_non_pr_net_lr',
@@ -326,7 +382,7 @@ exp_dict = {
             # '--sep_where_pres_net',
             '--simple_pres',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-simPres-normRfLoss-anLr': basic_full_model +\
         [
             '--anneal_lr',
             # '--anneal_non_pr_net_lr',
@@ -342,7 +398,7 @@ exp_dict = {
             '--simple_pres',
          ],
     # Feb 23 
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--log_param',
@@ -356,7 +412,7 @@ exp_dict = {
             '--sep_where_pres_net',
          ],
     # 500k
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--log_param',
@@ -368,7 +424,7 @@ exp_dict = {
             '--update_reinforce_ll',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss': basic_full_model +\
         [
             # '--anneal_lr',
             '--log_param',
@@ -380,7 +436,7 @@ exp_dict = {
             '--update_reinforce_loss',
             '--sep_where_pres_net',
          ],
-    'Full-spDec-sqPrior-useDetachRsd-normRfLoss': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-normRfLoss': basic_full_model +\
         [
             # '--anneal_lr',
             '--log_param',
@@ -396,7 +452,7 @@ exp_dict = {
     # is already able to learn a variable number of strokes.
     # Now exp fxPrior model that uses 4dim z_where and residual
     # works 400k+
-    'Full-spDec-sqPrior-useDetachRsd-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachRsd-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--log_param',
@@ -408,7 +464,7 @@ exp_dict = {
             '--update_reinforce_ll',
          ],
     # works 250k+
-    'Full-spDec-sqPrior-useDetachCanvRsd-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useDetachCanvRsd-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--log_param',
@@ -421,7 +477,7 @@ exp_dict = {
             '--update_reinforce_ll',
          ],
     # works 250k+
-    'Full-spDec-sqPrior-useCanv-anLr': full_model_args +\
+    'Full-spDec-sqPrior-useCanv-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--log_param',
@@ -436,7 +492,7 @@ exp_dict = {
             '--update_reinforce_ll',
          ],
     # works 300k+
-    'Full-spDec-fxPrior-useDetachCanvRsd-anLr-wr4': full_model_args +\
+    'Full-spDec-fxPrior-useDetachCanvRsd-anLr-wr4': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--anneal_lr',
@@ -449,7 +505,7 @@ exp_dict = {
             # '--save_history_ckpt',
         ],
     # works 300k+
-    'Full-spDec-fxPrior-useRsd-anLr-wr4-simplePres': full_model_args +\
+    'Full-spDec-fxPrior-useRsd-anLr-wr4-simplePres': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--anneal_lr',
@@ -461,7 +517,7 @@ exp_dict = {
             # '--save_history_ckpt',
         ],
     # works 300k+
-    'Full-spDec-fxPrior-useRsd-anLr-wr4': full_model_args +\
+    'Full-spDec-fxPrior-useRsd-anLr-wr4': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--anneal_lr',
@@ -471,7 +527,7 @@ exp_dict = {
             '--residual_pixel_count',
             # '--save_history_ckpt',
         ],
-    'Full-spDec-fxPrior-useCanvas-anLr-wr4': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr-wr4': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--anneal_lr',
@@ -479,7 +535,7 @@ exp_dict = {
             '--log_param',
             # '--save_history_ckpt',
         ],
-    'Full-spDec-fxPrior-useCanvas-anLr-wr3': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr-wr3': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--anneal_lr',
@@ -489,25 +545,25 @@ exp_dict = {
             # '--save_history_ckpt',
         ],
     # Feb 17
-    'Full-fixed_prir-useRsd-anLr': full_model_args +\
+    'Full-fixed_prir-useRsd-anLr': basic_full_model +\
         [
             '--anneal_lr',
             '--prior', "Independent",
             '--use_residual',
         ],
-    'Full-spDec-noPost_rnn': full_model_args +\
+    'Full-spDec-noPost_rnn': basic_full_model +\
         [
             '--no_post_rnn',
             '--log_param',
             '--use_residual',
         ],
-    'Full-spDec-simple_pres': full_model_args +\
+    'Full-spDec-simple_pres': basic_full_model +\
         [
             '--simple_pres',
             '--log_param',
             '--use_residual',
         ],
-    'Full': full_model_args,
+    'Full': basic_full_model,
     # model that doesn't collapse, a.k.a. baseline:
     'Full-neuralDec-fixed_prir-noEG-sepPrWr': full_no_canvas +\
         [
@@ -518,7 +574,7 @@ exp_dict = {
             '--sep_where_pres_net',
             '--log_param',
         ],
-    'Full-spDec-fxPrior-useCanvas-anLr-sepPrWr': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr-sepPrWr': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -529,7 +585,7 @@ exp_dict = {
             '--sep_where_pres_net',
             '--save_history_ckpt',
         ],
-    'Full-spDec-fxPrior-useCanvas-anLr': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -540,7 +596,7 @@ exp_dict = {
         ],
     # exp with constraining z_pres_param, as normally it doesn't produce 0s once
     # converged
-    'Full-spDec-fxPrior-useCanvas-anLr-consPres': full_model_args +\
+    'Full-spDec-fxPrior-useCanvas-anLr-consPres': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -560,7 +616,7 @@ exp_dict = {
         ],
     # we can potentially also use: 1) a detach canvas before passing to both rnn
     # and 2)return no canvas
-    'Full-spDec-fxPrior-useDetachCanvas-anLr': full_model_args +\
+    'Full-spDec-fxPrior-useDetachCanvas-anLr': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -570,7 +626,7 @@ exp_dict = {
         ],
     # use canvas by passing it only to zwhere but not zwhat, see above for 
     # another way
-    'Full-spDec-fxPrior-useUndetachetachCanvas-anLr': full_model_args +\
+    'Full-spDec-fxPrior-useUndetachetachCanvas-anLr': basic_full_model +\
         [
             '--prior_dist', 'Independent',
             '--z_where_type', '3',
@@ -579,7 +635,7 @@ exp_dict = {
             '--log_param',
         ],
     # 2 minimal models that collapse from early exp:
-    'Full-neuralDec-fxPrior-useUndetachCanvas-anLr': full_model_args +\
+    'Full-neuralDec-fxPrior-useUndetachCanvas-anLr': basic_full_model +\
         [
             '--no_spline_renderer',
             '--prior_dist', 'Independent',
@@ -606,3 +662,16 @@ exp_dict = {
         ],
     **models_2_cmd
 }
+
+full_and_ablation_dict = {
+    'Full': args_from_kw_list(full_config)+\
+        [
+            # '--beta', '4'
+         ],
+    **ablation_args()
+}
+exp_dict.update(full_and_ablation_dict)
+
+standard = "Full-spDec-sqPrior-dp-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-"+\
+            "anNonPrLr"
+assert set(exp_dict['Full']) == set(exp_dict[standard]), "Full != Standard"

@@ -21,7 +21,7 @@ from splinesketch.code.bezier import Bezier
 # [bs, 3 channels, pixel]
 pres_clr = torch.tensor((0,.5,.5), dtype=torch.float).view(1, 3, 1) # gold
 no_pres_clr = torch.tensor((.5,0,0.5), dtype=torch.float).view(1, 3, 1) # orange red
-nrow = 16 # number of imgs/row
+nrow = 32 # number of imgs/row
 
 resize_res = 64
 display_transform = transforms.Compose([
@@ -56,7 +56,8 @@ def plot_reconstructions(imgs:torch.Tensor,
                          epoch:int=None, 
                          writer_tag:str='Train',
                          dataset_name:str=None,
-                         max_display=16):
+                         max_display=32,
+                         fix_img:torch.Tensor=None):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
     2) control points
@@ -66,8 +67,10 @@ def plot_reconstructions(imgs:torch.Tensor,
     bs = imgs.shape[0]
     n_strks = args.strokes_per_img
 
-    n = min(bs, max_display)
-    imgs = imgs[:n]
+    n = min(bs, max_display // 2)
+    m = max_display - n
+    imgs = torch.cat((imgs[:n], fix_img[:m]), dim=0)
+    n = n + m # final recons to show
     res = imgs.shape[-1]
 
     if args.model_type == 'Base':

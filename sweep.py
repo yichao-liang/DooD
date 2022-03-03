@@ -30,14 +30,35 @@ if __name__ == '__main__':
     # Full model ablation (Full minus 1 feature)
     # MWS
 
-    # exp_name = "Full-spDec-sqPrior-unDetachCanvRsd-sepPrWrNet-noRnn-normRfLoss"
-    # exp_name = "Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss"
-    # exp_name = "Full-spDec-sqPrior-detachCanvRsd-sepPrWrNet-noRnn-normRfLoss-anLr"
+    ablation_exp_name = [
+            'Full-sequential_prior',
+            'Full-spline_decoder',
+            'Full-canvas',
+            'Full-seperated_z',
+        ]
+
     # exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr"
-    exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr"
+    # exp_name = 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-onlyRsdRatPr-'+\
+    #     'normRfLoss-anNonPrLr'
+    # exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr"
+    # exp_name = 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr'
+    # exp_name = 'Full-spDec-sqPrior-dp-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr'
+    exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
+    # # beta 4; 3/4 var 1full
+    # exp_name = 'Full' 
+    # β4->4/4 collapse; β1->4/4 steps; β3->3collapse 1full; β2->1var; 3full
+    # exp_name = ablation_exp_name[0] 
+    # also means no strk_tanh and add_tanh; β10 
+    # exp_name = ablation_exp_name[1]
+    # extramely hard to get to learn variable steps; maybe β4
+    # exp_name = ablation_exp_name[2]
+    # β4: 1/4 var, 3/4 full
+    # exp_name = ablation_exp_name[3]
     # exp_name = 'MWS'
+    # exp_name = 'AIR'
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
+    # breakpoint()
     train = True
     evalulate = False
 
@@ -46,7 +67,7 @@ if __name__ == '__main__':
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'./log/full/{model_name}',
+                        '--tb_dir', f'./log/full-beta/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',
 

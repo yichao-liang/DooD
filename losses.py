@@ -229,8 +229,8 @@ def get_loss_sequential(generative_model,
                                     iteration)
             # z posterior samples
             z_pres_smpls = guide_out.z_smpl.z_pres.detach()
-            writer.add_scalar(f"{writer_tag}Train curves/# of 0s in z_pres",
-                np.prod(z_pres_smpls.shape) - z_pres_smpls.sum(),
+            writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
+                z_pres_smpls.sum(),
                 iteration)
 
             if args.log_param:
@@ -512,8 +512,8 @@ def get_loss_air(generative_model, guide, imgs, k=1,
     loss = model_loss + baseline_loss # [bs, ]
     
     z_pres_smpls = guide_out.z_smpl.z_pres.detach()
-    writer.add_scalar(f"{writer_tag}Train curves/# of 0s in z_pres",
-        np.prod(z_pres_smpls.shape) - z_pres_smpls.sum(),
+    writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
+        z_pres_smpls.sum(),
         iteration)
 
     if args.log_param:

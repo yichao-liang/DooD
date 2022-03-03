@@ -469,12 +469,12 @@ if __name__ == "__main__":
 
     # Choose the dataset to test on
     marginal_likelihood_test_datasets = [
-                    #  "Quickdraw",
-                    #  "MNIST",
-                    #  "KMNIST", 
-                    #  "EMNIST", 
-                    #  "QMNIST", 
-                    #  "Omniglot", 
+                     "Quickdraw",
+                     "MNIST",
+                     "KMNIST", 
+                     "EMNIST", 
+                     "QMNIST", 
+                     "Omniglot", 
                      ]
 
     clf_test_datasets = [

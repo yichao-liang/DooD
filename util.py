@@ -80,13 +80,19 @@ def init_dataloader(res, dataset, batch_size=64):
                             root="./data/QuickDraw_pytorch/Dataset")
     else: raise NotImplementedError
 
-    torch.manual_seed(0)
-    np.random.seed(0)
-    random.seed(0)
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    g = torch.Generator()
+    g.manual_seed(0)
+
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=4)
+                                num_workers=4)
     test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, 
-                                                            num_workers=4)
+                                num_workers=4,
+                                worker_init_fn=seed_worker, generator=g,)
     
     return train_loader, test_loader
 
@@ -566,7 +572,7 @@ def init(run_args, device):
         valid_loader = DataLoader(val_dataset,
                                 batch_size=run_args.batch_size,
                                 num_workers=2,
-                                shuffle=True,
+                                shuffle=False,
                                 # sampler=val_sampler
                                 )
 
@@ -655,7 +661,7 @@ def init(run_args, device):
                     no_rnn=run_args.no_rnn,
                     no_pres_rnn=run_args.no_pres_rnn,
                     # comment out for eval old models
-                    # dependent_prior=run_args.dependent_prior
+                    dependent_prior=run_args.dependent_prior
                                     ).to(device)
         guide = ssp.Guide(
                 max_strks=run_args.strokes_per_img,
@@ -696,6 +702,7 @@ def init(run_args, device):
                 no_rnn=run_args.no_rnn,
                 no_pres_rnn=run_args.no_pres_rnn,
                 no_post_rnn=run_args.no_post_rnn,
+                only_rsd_ratio_pres=run_args.only_rsd_ratio_pres,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -719,7 +726,7 @@ def init(run_args, device):
                         z_what_in_pos=run_args.z_what_in_pos,
                         prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
-                        # sep_where_pres_net=run_args.sep_where_pres_net,
+                        sep_where_pres_net=run_args.sep_where_pres_net,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(
@@ -883,7 +890,6 @@ def load_checkpoint(path, device):
         print(e)
         print(f"failed loading {path}")
     run_args = checkpoint["run_args"]
-    run_args.dataset = 'MNIST'
     model, optimizer, scheduler, stats, data_loader = init(run_args, device)
 
     if run_args.model_type == 'MWS':

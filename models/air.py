@@ -236,7 +236,7 @@ class GenerativeModel(nn.Module):
 
         # Change to [bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(1) 
-        imgs = util.normalize_pixel_values(imgs, method="tanh", slope=0.6) # tanh works
+        # imgs = util.normalize_pixel_values(imgs, method="tanh", slope=0.6) # tanh works
 
 
         try:
@@ -345,7 +345,7 @@ class Guide(template.Guide):
                     prior_dist='Independent',
                     target_in_pos="RNN",
                     intermediate_likelihood=None,
-                    # sep_where_pres_mlp=True,
+                    sep_where_pres_net=False,
                                             ):
         # Parameters
         self.z_what_dim = z_what_dim
@@ -360,7 +360,8 @@ class Guide(template.Guide):
                     prior_dist=prior_dist,
                     target_in_pos=target_in_pos,
                     intermediate_likelihood=intermediate_likelihood,
-                    # sep_where_pres_mlp=sep_where_pres_mlp,
+                    feature_extractor_type='CNN',
+                    sep_where_pres_net=sep_where_pres_net,
                     )
 
         # Internal renderer

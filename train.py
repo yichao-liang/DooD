@@ -56,6 +56,7 @@ def train(model,
 
     if args.model_type != 'MWS':
         generative_model, guide = model
+        memory = None
     else:
         mws_transform = transforms.Resize([args.img_res, args.img_res], 
                                             antialias=True)
@@ -71,12 +72,16 @@ def train(model,
     
     # For ploting first
     imgs, target = next(iter(train_loader))
+    fix_img, fix_tar = next(iter(val_loader))
     if args.model_type == 'MWS':
         obs_id = imgs.type(torch.int64)            
         imgs = mws_transform(target)
+        fix_img = mws_transform(fix_tar)
     imgs = util.transform(imgs.to(args.device))
+    fix_img = util.transform(fix_img.to(args.device))
     if dataset_name is not None and dataset_name == "Omniglot":
         imgs = 1 - imgs
+        fix_img = 1 - fix_img
 
     while iteration < args.num_iterations:
         # Log training reconstruction in Tensorboard
@@ -85,7 +90,8 @@ def train(model,
                                       generative_model=generative_model, 
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
-                                      dataset_name=args.dataset)
+                                      dataset_name=args.dataset, 
+                                      fix_img=fix_img)
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         for imgs, target in train_loader:
@@ -112,7 +118,7 @@ def train(model,
 
             optimizer.zero_grad()
             loss_tuple = get_loss_tuple(args, generative_model, guide, 
-                                    iteration, imgs, writer, obs_id)
+                                    iteration, imgs, writer, obs_id, memory)
             loss = loss_tuple.overall_loss.mean()
             loss.backward()
 
@@ -231,10 +237,10 @@ def get_model_named_params(args, guide, generative_model):
     return named_params
 
 MWSLoss = namedtuple('MWSLoss', ["neg_elbo", "theta_loss", "phi_loss", 
-                                 "prior_loss","accuracy", "novel_proportion", 
+                                 "prior_loss", "novel_proportion", 
                                  "new_map", "overall_loss"])
 def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer, 
-                   obs_id):
+                   obs_id, memory=None):
     if args.model_type == 'Base':
         base.schedule_model_parameters(generative_model, guide, 
                                     iteration, args.loss, args.device)
@@ -258,7 +264,6 @@ def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer,
                                 generative_model=generative_model, 
                                 guide=guide,
                                 imgs=imgs, 
-                                loss_type=args.loss, 
                                 iteration=iteration,
                                 writer=writer,
                                 beta=float(args.beta),
@@ -300,12 +305,15 @@ def get_mws_loss_tuple(generative_model,
                             memory,
                             imgs.squeeze(1).round(),
                             obs_id,
-                            args.num_particles,
+                            num_particles,
                             )
-    return MWSLoss(neg_elbo=loss, theta_loss=theta_loss, phi_loss=phi_loss, 
-                    prior_loss=prior_loss, accuracy=accuracy, 
-                    novel_proportion=novel_proportion, 
-                    new_map=new_map, overall_loss=loss)
+    return MWSLoss(neg_elbo=loss, theta_loss=torch.tensor(theta_loss), 
+                   phi_loss=torch.tensor(phi_loss), 
+                    prior_loss=torch.tensor(prior_loss), 
+                    # accuracy=accuracy, 
+                    novel_proportion=torch.tensor(novel_proportion), 
+                    new_map=torch.tensor(new_map), 
+                    overall_loss=loss)
 
 def log_stat(args, stats, iteration, loss, loss_tuple):
     '''Log to stats and generate output for display
@@ -317,26 +325,26 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
         stats.theta_losses.append(loss_tuple.theta_loss)
         stats.phi_losses.append(loss_tuple.phi_loss)
         stats.prior_losses.append(loss_tuple.prior_loss)
-        if accuracy is not None:
-            stats.accuracies.append(loss_tuple.accuracy)
-        if novel_proportion is not None:
-            stats.novel_proportions.append(loss_tuple.novel_proportion)
-        if new_map is not None:
-            stats.new_maps.append(loss_tuple.new_map)
+        # if accuracy is not None:
+        #     stats.accuracies.append(loss_tuple.accuracy)
+        # if novel_proportion is not None:
+        #     stats.novel_proportions.append(loss_tuple.novel_proportion)
+        # if new_map is not None:
+        #     stats.new_maps.append(loss_tuple.new_map)
     
     # Log
     if iteration % args.log_interval == 0:
         if args.model_type == 'MWS':
             util.logging.info(
                 "it. {}/{} | prior loss = {:.2f} | theta loss = {:.2f} | "
-                "phi loss = {:.2f} | accuracy = {}% | novel = {}% | new map = {}% "
+                "phi loss = {:.2f} | novel = {}% | new map = {}% "
                 "| last log_p = {} | last kl = {} | GPU memory = {:.2f} MB".format(
                     iteration,
                     args.num_iterations,
                     loss_tuple.prior_loss,
                     loss_tuple.theta_loss,
                     loss_tuple.phi_loss,
-                    loss_tuple.accuracy * 100 if loss_tuple.accuracy is not None else None,
+                    # loss_tuple.accuracy * 100 if loss_tuple.accuracy is not None else None,
                     loss_tuple.novel_proportion * 100 if loss_tuple.novel_proportion is not None else None,
                     loss_tuple.new_map * 100 if loss_tuple.new_map is not None else None,
                     "N/A" if len(stats.log_ps) == 0 else stats.log_ps[-1],
@@ -354,16 +362,17 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
 
 def save(args, iteration, model, optimizer, scheduler, stats):
     # save iteration.pt
-    if args.save_history_ckpt:
-        util.save_checkpoint(
-            util.get_checkpoint_path(args, 
-            checkpoint_iteration=iteration),
-            model,
-            optimizer,
-            scheduler,
-            stats,
-            run_args=args,
-        )
+    if iteration % 10000 == 0:
+        if args.save_history_ckpt:
+            util.save_checkpoint(
+                util.get_checkpoint_path(args, 
+                checkpoint_iteration=iteration),
+                model,
+                optimizer,
+                scheduler,
+                stats,
+                run_args=args,
+            )
     # save latest.pt
     util.save_checkpoint(
         util.get_checkpoint_path(args),
