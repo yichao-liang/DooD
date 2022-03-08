@@ -37,13 +37,40 @@ if __name__ == '__main__':
             'Full-seperated_z',
         ]
 
-    # exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-normRfLoss-anNonPrLr"
-    # exp_name = 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-onlyRsdRatPr-'+\
-    #     'normRfLoss-anNonPrLr'
-    # exp_name = "Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr"
-    # exp_name = 'Full-spDec-sqPrior-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr'
-    # exp_name = 'Full-spDec-sqPrior-dp-useDetachRsd-sepPrWrNet-noPrRnn-normRfLoss-anNonPrLr'
-    exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
+    # v1 4 stroks
+    exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-44strk'
+    # ---
+    # v1:β2 all steps; β3 works
+    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # v2: β2-4 works 
+    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
+    #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # v3: β2 a bit more strokes then needed, 4 collapse
+    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
+    #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
+
+    # v1.1 β3 works better than 4; 4 stops using strokes
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # v2.1 β2-4 all works
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
+    #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # v3.1 β2 works
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
+    #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
+    
+    # v1.2
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-'+\
+    #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
+    # v2.2
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
+    #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
+    # v3.2
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
+    #             'noWtPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
+    # temp
+    # exp_name = 'Full-spDec-sqPrior-dp-t|r-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+
     # # beta 4; 3/4 var 1full
     # exp_name = 'Full' 
     # β4->4/4 collapse; β1->4/4 steps; β3->3collapse 1full; β2->1var; 3full
@@ -78,13 +105,13 @@ if __name__ == '__main__':
             print(f"==> Done training {n}\n")
 
         if evalulate:
-            print(f"==> Begin evaluating the '{n}' model")
+            print(f"==> Begin evaluating the '{model_name}' model")
 
             # ckpt_path = util.get_checkpoint_path_from_path_base(model_name, -1)
             subprocess.run(['python', 'test.py', 
                             # '--ckpt_path', ckpt_path,
                             # for old models
-                            '--save_model_name', n])
+                            # '--save_model_name', n])
                             # for new models
-                            # '--save_model_name', model_name])
+                            '--save_model_name', model_name])
             print(f"==> Done evaluating the '{n}' model\n\n")

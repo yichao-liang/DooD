@@ -382,23 +382,31 @@ def unconditioned_generation(model, args, writer, in_img):
     if args.model_type == 'MWS':
         generative_model, guide, memory = model
     else:
-        generative_model, guide = model
+        _, guide = model
+        generative_model = guide.internal_decoder
     
     # todo: check for AIR, Full, Full-seq_prir
     with torch.no_grad():
+        # pass on the parameters
+        decoder_param = guide(in_img).decoder_param
         generative_model.img_feature_extractor = guide.img_feature_extractor
-        generative_model.style_rnn = guide.style_rnn
-        generative_model.z_what_rnn = guide.z_what_rnn
-        generative_model.renderer_param_mlp = guide.renderer_param_mlp
-        generative_model.target_in_pos = guide.target_in_pos
-
-        gen_out = generative_model.sample(bs=[in_img.shape[0]], in_img=in_img)
+        if guide.sep_where_pres_net:
+            generative_model.wr_rnn = guide.wr_rnn
+            generative_model.pr_rnn = guide.pr_rnn
+        else:
+            generative_model.pr_wr_rnn = guide.pr_wr_rnn
+        generative_model.wt_rnn = guide.wt_rnn
+        # generative_model.renderer_param_mlp = guide.renderer_param_mlp
+        # generative_model.target_in_pos = guide.target_in_pos
+        # sample
+        gen_out = generative_model.sample(bs=[in_img.shape[0]], 
+                                          decoder_param=decoder_param,
+                                          char_cond_gen=False)
         gen_imgs = gen_out.canvas
         gen_imgs = display_transform(gen_imgs)
 
     gen_img_grid = make_grid(gen_imgs, nrow=NROW)
-    writer.add_image(f'Unconditioned Generation/', gen_img_grid)
-    return
+    writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid)
 
 def character_conditioned_generation(model, args, writer, imgs):
     '''Get the first (or more) hidden_states and pass it to the generative model
@@ -503,71 +511,71 @@ if __name__ == "__main__":
     res = gen.res
     writer = SummaryWriter(log_dir=f"./log/debug/{args.save_model_name}",)
 
-    for dataset in marginal_likelihood_test_datasets:
-        print(f"===> Begin evaluation on {dataset} dataset")
+    # for dataset in marginal_likelihood_test_datasets:
+    #     print(f"===> Begin evaluation on {dataset} dataset")
 
-        # Evaluate marginal likelihood
-        train_loader, test_loader = util.init_dataloader(res, dataset, 
-                                                         batch_size=64)
-        print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
-        marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-                            args=trn_args, save_imgs_dir=None, epoch=None, 
-                            writer=writer, 
-                            # k=1, # used for debug why the signs are different
-                            k=2, # use for current results
-                        train_loader=None, optimizer=None, scheduler=scheduler,
-                            # train_loader=train_loader, optimizer=optimizer,
-                            dataset_name=dataset,
-                            finetune_ite=0,
-                            only_marginal_likelihood_evaluation=True,
-                            only_reconstruction=False,
-                            dataset_derived_std=True,
-                            log_to_file=True)
-        print(f"===> Done elbo_evalution on {dataset}\n")
+    #     # Evaluate marginal likelihood
+    #     train_loader, test_loader = util.init_dataloader(res, dataset, 
+    #                                                      batch_size=64)
+    #     print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
+    #     marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+    #                         args=trn_args, save_imgs_dir=None, epoch=None, 
+    #                         writer=writer, 
+    #                         # k=1, # used for debug why the signs are different
+    #                         k=2, # use for current results
+    #                     train_loader=None, optimizer=None, scheduler=scheduler,
+    #                         # train_loader=train_loader, optimizer=optimizer,
+    #                         dataset_name=dataset,
+    #                         finetune_ite=0,
+    #                         only_marginal_likelihood_evaluation=True,
+    #                         only_reconstruction=False,
+    #                         dataset_derived_std=True,
+    #                         log_to_file=True)
+    #     print(f"===> Done elbo_evalution on {dataset}\n")
         
-        # train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
-        print(f"===> Begin Reconstruction testing on {dataset}")
-        trn_args.save_model_name = args.save_model_name
-        marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-                            args=trn_args, save_imgs_dir=None, epoch=None, 
-                            writer=writer, k=1,
-                            train_loader=None, optimizer=None,
-                            dataset_name=dataset, 
-                            only_marginal_likelihood_evaluation=False,
-                            only_reconstruction=True)
-        print(f"===> Done Reconstruction on {dataset}\n")
+    #     # train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
+    #     print(f"===> Begin Reconstruction testing on {dataset}")
+    #     trn_args.save_model_name = args.save_model_name
+    #     marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+    #                         args=trn_args, save_imgs_dir=None, epoch=None, 
+    #                         writer=writer, k=1,
+    #                         train_loader=None, optimizer=None,
+    #                         dataset_name=dataset, 
+    #                         only_marginal_likelihood_evaluation=False,
+    #                         only_reconstruction=True)
+    #     print(f"===> Done Reconstruction on {dataset}\n")
 
-        # Evaluate classification
-    for dataset in clf_test_datasets:
-        # train_loader, test_loader = util.init_dataloader(res, dataset, 
-        #                                                  batch_size=64)
-        print(f"===> Begin Classification evaluation on {dataset}")
-        classification_evaluation(guide, args, writer, dataset, 
-                                    dataset_name=dataset, batch_size=64)    
-        print(f"===> Done clf_evaluation on {dataset}\n")
+    #     # Evaluate classification
+    # for dataset in clf_test_datasets:
+    #     # train_loader, test_loader = util.init_dataloader(res, dataset, 
+    #     #                                                  batch_size=64)
+    #     print(f"===> Begin Classification evaluation on {dataset}")
+    #     classification_evaluation(guide, args, writer, dataset, 
+    #                                 dataset_name=dataset, batch_size=64)    
+    #     print(f"===> Done clf_evaluation on {dataset}\n")
             
-        # Character-conditioned generation
-        # Alphabet-conditioned generation
-        # print(f"===> Done testing on {dataset} dataset \n\n")
+    #     # Character-conditioned generation
+    #     # Alphabet-conditioned generation
+    #     # print(f"===> Done testing on {dataset} dataset \n\n")
 
     # Unconditioned generation
-    # num_to_sample = 64
-    # train_loader, _ = init_dataloader(res, 'MNIST', batch_size=2)
-    # in_img, n = [], 0
-    # for imgs, _ in train_loader:
-    #     imgs = imgs.to(device)
-    #     in_img.append(imgs)
-    #     n += imgs.shape[0]
-    #     if n >= num_to_sample:
-    #         in_img = torch.cat(in_img, dim=0)
-    #         break
+    num_to_sample = 64
+    train_loader, _ = util.init_dataloader(res, 'MNIST', batch_size=64)
+    in_img, n = [], 0
+    for imgs, _ in train_loader:
+        imgs = imgs.to(device)
+        in_img.append(imgs)
+        n += imgs.shape[0]
+        if n >= num_to_sample:
+            in_img = torch.cat(in_img, dim=0)
+            break
 
-    # print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
-    # unconditioned_generation(model=model, 
-    #                          args=trn_args,
-    #                          writer=writer, 
-    #                          in_img=in_img[:num_to_sample])
-    # print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
+    print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
+    unconditioned_generation(model=model, 
+                             args=trn_args,
+                             writer=writer, 
+                             in_img=in_img[:num_to_sample])
+    print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
 
     # print(f"===> Begin Character-conditioned generation on with {args.save_model_name}")
     # character_conditioned_generation(model=model,
@@ -575,3 +583,5 @@ if __name__ == "__main__":
     #                                  writer=writer,
     #                                  imgs=in_img[:8])
     # print(f"===> Done Character-conditioned generation on with {args.save_model_name}\n")
+    writer.flush()
+    writer.close()

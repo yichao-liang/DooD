@@ -83,6 +83,7 @@ def train(model,
         imgs = 1 - imgs
         fix_img = 1 - fix_img
 
+    args.num_iterations = 1e6
     while iteration < args.num_iterations:
         # Log training reconstruction in Tensorboard
         with torch.no_grad():

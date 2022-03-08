@@ -363,8 +363,8 @@ def init_z_where(z_where_type):
                                                 torch.tensor([.8,0,0,0]),
                                                 torch.tensor([.2,.2,.2,.4]), 4),
                                                 # torch.ones(4)/5, 4),
-                           '5': ZWhereParam(torch.tensor([1,1,0,0,0]),
-                                                torch.ones(5)/5, 5),
+                           '5': ZWhereParam(torch.tensor([.8,.8,0,0,0]),
+                                            torch.tensor([.2,.2,.2,.2,.4]), 5),
                         }
     assert z_where_type in init_z_where_params
     return init_z_where_params.get(z_where_type)
@@ -482,6 +482,8 @@ transform = transforms.Compose([
 def init(run_args, device):  
     # Data
     res = run_args.img_res
+    # for continue training on omniglot
+    # run_args.dataset = 'Omniglot'
     if run_args.dataset == 'Omniglot':
         # data_loader = omniglot_dataset.init_training_data_loader(
         #                                         run_args.data_dir, 
@@ -640,8 +642,9 @@ def init(run_args, device):
         # assert ((run_args.use_canvas == (not run_args.no_sgl_strk_tanh)) or
         #         not run_args.use_canvas),\
             # "use_canvas should be used in accordance with strk_tanh norm"
+        hid_dim = 256
         generative_model = ssp.GenerativeModel(
-                    max_strks=run_args.strokes_per_img,
+                    max_strks=int(run_args.strokes_per_img),
                     pts_per_strk=run_args.points_per_stroke,
                     z_where_type=run_args.z_where_type,
                     res=run_args.img_res,
@@ -661,10 +664,12 @@ def init(run_args, device):
                     no_rnn=run_args.no_rnn,
                     no_pres_rnn=run_args.no_pres_rnn,
                     # comment out for eval old models
-                    dependent_prior=run_args.dependent_prior
+                    dependent_prior=run_args.dependent_prior,
+                    prior_dependency=run_args.prior_dependency,
+                    hidden_dim=hid_dim,
                                     ).to(device)
         guide = ssp.Guide(
-                max_strks=run_args.strokes_per_img,
+                max_strks=int(run_args.strokes_per_img),
                 pts_per_strk=run_args.points_per_stroke,
                 z_where_type=run_args.z_where_type,
                 img_dim=[1, run_args.img_res, run_args.img_res],
@@ -686,8 +691,8 @@ def init(run_args, device):
                 constrain_param=not run_args.constrain_sample,
                 render_method=run_args.render_method,
                 intermediate_likelihood=run_args.intermediate_likelihood,
-                # comment out for eval old models
                 dependent_prior=run_args.dependent_prior,
+                prior_dependency=run_args.prior_dependency,
                 residual_pixel_count=run_args.residual_pixel_count,
                 spline_decoder=not run_args.no_spline_renderer,
                 sep_where_pres_net=run_args.sep_where_pres_net,
@@ -702,7 +707,11 @@ def init(run_args, device):
                 no_rnn=run_args.no_rnn,
                 no_pres_rnn=run_args.no_pres_rnn,
                 no_post_rnn=run_args.no_post_rnn,
+                # comment out for eval old models
+                no_what_post_rnn=run_args.no_what_post_rnn,
+                no_pres_post_rnn=run_args.no_pres_post_rnn,
                 only_rsd_ratio_pres=run_args.only_rsd_ratio_pres,
+                hidden_dim=hid_dim,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -823,6 +832,8 @@ def init_optimizer(run_args, model):
              'weight_decay': run_args.weight_decay,}
             ])
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            # for direct training on omniglot
+            # optimizer, mode='max',factor=0.1, patience=2000, threshold=50, 
             optimizer, mode='max',factor=0.1, patience=5000, threshold=30, 
             min_lr=[1e-4, 1e-3, 1e-3], threshold_mode='abs'
             )
@@ -906,6 +917,26 @@ def load_checkpoint(path, device):
         generative_model.load_state_dict(checkpoint["generative_model_state_dict"])
         guide.load_state_dict(checkpoint["guide_state_dict"])
 
+        # # reset pres, where mlp for omniglot
+        # guide.where_mlp.seq.linear_modules[-1].weight.data.zero_()
+        # guide.where_mlp.seq.linear_modules[-1].bias = torch.nn.Parameter(
+        #     torch.tensor([2,2,0,0,0, -4,-4,-4,-4,-4], dtype=torch.float,
+        #                  device=device), 
+        #     requires_grad=True) 
+        # guide.pres_mlp.seq.linear_modules[-1].weight.data.zero_()
+        # guide.pres_mlp.seq.linear_modules[-1].bias = torch.nn.Parameter(
+        #     torch.tensor([5], dtype=torch.float, 
+        #                  device=device), 
+        #     requires_grad=True) # when scaling up the reparam likelihood, it's better to use this
+        #     # [6], dtype=torch.float)) # works for stable models
+        # from models.ssp_mlp import PresWherePriorMLP
+        # guide.internal_decoder.gen_pr_wr_mlp = PresWherePriorMLP(
+        #                                         in_dim=266,
+        #                                         z_where_type='5',
+        #                                         z_where_dim=5,
+        #                                         hidden_dim=256,
+        #                                         num_layers=2,
+        #                                         constrain_param=True).to(device)
         model = (generative_model, guide)
 
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -1041,17 +1072,21 @@ class ConvolutionNetwork(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
         self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 3, 1)
+        # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 9, 1)
+        # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 7, 1)
         self.mlp = mlp
         self.dropout = nn.Dropout(0.50)
     
     def forward(self, x):
         x = self.conv1(x)
         x = F.relu(x)
+        # x = F.max_pool2d(x, 2) # addition
         x = self.conv2(x)
         x = F.relu(x)
         x = F.max_pool2d(x, 2)
         x = self.dropout(x)
         x = torch.flatten(x, 1)
+        # print("CNN out dim", x.shape)
         if self.mlp:
             x = self.mlp(x)
         return x
@@ -1178,16 +1213,16 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     if z_where_type=='4_rotate':
         bs = thetas.shape[0]
         # new
-        # rotate
+        # 1 rotate
         angle = thetas[:, 3]
-        angle_cos, angle_sin = (torch.cos(torch.deg2rad(angle)),\
-                                torch.sin(torch.deg2rad(angle)))
+        angle_cos, angle_sin = (torch.cos(angle),\
+                                torch.sin(angle))
         affine_matrix = torch.stack([angle_cos, -angle_sin, torch.empty_like(angle), 
                                      angle_sin, angle_cos, torch.empty_like(angle)], 
                                      dim=0).T.view(-1,2,3)
-        # scale
+        # 2 scale
         affine_matrix *= thetas[:, 0].unsqueeze(-1).unsqueeze(-1)  
-        # translate
+        # 3 translate
         affine_matrix[:, :, 2] = thetas[:, 1:3] 
         return affine_matrix
 
@@ -1195,6 +1230,51 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         # scale = thetas[:, 0:1].expand(-1, 2)
         # translations = thetas[:, 1:3]
         # angle = thetas[:, 3]
+    elif z_where_type == '5':
+        bs = thetas.shape[0]
+        # new
+        # 1 rotate
+        angle = thetas[:, 4]
+        angle_cos, angle_sin = (torch.cos(angle),\
+                                torch.sin(angle))
+        affine_matrix = torch.stack([angle_cos, -angle_sin, torch.empty_like(angle), 
+                                     angle_sin, angle_cos, torch.empty_like(angle)], 
+                                     dim=0).T.view(-1,2,3)
+        # 2 scale
+        affine_matrix[:, :, 0] *= thetas[:, 0].unsqueeze(-1)  
+        affine_matrix[:, :, 1] *= thetas[:, 1].unsqueeze(-1)  
+        # 3 translate
+        affine_matrix[:, :, 2] = thetas[:, 2:4] 
+        return affine_matrix
+        
+        #old
+        scale = thetas[:, 0:2]
+        translations = thetas[:, 2:4]
+        angle = thetas[:, 3]
+    elif z_where_type == '7':
+        # shear
+        sx = thetas[:, 5]
+        sy = thetas[:, 6]
+        
+        # rotate
+        angle = thetas[:, 4]
+        angle_cos, angle_sin = (torch.cos(torch.deg2rad(angle)),\
+                                torch.sin(torch.deg2rad(angle)))
+        affine_matrix = torch.stack([
+                                    angle_cos * (1 + sx * sy) + angle_sin * sx, 
+                                    -angle_sin * (1 + sx * sy) + sx * angle_cos, 
+                                    torch.empty_like(angle), 
+                                    angle_cos * sy + angle_sin, 
+                                    -angle_sin * sy + angle_cos, 
+                                    torch.empty_like(angle)
+                                ], dim=0).T.view(-1,2,3)
+        # 2 scale
+        affine_matrix[:, :, 0] *= thetas[:, 0].unsqueeze(-1)  
+        affine_matrix[:, :, 1] *= thetas[:, 1].unsqueeze(-1)  
+        # 3 translate
+        affine_matrix[:, :, 2] = thetas[:, 2:4] 
+        return affine_matrix
+ 
     elif z_where_type == '4_no_rotate':
         scale = thetas[:, 0:2]
         translations = thetas[:, 2:4]
@@ -1210,10 +1290,6 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         # translations = thetas[:, 1:3]
         # angle = torch.zeros_like(thetas[:, 0]) 
         return affine_matrix
-    elif z_where_type == '5':
-        scale = thetas[:, 0:2]
-        translations = thetas[:, 2:4]
-        angle = thetas[:, 3]
     else:
         raise NotImplementedError
     affine_matrix = get_affine_matrix2d(translations=translations,

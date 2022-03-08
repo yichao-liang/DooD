@@ -244,6 +244,9 @@ def get_args_parser():
         action='store_true',
         help='if specified then True',
     )
+    parser.add_argument('--prior_dependency', type=str, default='wr|wt',
+                        choices=['wr|wt', 'wt|wr'], 
+                        help='dependency between z_where and z_what in prior')
     parser.add_argument(
         '--residual_pixel_count',
         action='store_true',
@@ -343,6 +346,8 @@ def get_args_parser():
                         learnable vector for the z_pres prior prob. The target
                         image is also detached before pres MLP to avoid 
                         influences of REINFORCE to the CNN.''')
+    parser.add_argument('--no_what_post_rnn', action='store_true',)
+    parser.add_argument('--no_pres_post_rnn', action='store_true',)
     parser.add_argument('--only_rsd_ratio_pres', action='store_true',
                         help="only input pres MLP the rsd-pixel ratio")
     # parser.add_argument('--half_1s')

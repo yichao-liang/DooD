@@ -124,6 +124,46 @@ def plot_reconstructions(imgs:torch.Tensor,
                 recon_img = guide_out.canvas[0].expand(n,3,res,res)
         else:
             recon_img = generative_model.renders_imgs(latent)[0].expand(n,3,res,res)
+        
+        cum_stroke_plot = True
+        if cum_stroke_plot:
+            cum_recon_img = generative_model.renders_cum_imgs(latent)[0].cpu()
+            cum_recon_img = cum_recon_img.view(n*n_strks,1,res,res)
+            cum_recon_img = cum_recon_img.repeat(1,3,1,1)
+            # cum_recon_img = cum_recon_img.expand(n*n_strks,3,res,res)
+
+            # Add color to indicate whether its kept
+            # z_pres: originally in [n, n_strkes] -> [n * n_strkes]
+            z_pres_b = latent.z_pres.view(n * n_strks).bool().cpu()
+            cum_recon_img = color_img_edge(imgs=cum_recon_img, z_pres=z_pres_b, 
+                                                            color=pres_clr)
+            cum_recon_img = display_transform(cum_recon_img)
+            # [n*n_strks, 3, res, res]
+            cum_recon_img = batch_add_bounding_boxes_skimage(
+                imgs=cum_recon_img,
+                z_where_mtrx=z_where_mtrx.cpu().view(n*n_strks,2,3),
+                n_objs=torch.ones(n*n_strks),
+                n_strks=1,
+            )
+            cum_recon_img = cum_recon_img * latent.z_pres.view(n*n_strks
+                                                    )[:,None,None,None].cpu()
+            
+            cum_recon_img = cum_recon_img.view(n, n_strks, 3, resize_res,
+                                                              resize_res)
+            cum_recon_img = cum_recon_img.transpose(1,2).reshape(
+                                [n, 3, n_strks * resize_res, resize_res])
+            target_imgs = display_transform(imgs).cpu().expand(
+                                                n, 3, resize_res, resize_res)
+            cum_recon_plot = torch.cat([target_imgs, 
+                                        cum_recon_img], dim=2)
+            cum_recon_plot = make_grid(cum_recon_plot, nrow=nrow)
+            tag = writer_tag
+            if dataset_name is not None:
+                tag = f'{dataset_name}/Cummulative Reconstruction/{writer_tag}/'
+            else:
+                tag = f'Cummulative Reconstruction/{writer_tag}'
+            writer.add_image(tag, cum_recon_plot, epoch)
+
 
         print(f"epoch {epoch}")
         print(np.array(guide_out.z_pms.z_pres.detach().cpu()).round(3))
@@ -288,7 +328,7 @@ def color_img_edge(imgs, z_pres, color):
 
 def add_control_points_plot(gen, latents, writer, epoch=None,
                             writer_tag:bool=True, dataset_name=None):
-    num_shown = 16
+    num_shown = 32
     n = min(num_shown, latents.shape[0])
     num_steps_per_strk = 500
     num_strks_per_img, num_pts_per_strk = latents.shape[1], latents.shape[2]
@@ -298,7 +338,7 @@ def add_control_points_plot(gen, latents, writer, epoch=None,
     latents = latents[:num_shown]
     curves = gen.decoder.sample_curve(latents[:num_shown], steps)
 
-    fig, ax= plt.subplots(2,8,figsize=(18, 4))
+    fig, ax= plt.subplots(4,8,figsize=(18, 4))
 
     # [num_shown, num_strks, num_pts, 2]-> [num_shown, total_pts_num, 2]
     latents = latents.reshape([n, total_pts_num, 2]).cpu()
@@ -311,12 +351,12 @@ def add_control_points_plot(gen, latents, writer, epoch=None,
         ax[i//8][i%8].set_aspect('equal')
         ax[i//8][i%8].axis('equal')
         ax[i//8][i%8].invert_yaxis()
-        im = ax[i//8][i%8].scatter(x=latents[i][:,0],
-                                   y=latents[i][:,1],
-                                    marker='x',
-                                    s=30,c=np.arange(total_pts_num),
-                                            cmap='rainbow')
-        ax[i//8][i%8].scatter(x=curves[i][:,0], y=curves[i][:,1],
+        # im = ax[i//8][i%8].scatter(x=latents[i][:,0],
+        #                            y=latents[i][:,1],
+        #                             marker='x',
+        #                             s=30,c=np.arange(total_pts_num),
+        #                                     cmap='rainbow')
+        im = ax[i//8][i%8].scatter(x=curves[i][:,0], y=curves[i][:,1],
                                                 s=0.1,
                                                 c=-np.arange(num_strks_per_img*
                                                     num_steps_per_strk),
@@ -418,7 +458,7 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     # t-sne z_whats
     util.logging.info("Generating t-sne embeddings...")
     all_z_whats_embedded = TSNE(n_components=2, 
-                                # init='pcacncel a', 
+                                # init='pca', 
                                 learning_rate='auto'
                                 ).fit_transform(all_z_whats)
 
@@ -496,7 +536,8 @@ def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks):
                            [0., 1., 0.],
                            [0., 0., 1.],
                            [1., 1., 0.],
-                           [0., 1., 1.]]).view(5,3,1)
+                           [0., 1., 1.],
+                           [1., 0., 1.]]).view(6,3,1)
     bs, res = imgs.shape[0], imgs.shape[-1]
     imgs = imgs.expand(bs, 3, res, res)
     new_img = imgs.clone()

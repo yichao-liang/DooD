@@ -97,8 +97,8 @@ class GenerativeModel(nn.Module):
         self.res = res
 
     def get_imgs_dist_std(self):
-        # return F.softplus(self.imgs_dist_std) + 1e-6
-        return util.constrain_parameter(self.imgs_dist_std, min=.01, max=1)
+        return F.softplus(self.imgs_dist_std) + 1e-12
+        # return util.constrain_parameter(self.imgs_dist_std, min=.01, max=1)
 
     def control_points_dist(self, h_c=None, bs=[1, 3]):
         '''(z_what Prior) Batched control points distribution

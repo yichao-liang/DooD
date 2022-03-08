@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Independent, Normal, Laplace, Bernoulli
 
+from models.ssp_mlp import *
+
 
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
 ZLogProb = namedtuple("ZLogProb", "z_pres z_what z_where")
@@ -48,6 +50,8 @@ class Guide(nn.Module):
                 no_rnn=False,
                 only_rsd_ratio_pres=False,
                 feature_extractor_type='CNN',
+                no_what_post_rnn=False,
+                no_pres_post_rnn=False,
                 ):
         super().__init__()
         
@@ -76,6 +80,8 @@ class Guide(nn.Module):
         self.detach_rsd_embed = detach_rsd_embed
         self.no_pres_rnn = no_pres_rnn
         self.no_rnn = no_rnn
+        self.no_what_post_rnn = no_what_post_rnn
+        self.no_pres_post_rnn = no_pres_post_rnn
         if no_pres_rnn or no_rnn:
             assert sep_where_pres_net, "need to have seperate where pres net"+\
                 "to get h for zpres prior and renderer_mlp_in"
@@ -87,7 +93,7 @@ class Guide(nn.Module):
             assert use_residual,\
                     "simple_pres requires execution guide and residual"
         self.no_post_rnn = no_post_rnn
-        if no_post_rnn:
+        if no_post_rnn or no_what_post_rnn:
             assert use_residual,\
                     "no_post_rnn requires execution guide and residual"
         self.residual_no_target = residual_no_target
@@ -115,43 +121,63 @@ class Guide(nn.Module):
         # -> res=50, 33856 when [1, 32, 64]; 16928 when [1, 16, 32]
         # -> res=28, 4608 when
         self.feature_extractor_sharing = feature_extractor_sharing
-        if feature_extractor_type == 'reshape':
-            self.img_feature_extractor = lambda x: torch.reshape(
-                                                    x, (x.shape[0], -1))
-            self.feature_extractor_out_dim = 2500
-        else:
-            self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608
-            self.feature_extractor_out_dim = 256
-            self.img_feature_extractor = util.init_cnn(
+        # if feature_extractor_type == 'reshape':
+        #     self.img_feature_extractor = lambda x: torch.reshape(
+        #                                             x, (x.shape[0], -1))
+        #     self.feature_extractor_out_dim = 2500
+        # elif feature_extractor_type == 'MLP':
+        #     in_dim = prod(self.img_dim)
+        #     self.feature_extractor_out_dim = 256
+        #     hid_dim, num_layers = 512, 3
+        #     self.img_feature_extractor = ImageMLP(
+        #                                 in_dim=in_dim,
+        #                                 out_dim=self.feature_extractor_out_dim,
+        #                                 hid_dim=hid_dim,
+        #                                 num_layers=num_layers,
+        #                             )
+        #     if use_residual and not detach_rsd_embed:
+        #         # if detach_rsd_embed, not gradient is produced to learn this
+        #         self.residual_feature_extractor = ImageMLP(
+        #                                 in_dim=in_dim,
+        #                                 out_dim=self.feature_extractor_out_dim,
+        #                                 hid_dim=hid_dim,
+        #                                 num_layers=num_layers,
+        #                             )
+        # else:
+        self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
+        # self.cnn_out_dim = 1568 if self.img_dim[-1] == 50 else 4608
+        # self.cnn_out_dim = 10368 if self.img_dim[-1] == 50 else 4608
+        self.feature_extractor_out_dim = hidden_dim
+        self.img_feature_extractor = util.init_cnn(
+                                            n_in_channels=1,
+                                            n_mid_channels=16,#32, 
+                                            n_out_channels=32,#64,
+                                            cnn_out_dim=self.cnn_out_dim,
+                                            mlp_out_dim=
+                                                self.feature_extractor_out_dim,
+                                            mlp_hidden_dim=hidden_dim,
+                                            num_mlp_layers=1)
+        if not self.feature_extractor_sharing:
+            self.trans_img_feature_extractor = util.init_cnn(
+                                            n_in_channels=1,
+                                            n_mid_channels=16,#32, 
+                                            n_out_channels=32,#64,
+                                            cnn_out_dim=self.cnn_out_dim,
+                                            mlp_out_dim=
+                                                self.feature_extractor_out_dim,
+                                            mlp_hidden_dim=hidden_dim,
+                                            num_mlp_layers=1)
+        if use_residual and not detach_rsd_embed:
+            # if detach_rsd_embed, not gradient is produced to learn this
+            self.residual_feature_extractor = util.init_cnn(
                                                 n_in_channels=1,
                                                 n_mid_channels=16,#32, 
                                                 n_out_channels=32,#64,
                                                 cnn_out_dim=self.cnn_out_dim,
                                                 mlp_out_dim=
-                                                    self.feature_extractor_out_dim,
+                                                self.feature_extractor_out_dim,
                                                 mlp_hidden_dim=hidden_dim,
                                                 num_mlp_layers=1)
-            if not self.feature_extractor_sharing:
-                self.trans_img_feature_extractor = util.init_cnn(
-                                                n_in_channels=1,
-                                                n_mid_channels=16,#32, 
-                                                n_out_channels=32,#64,
-                                                cnn_out_dim=self.cnn_out_dim,
-                                                mlp_out_dim=
-                                                    self.feature_extractor_out_dim,
-                                                mlp_hidden_dim=256,
-                                                num_mlp_layers=1)
-            if use_residual and not detach_rsd_embed:
-                # if detach_rsd_embed, not gradient is produced to learn this
-                self.residual_feature_extractor = util.init_cnn(
-                                                    n_in_channels=1,
-                                                    n_mid_channels=16,#32, 
-                                                    n_out_channels=32,#64,
-                                                    cnn_out_dim=self.cnn_out_dim,
-                                                    mlp_out_dim=
-                                                    self.feature_extractor_out_dim,
-                                                    mlp_hidden_dim=256,
-                                                    num_mlp_layers=1)
 
 
         self.sep_where_pres_net = sep_where_pres_net
@@ -230,7 +256,7 @@ class Guide(nn.Module):
             
             self.only_rsd_ratio_pres = only_rsd_ratio_pres
             if not self.no_post_rnn and not self.no_rnn:
-                if not self.no_pres_rnn:
+                if not self.no_pres_rnn and not self.no_pres_post_rnn:
                     self.pr_mlp_in = ['h']
                     self.pr_mlp_in_dim += self.pr_wr_rnn_hid_dim
                 self.wr_mlp_in = ['h']
@@ -306,7 +332,9 @@ class Guide(nn.Module):
         # 3.2 wt_mlp: instantiated in specific modules
         self.wt_mlp_in = []
         self.wt_mlp_in_dim = 0
-        if not self.no_post_rnn and not self.no_rnn:
+        if (not self.no_post_rnn and 
+            not self.no_rnn and 
+            not self.no_what_post_rnn):
             self.wt_mlp_in = ['h']
             self.wt_mlp_in_dim += self.wt_rnn_hid_dim
         if self.target_in_pos == 'MLP' and not self.residual_no_target:
