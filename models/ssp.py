@@ -11,7 +11,8 @@ from numpy import prod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Independent, Normal, Laplace, Bernoulli
+from torch.distributions import Independent, Normal, Laplace, Bernoulli,\
+    ContinuousBernoulli
 from einops import rearrange
 from kornia.morphology import dilation, erosion
 
@@ -61,7 +62,8 @@ class GenerativeModel(nn.Module):
                                                 sep_where_pres_net=False,
                                                 no_pres_rnn=False,
                                                 no_rnn=False,
-                                                prior_dependency = 'wr|wt',
+                                                prior_dependency='wr|wt',
+                                                bern_img_dist=True,
                                                     ):
         super().__init__()
         self.max_strks = max_strks
@@ -84,6 +86,7 @@ class GenerativeModel(nn.Module):
         self.no_pres_rnn = no_pres_rnn
         self.no_rnn = no_rnn
         self.prior_dependency = prior_dependency
+        self.bern_img_dist = bern_img_dist
 
         # Prior parameters
         self.prior_dist = prior_dist
@@ -404,9 +407,12 @@ class GenerativeModel(nn.Module):
             imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1, 1)
 
         try:
-            dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
-                            reinterpreted_batch_ndims=3
-                        )
+            if self.bern_img_dist:
+                dist = Independent(ContinuousBernoulli(imgs_dist_loc),
+                                                reinterpreted_batch_ndims=3)
+            else:
+                dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
+                                                reinterpreted_batch_ndims=3)
         except ValueError as e:
             print(e, "Invalid scale parameters {imgs_dist_std}")
             breakpoint()
@@ -660,6 +666,14 @@ class GenerativeModel(nn.Module):
         
         # if self.intr_ll: log_likelihood [bs, max_steps]
         # else: [bs]
+        # if self.bern_img_dist:
+        #     imgs = imgs.round()
+        # if self.bern_img_dist:
+        #     rec = self.img_dist(latents=latents, canvas=canvas).mean
+        #     log_likelihood = F.binary_cross_entropy(rec, imgs,reduction='none'
+        #                                             ).sum([2,3,4])
+        # else:
+        imgs = torch.clamp(imgs, min=0., max=1.)
         log_likelihood = self.img_dist(latents=latents, 
                                        canvas=canvas).log_prob(imgs)
 
@@ -1035,6 +1049,7 @@ class Guide(template.Guide):
                         only_rsd_ratio_pres:bool=False,
                         no_what_post_rnn:bool=False,
                         no_pres_post_rnn:bool=False,
+                        bern_img_dist=False,
                 ):
         '''
         Args:
@@ -1109,6 +1124,7 @@ class Guide(template.Guide):
                                             no_rnn=no_rnn,
                                             prior_dependency=prior_dependency,
                                             hidden_dim=hidden_dim,
+                                            bern_img_dist=bern_img_dist,
                                         )
         # Inference networks
         # Style_mlp:

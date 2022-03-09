@@ -17,6 +17,8 @@ def get_args_parser():
                         help="Minimal value for the z_pres Bern param")
     parser.add_argument("--final_beta", default=1, type=float, 
                         help="Minimal value for the beta")
+    parser.add_argument("-ct", action='store_true',
+                        help='continue training')
     return parser
 
 if __name__ == '__main__':
@@ -37,39 +39,37 @@ if __name__ == '__main__':
             'Full-seperated_z',
         ]
 
-    # v1 4 stroks
-    exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-44strk'
     # ---
-    # v1:β2 all steps; β3 works
-    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
-    # v2: β2-4 works 
+    # v0.1: β3 works
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-65strk'
+    # v0.2: β2-4 works 
     # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
     #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
-    # v3: β2 a bit more strokes then needed, 4 collapse
+    # v0.3: β2 a bit more strokes then needed, 4 collapse
     # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
     #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
 
     # v1.1 β3 works better than 4; 4 stops using strokes
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
-    # v2.1 β2-4 all works
+    # v1.2 β2-4 all works
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
     #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
-    # v3.1 β2 works
+    # v1.2 β2 works
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
     #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
     # exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
     
-    # v1.2
+    # v2.1
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-'+\
     #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
     # v2.2
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
     #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
-    # v3.2
+    # v2.3
     # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
     #             'noWtPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
-    # temp
-    # exp_name = 'Full-spDec-sqPrior-dp-t|r-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # v3.1 β8, 9 works well
+    exp_name = 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk'
 
     # # beta 4; 3/4 var 1full
     # exp_name = 'Full' 
@@ -94,13 +94,15 @@ if __name__ == '__main__':
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'./log/full-beta/{model_name}',
+                        '--tb_dir', f'./log/full-beta-1/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',
 
                         '--seed', f'{run_args.seed}',
-                        # '--continue_training',
+                        # '--dataset', 'Omniglot',
                         ])
+            if run_args.ct:
+                args.append('--continue_training')
             subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
             print(f"==> Done training {n}\n")
 

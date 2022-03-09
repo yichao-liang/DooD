@@ -25,19 +25,19 @@ def constrain_z_where(z_where_type, z_where_loc, clamp=False):
         constrain_f = util.constrain_parameter
     if z_where_type == '5':
         z_where_scale_loc = constrain_f(z_where_loc[:, 0:2], min=0.1, max=1)
-        z_where_shift_loc = constrain_f(z_where_loc[:, 2:4], min=-.7, max=.7)
+        z_where_shift_loc = constrain_f(z_where_loc[:, 2:4], min=-.8, max=.8)
         # rot
         z_where_ang_loc = constrain_f(z_where_loc[:, 4:5], 
-                                                    min=-np.pi, max=np.pi)
+                                                    min=-np.pi/4, max=np.pi/4)
         z_where_loc = [z_where_scale_loc, z_where_shift_loc, z_where_ang_loc]
         z_where_loc = torch.cat(z_where_loc, dim=1)
     else:
         # z_where_scale_loc = constrain_f(z_where_loc[:, 0:1], min=.3, max=1)
         z_where_scale_loc = constrain_f(z_where_loc[:, 0:1], min=0.1, max=1)
-        z_where_shift_loc = constrain_f(z_where_loc[:, 1:3], min=-.7, max=.7)
+        z_where_shift_loc = constrain_f(z_where_loc[:, 1:3], min=-.8, max=.8)
         if z_where_type == '4_rotate':
             z_where_ang_loc = constrain_f(z_where_loc[:, 3:4], 
-                                                    min=-np.pi, max=np.pi)
+                                                    min=-np.pi/4, max=np.pi/4)
 
         #   concat
         z_where_loc = [z_where_scale_loc, z_where_shift_loc]
@@ -187,7 +187,7 @@ class PresMLP(nn.Module):
             # [100], dtype=torch.float))
     def forward(self, h):
         z = self.seq(h)
-        z_pres_p = util.constrain_parameter(z, min=1e-12, max=1-(1e-12))
+        z_pres_p = util.constrain_parameter(z, min=1e-9, max=1-(1e-9))
         return z_pres_p
 
 class WhereMLP(nn.Module):

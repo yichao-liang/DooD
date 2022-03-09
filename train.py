@@ -77,11 +77,13 @@ def train(model,
         obs_id = imgs.type(torch.int64)            
         imgs = mws_transform(target)
         fix_img = mws_transform(fix_tar)
-    imgs = util.transform(imgs.to(args.device))
-    fix_img = util.transform(fix_img.to(args.device))
     if dataset_name is not None and dataset_name == "Omniglot":
-        imgs = 1 - imgs
-        fix_img = 1 - fix_img
+        imgs = util.omniglot_transform(1 - imgs)
+        fix_img = util.omniglot_transform(1 - fix_img)
+    if not args.bern_img_dist:
+        imgs = util.blur(imgs)
+        fix_img = util.blur(fix_img)
+    imgs, fix_img = imgs.to(args.device), fix_img.to(args.device)
 
     args.num_iterations = 1e6
     while iteration < args.num_iterations:
@@ -96,11 +98,6 @@ def train(model,
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         for imgs, target in train_loader:
-            # if args.anneal_lr:
-            #     args, optimizer = anneal_lr(args, model, iteration)
-            if args.increase_beta:
-                args = increase_beta(args, model, iteration)
-
             # Special data pre-processing for MWS
             obs_id = None
             if args.model_type == 'MWS':
@@ -108,13 +105,12 @@ def train(model,
                 imgs = mws_transform(target)
             # pre-processing for Omniglot
             if dataset_name is not None and dataset_name == "Omniglot":
-                imgs = 1 - imgs
+                imgs = util.omniglot_transform(1 - imgs)
 
             # prepare the data
-            if iteration < np.inf:
-                imgs = util.transform(imgs.to(args.device))
-            else:
-                imgs = imgs.to(args.device)
+            if iteration < 0 and not args.bern_img_dist: #np.inf:
+                imgs = util.blur(imgs)
+            imgs = imgs.to(args.device)
             # fit on only 1 batch
 
             optimizer.zero_grad()

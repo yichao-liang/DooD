@@ -366,8 +366,8 @@ def get_loss_sequential(generative_model,
 
                 # z posterior samples
                 if log_z_post_samples:
-                    writer.add_histogram(f"{writer_tag}Samples/z_pres",
-                                    z_pres_smpls, iteration)
+                    # writer.add_histogram(f"{writer_tag}Samples/z_pres",
+                    #                 z_pres_smpls, iteration)
                     z_pres = z_pres_smpls.view(prod(shp)).detach().cpu().numpy()
                     z_where = guide_out.z_smpl.z_where.detach().cpu()
                     if guide.z_where_type == '5':

@@ -43,7 +43,8 @@ def main(args):
                                                                       device)
     else:
         model, optimizer, scheduler, stats, data_loader, args =\
-                                util.load_checkpoint(checkpoint_path, device)
+                                util.load_checkpoint(checkpoint_path, device,
+                                            finetune_dataset_name=args.dataset)
     args.num_iterations = num_iterations
 
     # train
@@ -350,6 +351,9 @@ def get_args_parser():
     parser.add_argument('--no_pres_post_rnn', action='store_true',)
     parser.add_argument('--only_rsd_ratio_pres', action='store_true',
                         help="only input pres MLP the rsd-pixel ratio")
+    parser.add_argument('--bern_img_dist', action='store_true',
+                        help='''Using continousBernoulli image distribution vs.
+                        Laplace''')
     # parser.add_argument('--half_1s')
 
     # Baseline network

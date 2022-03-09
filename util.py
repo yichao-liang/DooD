@@ -474,11 +474,15 @@ def get_checkpoint_paths(checkpoint_iteration=-1):
     for path_base in sorted(os.listdir(save_dir)):
         yield get_checkpoint_path_from_path_base(path_base, checkpoint_iteration)
 
-transform = transforms.Compose([
+blur = transforms.Compose([
                        transforms.GaussianBlur(kernel_size=3)
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ])
 
+omniglot_transform = transforms.Compose([
+                    transforms.RandomRotation(30, fill=(0,)),
+                    transforms.Resize([50, 50], antialias=True),
+                    ])
 def init(run_args, device):  
     # Data
     res = run_args.img_res
@@ -495,15 +499,15 @@ def init(run_args, device):
         #                                         use_interpolate=20)
         trn_dataset = datasets.Omniglot(root='./data', background=True,
                 transform=transforms.Compose([
-                    # transforms.Resize([120, 120], antialias=True),
+                    transforms.Resize([120, 120], antialias=True),
                     # transforms.RandomRotation(30, fill=(1,)),
-                    transforms.Resize([res, res], antialias=True),
+                    # transforms.Resize([res, res], antialias=True),
                     transforms.ToTensor()
                     ]),
                     download=True)
         val_dataset = datasets.Omniglot(root='./data', background=False,
                 transform=transforms.Compose([
-                    transforms.Resize([res,res], antialias=True),
+                    transforms.Resize([120, 120], antialias=True),
                     transforms.ToTensor()
                     ]), 
                     download=True)
@@ -667,6 +671,7 @@ def init(run_args, device):
                     dependent_prior=run_args.dependent_prior,
                     prior_dependency=run_args.prior_dependency,
                     hidden_dim=hid_dim,
+                    bern_img_dist=run_args.bern_img_dist,
                                     ).to(device)
         guide = ssp.Guide(
                 max_strks=int(run_args.strokes_per_img),
@@ -712,6 +717,7 @@ def init(run_args, device):
                 no_pres_post_rnn=run_args.no_pres_post_rnn,
                 only_rsd_ratio_pres=run_args.only_rsd_ratio_pres,
                 hidden_dim=hid_dim,
+                bern_img_dist=run_args.bern_img_dist,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -893,7 +899,7 @@ def save_checkpoint(path, model, optimizer, schedular, stats, run_args=None):
     logging.info(f"Saved checkpoint to {path}")
 
 
-def load_checkpoint(path, device):
+def load_checkpoint(path, device, finetune_dataset_name=None):
     scheduler = None
     try:
         checkpoint = torch.load(path, map_location=device)
@@ -901,6 +907,8 @@ def load_checkpoint(path, device):
         print(e)
         print(f"failed loading {path}")
     run_args = checkpoint["run_args"]
+    if finetune_dataset_name != None:
+        run_args.dataset = finetune_dataset_name
     model, optimizer, scheduler, stats, data_loader = init(run_args, device)
 
     if run_args.model_type == 'MWS':
