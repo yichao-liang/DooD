@@ -13,29 +13,6 @@ import test
 from models import base, air
 from models.mws.handwritten_characters.losses import get_mws_loss
 
-# def anneal_lr(args, model, iteration):
-#     if args.model_type == 'Sequential':
-#         lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
-#                                 cur_ite=iteration, anneal_step=2e4,
-#                                 init_ite=1e4)
-#         args.lr = lr
-#         new_optimizer = util.init_optimizer(args, model)
-#         return args, new_optimizer
-#     if args.model_type == 'AIR':
-#         lr = util.anneal_weight(init_val=1e-3, final_val=1e-3,
-#                                 cur_ite=iteration, anneal_step=2e4,
-#                                 init_ite=1e4)
-#         args.lr = lr
-#         new_optimizer = util.init_optimizer(args, model)
-#         return args, new_optimizer
-
-# def increase_beta(args, model, iteration):
-#     if args.increase_beta:
-#         args.beta = util.heat_weight(init_val=1, final_val=args.final_beta,
-#                                         cur_ite=iteration, heat_step=3e4,
-#                                         init_ite=2e4)
-#         return args
-        
 def train(model, 
           optimizer, 
           scheduler, 
@@ -77,35 +54,36 @@ def train(model,
         obs_id = imgs.type(torch.int64)            
         imgs = mws_transform(target)
         fix_img = mws_transform(fix_tar)
-    if dataset_name is not None and dataset_name == "Omniglot":
-        imgs = util.omniglot_transform(1 - imgs)
-        fix_img = util.omniglot_transform(1 - fix_img)
-    if not args.bern_img_dist:
-        imgs = util.blur(imgs)
-        fix_img = util.blur(fix_img)
+    # if not args.bern_img_dist:
+    #     imgs = util.blur(imgs)
+    #     fix_img = util.blur(fix_img)
     imgs, fix_img = imgs.to(args.device), fix_img.to(args.device)
 
     args.num_iterations = 1e6
     while iteration < args.num_iterations:
+        # freeze pres mlp
+        # if iteration == 0:
+        #     for p in guide.pres_mlp.parameters(): 
+        #         p.requires_grad=False
         # Log training reconstruction in Tensorboard
+        ite_since_last_plot = 0
         with torch.no_grad():
             plot.plot_reconstructions(imgs=imgs, guide=guide, 
                                       generative_model=generative_model, 
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset, 
-                                      fix_img=fix_img)
+                                      fix_img=fix_img,
+                                      has_fix_img=True)
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
+        # train_loader = itertools.chain(train_loader, val_loader)
         for imgs, target in train_loader:
             # Special data pre-processing for MWS
             obs_id = None
             if args.model_type == 'MWS':
                 obs_id = imgs.type(torch.int64)            
                 imgs = mws_transform(target)
-            # pre-processing for Omniglot
-            if dataset_name is not None and dataset_name == "Omniglot":
-                imgs = util.omniglot_transform(1 - imgs)
 
             # prepare the data
             if iteration < 0 and not args.bern_img_dist: #np.inf:
@@ -128,6 +106,10 @@ def train(model,
                                                                     iteration)
             writer.add_scalar("Train curves/lr", 
                               optimizer.state_dict()['param_groups'][0]['lr'], 
+                              iteration)
+            if args.anneal_non_pr_net_lr:
+                writer.add_scalar("Train curves/lr.pres", 
+                              optimizer.state_dict()['param_groups'][1]['lr'], 
                               iteration)
             # Check for nans gradients, parameters
             if args.log_grad:
@@ -165,6 +147,7 @@ def train(model,
                 model = generative_model, guide
 
             # Save Checkpoint
+            # if iteration % 100 == 0 or iteration == \
             if iteration % args.save_interval == 0 or iteration == \
                                                             args.num_iterations:
                 save(args, iteration, model, optimizer, scheduler, stats)
@@ -173,15 +156,30 @@ def train(model,
             iteration += 1
             if iteration == args.num_iterations:
                 break
+            # plot every 1k ite if an epoch takes too long
+            ite_since_last_plot += 1
+            if ite_since_last_plot > 500:
+                ite_since_last_plot = 0
+                with torch.no_grad():
+                    plot.plot_reconstructions(imgs=imgs, guide=guide, 
+                                      generative_model=generative_model, 
+                                      args=args, writer=writer, epoch=epoch,
+                                      writer_tag='Train', 
+                                      dataset_name=args.dataset, 
+                                      fix_img=fix_img,
+                                      has_fix_img=True)
+
         epoch += 1
         writer.flush()
 
         # Test every epoch
-        # if val_loader:
-        #     test_model(model, stats, val_loader, args, epoch=epoch, writer=writer)
+        # if epoch % 5 == 0:
+        #     if val_loader:
+        #         test_model(model, stats, val_loader, args, epoch=epoch, writer=writer)
+        # else:
+        stats.tst_losses.append([])
         
         # count epochs when test is not used
-        stats.tst_losses.append([])
 
     writer.close()
     
@@ -359,7 +357,8 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
 
 def save(args, iteration, model, optimizer, scheduler, stats):
     # save iteration.pt
-    if iteration % 10000 == 0:
+    if iteration % 5000 == 0:
+    # if iteration % 100 == 0:
         if args.save_history_ckpt:
             util.save_checkpoint(
                 util.get_checkpoint_path(args, 

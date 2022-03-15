@@ -6,6 +6,7 @@ from matplotlib import offsetbox
 import matplotlib.lines as mlines
 import seaborn as sns
 import numpy as np
+from numpy import prod
 import seaborn as sns
 import torch
 from torchvision.utils import save_image, make_grid
@@ -15,6 +16,7 @@ from skimage.draw import line_aa, line
 from kornia.geometry.transform import invert_affine_transform
 
 import util
+from models.template import ZSample
 from splinesketch.code.bezier import Bezier
 
 
@@ -46,6 +48,23 @@ def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
     writer.add_figure("Stroke count plot", fig, epoch)
     save_imgs_dir = util.get_save_count_swarm_img_dir(args, epoch, suffix='')
     plt.savefig(save_imgs_dir)
+    
+def debug_plot(imgs, recon, writer, ite):
+    '''
+    imgs [ptcs, bs, 1 res, res]
+    recon [ptcs, bs, 1 , res, res]
+    writer
+    ite::int
+    '''
+    imgs = imgs[0]
+    bs, _, res = imgs.shape[:3]
+    recon = recon[0]
+    imgs = imgs.expand(bs, 3, res, res).cpu()
+    recon = recon.expand(bs, 3, res, res).cpu()
+    out_img = torch.cat([imgs, recon], dim=2)
+    img_grid = make_grid(out_img, nrow=nrow)
+
+    writer.add_image("Debug", img_grid, ite)
 
 def plot_reconstructions(imgs:torch.Tensor, 
                          guide:torch.nn.Module, 
@@ -57,7 +76,9 @@ def plot_reconstructions(imgs:torch.Tensor,
                          writer_tag:str='Train',
                          dataset_name:str=None,
                          max_display=32,
-                         fix_img:torch.Tensor=None):
+                         fix_img:torch.Tensor=None,
+                         recons_per_img:int=1,
+                         has_fix_img=False):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
     2) control points
@@ -69,7 +90,12 @@ def plot_reconstructions(imgs:torch.Tensor,
 
     n = min(bs, max_display // 2)
     m = max_display - n
-    imgs = torch.cat((imgs[:n], fix_img[:m]), dim=0)
+    if recons_per_img == 1 or has_fix_img:
+        # during training
+        imgs = torch.cat((imgs[:n], fix_img[:m]), dim=0)
+    else:
+        # in eval
+        imgs = imgs[:max_display]
     n = n + m # final recons to show
     res = imgs.shape[-1]
 
@@ -94,7 +120,12 @@ def plot_reconstructions(imgs:torch.Tensor,
     elif args.model_type == 'Sequential' or args.model_type == 'AIR':
 
         # Get the info for make plots
-        guide_out = guide(imgs, num_particles=1)
+        guide_out = guide(imgs, num_particles=recons_per_img)#, writer=writer)
+        if recons_per_img > 1:
+            # when plotting multiple recons, stepwise progression is not shown
+            plot_multi_recon(imgs, guide_out, args, generative_model, 
+                             dataset_name, writer, writer_tag)
+            return
         latent = guide_out.z_smpl
         z_where_dim = latent.z_where.shape[-1]
 
@@ -124,6 +155,8 @@ def plot_reconstructions(imgs:torch.Tensor,
                 recon_img = guide_out.canvas[0].expand(n,3,res,res)
         else:
             recon_img = generative_model.renders_imgs(latent)[0].expand(n,3,res,res)
+        # debug_plot(imgs.unsqueeze(0), recon_img.unsqueeze(0), writer, 6)
+        # breakpoint()
         
         cum_stroke_plot = True
         if cum_stroke_plot:
@@ -308,6 +341,59 @@ def plot_reconstructions(imgs:torch.Tensor,
     #                             writer_tag=writer_tag, 
     #                             dataset_name=dataset_name,
     #                             )
+
+def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer, 
+                     writer_tag):
+    '''plot multiple recons for one input
+    Args:
+        out: return value of Guide.forward()
+    '''
+
+    res = gen.res
+    latent = guide_out.z_smpl
+    # _, z_what, z_where = latent
+    # z_what = z_what + torch.randn_like(z_what) * .1
+    # z_where = z_where + torch.randn_like(z_where) * .1
+    # latent = ZSample(z_pres=latent.z_pres,
+    #                  z_what=z_what,
+    #                  z_where=z_where)
+
+    ps, bs = shp = latent.z_pres.shape[:2]
+
+    if args.model_type == 'Sequential' and\
+        gen.input_dependent_param:
+        gen.sigma = guide_out.decoder_param.sigma
+        gen.sgl_strk_tanh_slope = \
+                            guide_out.decoder_param.slope[0]
+        gen.add_strk_tanh_slope = \
+                            guide_out.decoder_param.slope[1][:, :, -1]
+    
+    # if args.use_canvas and guide_out.canvas is not None:
+    #         if guide.intr_ll is not None:
+    #             recon_img = guide_out.canvas[0, :, -1].expand(n,3,res,res)
+    #         else:
+    #             recon_img = guide_out.canvas[0].expand(n,3,res,res)
+    # else:
+    imgs = display_transform(imgs.cpu().expand(bs, 3, res, res))
+    recon_img = gen.renders_imgs(latent).expand(*shp,3,res,res)
+    recon_img = recon_img.view(prod(shp), 3, res, res)
+    recon_img = display_transform(recon_img.cpu())
+    recon_img = recon_img.view(ps, bs, 3, resize_res, resize_res)
+    recon_img = recon_img.transpose(0,1).transpose(1,2).reshape(
+                                            bs, 3, ps * resize_res, resize_res)
+    out_img = torch.cat([imgs, recon_img], dim=2)
+
+    img_grid = make_grid(out_img, nrow=nrow)
+    if writer_tag[-1] == '/': writer_tag = writer_tag[:-1]
+    writer_tag = writer_tag + '_' + dataset_name
+    tag = writer_tag
+    if dataset_name is not None:
+        tag = f'{dataset_name}/Multi-reconstruction/{writer_tag}/'
+    else:
+        tag = f'Multi-reconstruction/{writer_tag}'
+    writer.add_image(tag, img_grid)
+
+
 def color_img_edge(imgs, z_pres, color):
     '''
     Args:

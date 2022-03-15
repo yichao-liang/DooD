@@ -386,8 +386,9 @@ def get_args_parser():
                     # default="multimnist",
                     default='MNIST',
                     # default="generative_model",
-                    choices=['MNIST', 'Omniglot', 'generative_model', 
-                    'multimnist'],
+                    choices=['MNIST', 'Omniglot', 'EMNIST', 'KMNIST', 'QMNIST',
+                            'Quickdraw', 'generative_model', 
+                            'multimnist'],
                     type=str, help=" ")
     parser.add_argument("--data-dir", 
                         default="./omniglot_dataset/omniglot/",

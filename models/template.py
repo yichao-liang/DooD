@@ -145,8 +145,7 @@ class Guide(nn.Module):
         #                             )
         # else:
         self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
-        # self.cnn_out_dim = 1568 if self.img_dim[-1] == 50 else 4608
-        # self.cnn_out_dim = 10368 if self.img_dim[-1] == 50 else 4608
+        # self.cnn_out_dim = 3872 if self.img_dim[-1] == 50 else 4608
         self.feature_extractor_out_dim = hidden_dim
         self.img_feature_extractor = util.init_cnn(
                                             n_in_channels=1,
@@ -572,7 +571,7 @@ class Guide(nn.Module):
         if self.constrain_z_pres_param_this_step:
             # this should used be false, but set true occationally from the loss
             # script to encourage samples of 0s.
-            z_pres = Independent(Bernoulli(torch.zeros_like(z_pres_p)+0.4),
+            z_pres = Independent(Bernoulli(torch.ones_like(z_pres_p)),
                                            reinterpreted_batch_ndims=1).sample()
 
         # If previous z_pres is 0, then this z_pres should also be 0.
@@ -596,9 +595,9 @@ class Guide(nn.Module):
         z_where = z_where_post.rsample()
 
         # constrain sample
-        # if not self.constrain_param:
+        # if self.constrain_smpl:
         #     z_where = constrain_z_where(self.z_where_type, 
-        #                                 z_where.view(prod(shp), -1), 
+        #                                 z_where.view(prod(shp), -1),
         #                                 clamp=True)
         #     z_where = z_where.view(*shp, -1)
                                                             
@@ -616,7 +615,7 @@ class Guide(nn.Module):
         # [ptcs, bs, pts_per_strk, 2] 
         z_what = z_what_post.rsample()
         # constrain samples
-        # if not self.constrain_param:
+        # if self.constrain_smpl:
         #     z_what = constrain_z_what(z_what, clamp=True)
 
         # log_prob(z_what): [ptcs, bs, 1]

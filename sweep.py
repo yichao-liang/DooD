@@ -7,6 +7,7 @@ import subprocess
 import argparse
 
 import exp_dict as ed
+import util
 
 def get_args_parser():
     parser = argparse.ArgumentParser(formatter_class=
@@ -19,6 +20,11 @@ def get_args_parser():
                         help="Minimal value for the beta")
     parser.add_argument("-ct", action='store_true',
                         help='continue training')
+    parser.add_argument("-it", default=-1,
+                        type=int, help='''iteration to run test on, default -1
+                        means latest''')
+    parser.add_argument("-m", default='mn',
+                        type=str, help='model code')
     return parser
 
 if __name__ == '__main__':
@@ -40,37 +46,36 @@ if __name__ == '__main__':
         ]
 
     # ---
+    # v3.1 bernoulli: β8, 9 works well
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk'
     # v0.1: β3 works
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-65strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
     # v0.2: β2-4 works 
-    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
-    #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
     # v0.3: β2 a bit more strokes then needed, 4 collapse
-    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-'+\
-    #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
 
     # v1.1 β3 works better than 4; 4 stops using strokes
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
     # v1.2 β2-4 all works
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
-    #             'sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
     # v1.2 β2 works
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-'+\
-    #             'sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
+    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
     # exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
     
     # v2.1
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-'+\
-    #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
-    # v2.2
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
-    #             'noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
-    # v2.3
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-'+\
-    #             'noWtPrPosRnn-normRfLoss-anNonPrLr-6strk-omni'
-    # v3.1 β8, 9 works well
-    exp_name = 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk'
-
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni'
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km'
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em'
+    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd'
+    code_dict = {
+        'mn': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'om': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        'km': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
+        'em': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
+        'qd': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
+    }
+    exp_name = code_dict[run_args.m]
     # # beta 4; 3/4 var 1full
     # exp_name = 'Full' 
     # β4->4/4 collapse; β1->4/4 steps; β3->3collapse 1full; β2->1var; 3full
@@ -85,33 +90,39 @@ if __name__ == '__main__':
     # exp_name = 'AIR'
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
-    # breakpoint()
-    train = True
-    evalulate = False
+    train_not_test = False
+    if train_not_test:
+        train, evaluate = True, False
+    else:
+        train, evaluate = False, True
 
     for n, args in all_exp_args.items():
         model_name = n + f'-β{run_args.beta}-{run_args.seed}'
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'./log/full-beta-1/{model_name}',
+                        '--tb_dir', f'/om/user/ycliang/log/full-{run_args.m}/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',
 
                         '--seed', f'{run_args.seed}',
                         # '--dataset', 'Omniglot',
+                        # '--dataset', 'KMNIST',
+                        # '--dataset', 'Quickdraw',
+                        # '--dataset', 'EMNIST',
                         ])
             if run_args.ct:
                 args.append('--continue_training')
             subprocess.run(['python', 'run.py'] + args)# + ['--continue_training'])
             print(f"==> Done training {n}\n")
 
-        if evalulate:
+        if evaluate:
             print(f"==> Begin evaluating the '{model_name}' model")
 
-            # ckpt_path = util.get_checkpoint_path_from_path_base(model_name, -1)
+            ckpt_path = util.get_checkpoint_path_from_path_base(model_name, 
+                                                                run_args.it)
             subprocess.run(['python', 'test.py', 
-                            # '--ckpt_path', ckpt_path,
+                            '--ckpt_path', ckpt_path,
                             # for old models
                             # '--save_model_name', n])
                             # for new models

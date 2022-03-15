@@ -35,56 +35,90 @@ ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 def init_dataloader(res, dataset, batch_size=64):
     # Dataloader
     # Train dataset
-    transform = transforms.Compose([
-                            # transforms.ToPILImage(mode=None),
+    trn_transform_lst = [
+                            transforms.Resize([120, 120], antialias=True),
+                            transforms.RandomRotation(30, fill=(0,)),
+                            transforms.Resize([res, res], antialias=True),
+                            transforms.ToTensor(),
+                        ]
+    tst_transform_lst = [
                             transforms.Resize([res,res], antialias=True),
                             transforms.ToTensor(),
-                            ])
-    if dataset == "EMNIST":
-        trn_dataset = datasets.EMNIST(root='./data', train=True, split='balanced',
-                            transform=transform, download=True)
-        tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
-                            transform=transform, download=True)
-    elif dataset == "MNIST":
+                        ]
+    if dataset == "EMNIST": # trn 697,932 tst 116,323
+        trn_dataset = datasets.EMNIST(root='./data', train=True, 
+                            split='balanced',
+                            transform=transforms.Compose(trn_transform_lst), 
+                            download=True)
+        tst_dataset = datasets.EMNIST(root='./data', train=False, 
+                            split='balanced',
+                            transform=transforms.Compose(tst_transform_lst), 
+                            download=True)
+    elif dataset == "MNIST": # trn 60k; tst 10k
+        # Get index of trn, val set
+        # num_train = len(trn_dataset)
+        # valid_size = 0.2
+        # indices = list(range(num_train))
+        # np.random.shuffle(indices)
+        # split = int(np.floor(valid_size * num_train))
+        # trn_idx, val_idx = indices[split:], indices[:split]
+        # trn_sampler = SubsetRandomSampler(trn_idx)
+        # val_sampler = SubsetRandomSampler(val_idx)
+        # To only use a subset
+        # idx = torch.logical_or(trn_dataset.targets == 1, 
+        #                        trn_dataset.targets == 2)
+        # trn_dataset.targets = trn_dataset.targets[idx]
+        # trn_dataset.data= trn_dataset.data[idx]
         trn_dataset = datasets.MNIST(root='./data', train=True,
-                            transform=transform, download=True)
+                            transform=transforms.Compose(trn_transform_lst), 
+                            download=True)
         tst_dataset = datasets.MNIST(root='./data', train=False,
-                            transform=transform, download=True)    
-    elif dataset == 'KMNIST':
+                            transform=transforms.Compose(tst_transform_lst), 
+                            download=True)    
+    elif dataset == 'KMNIST': # trn 60k; tst 10k
         trn_dataset = datasets.KMNIST(root='./data', train=True,
-                            transform=transform, download=True)
+                            transform=transforms.Compose(trn_transform_lst), 
+                            download=True)
 
         tst_dataset = datasets.KMNIST(root='./data', train=False,
-                            transform=transform, download=True)
-    elif dataset == 'QMNIST':
+                            transform=transforms.Compose(tst_transform_lst), 
+                            download=True)
+    elif dataset == 'QMNIST': # trn, tst 60k
         trn_dataset = datasets.QMNIST(root='./data', train=True, compat=True,
-                            transform=transform, download=True)
+                            transform=transforms.Compose(trn_transform_lst), 
+                            download=True)
         tst_dataset = datasets.QMNIST(root='./data', train=False, compat=True,
-                            transform=transform, download=True)
-    elif dataset == 'Omniglot':
-        trn_dataset = datasets.Omniglot(root='./data', background=True,
-                            transform=transform, download=True)
-        tst_dataset = datasets.Omniglot(root='./data', background=False,
-                            transform=transform, download=True)        
-    elif dataset == 'Quickdraw':
+                            transform=transforms.Compose(tst_transform_lst), 
+                            download=True)
+    elif dataset == 'Quickdraw': # all: trn 1.38m; tst 345k; 100 cat: .4m, .1m
         from data.QuickDraw_pytorch.DataUtils.load_data import QD_Dataset
-        transform = transforms.Compose([
-                            transforms.ToPILImage(mode=None),
-                            transforms.Resize([res,res], antialias=True),
-                            transforms.ToTensor(),
-                            ])
-
-        trn_dataset = QD_Dataset(mtype="train", transform=transform,
+        trn_dataset = QD_Dataset(mtype="train", 
+                        transform=transforms.Compose([
+                        transforms.ToPILImage(mode=None)] + trn_transform_lst),
                             root="./data/QuickDraw_pytorch/Dataset")
-        tst_dataset = QD_Dataset(mtype="test", transform=transform,
+        tst_dataset = QD_Dataset(mtype="test", 
+                        transform=transforms.Compose([
+                        transforms.ToPILImage(mode=None)] + tst_transform_lst),
                             root="./data/QuickDraw_pytorch/Dataset")
+    elif dataset == 'Omniglot': # trn 19,280; tst 13,180
+        trn_dataset = datasets.Omniglot(root='./data', background=True,
+                        transform=transforms.Compose([
+                        transforms.ToTensor(),
+                        transforms.Lambda(lambda x: 1-x),
+                        transforms.ToPILImage(mode=None)]+ trn_transform_lst), 
+                            download=True)
+        tst_dataset = datasets.Omniglot(root='./data', background=False,
+                        transform=transforms.Compose([
+                        transforms.ToTensor(),
+                        transforms.Lambda(lambda x: 1-x),
+                        transforms.ToPILImage(mode=None)]+ tst_transform_lst), 
+                            download=True)        
     else: raise NotImplementedError
 
     def seed_worker(worker_id):
         worker_seed = torch.initial_seed() % 2**32
         np.random.seed(worker_seed)
         random.seed(worker_seed)
-
     g = torch.Generator()
     g.manual_seed(0)
 
@@ -94,13 +128,13 @@ def init_dataloader(res, dataset, batch_size=64):
                                 num_workers=4,
                                 worker_init_fn=seed_worker, generator=g,)
     
-    return train_loader, test_loader
+    return train_loader, test_loader, trn_dataset, tst_dataset
 
 def init_classification_nets(guide, args, dataset, batch_size):
     # Dataset
     res = guide.res if args.save_model_name == 'MWS' else guide.img_dim[-1]
     # source dataset
-    train_loader, test_loader = init_dataloader(res, dataset, 
+    train_loader, test_loader, _,_ = init_dataloader(res, dataset, 
                                                 batch_size=batch_size)
     # latent variable dataset
     train_loader, test_loader = cluster.get_lv_data_loader(
@@ -441,7 +475,9 @@ def get_save_job_name_from_args(args):
 
 
 def get_save_dir_from_path_base(path_base):
-    return f"save/{path_base}"
+    # return f"save/{path_base}"
+    # to avoid the disk storage issues
+    return f"/om/user/ycliang/save/{path_base}"
 
 
 def get_save_dir(args):
@@ -479,150 +515,43 @@ blur = transforms.Compose([
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ])
 
-omniglot_transform = transforms.Compose([
-                    transforms.RandomRotation(30, fill=(0,)),
-                    transforms.Resize([50, 50], antialias=True),
-                    ])
 def init(run_args, device):  
     # Data
-    res = run_args.img_res
-    # for continue training on omniglot
-    # run_args.dataset = 'Omniglot'
-    if run_args.dataset == 'Omniglot':
-        # data_loader = omniglot_dataset.init_training_data_loader(
-        #                                         run_args.data_dir, 
-        #                                         device=device,
-        #                                         batch_size=run_args.batch_size,
-        #                                         shuffle=False,  
-        #                                         mode="original",
-        #                                         one_substroke='angle',
-        #                                         use_interpolate=20)
-        trn_dataset = datasets.Omniglot(root='./data', background=True,
-                transform=transforms.Compose([
-                    transforms.Resize([120, 120], antialias=True),
-                    # transforms.RandomRotation(30, fill=(1,)),
-                    # transforms.Resize([res, res], antialias=True),
-                    transforms.ToTensor()
-                    ]),
-                    download=True)
-        val_dataset = datasets.Omniglot(root='./data', background=False,
-                transform=transforms.Compose([
-                    transforms.Resize([120, 120], antialias=True),
-                    transforms.ToTensor()
-                    ]), 
-                    download=True)
-        train_loader = DataLoader(trn_dataset,
-                                batch_size=run_args.batch_size, 
-                                num_workers=2,
-                                shuffle=True,
-                                # sampler=trn_sampler
-                                )
+    # res = run_args.img_res
+    train_loader, test_loader, trn_dataset, tst_dataset = init_dataloader(
+                                                        run_args.img_res, 
+                                                        run_args.dataset,
+                                                        run_args.batch_size)
+    data_loader = train_loader, test_loader
 
-        valid_loader = DataLoader(val_dataset,
-                                batch_size=run_args.batch_size,
-                                num_workers=2,
-                                shuffle=True,
-                                # sampler=val_sampler
-                                )
-
-        data_loader = train_loader, valid_loader
-    elif run_args.dataset == 'MNIST':
-        # Training and Testing dataset
-
-        trn_dataset = datasets.MNIST(root='./data', train=True, download=True,
-                transform=transforms.Compose([
-                    transforms.Resize([120, 120], antialias=True),
-                    transforms.RandomRotation(30, fill=(0,)),
-                    transforms.Resize([res, res], antialias=True),
-                    transforms.ToTensor(),
-                #transforms.Normalize((0.1307,), (0.3081,))
-            ]))
-        val_dataset = datasets.MNIST(root='./data', train=False, download=False,
-                transform=transforms.Compose([
-                    transforms.Resize([res,res], antialias=True),
-                    transforms.ToTensor(),
-                #transforms.Normalize((0.1307,), (0.3081,))
-            ]))
-
-        # Get index of trn, val set
-        # num_train = len(trn_dataset)
-        # valid_size = 0.2
-        # indices = list(range(num_train))
-        # np.random.shuffle(indices)
-        # split = int(np.floor(valid_size * num_train))
-        # trn_idx, val_idx = indices[split:], indices[:split]
-
-        # trn_sampler = SubsetRandomSampler(trn_idx)
-        # val_sampler = SubsetRandomSampler(val_idx)
-
-        # To only use a subset
-        # idx = torch.logical_or(trn_dataset.targets == 1, 
-        #                        trn_dataset.targets == 2)
-        # idx = torch.logical_or(trn_dataset.targets == 0, trn_dataset.targets == 8)
-        # idx = trn_dataset.targets == 1
-        # trn_dataset.targets = trn_dataset.targets[idx]
-        # trn_dataset.data= trn_dataset.data[idx]
-
-        # idx = torch.logical_or(val_dataset.targets == 1, 
-        #                        val_dataset.targets == 2)
-        # # idx = val_dataset.targets == 1
-        # val_dataset.targets = val_dataset.targets[idx]
-        # val_dataset.data= val_dataset.data[idx]
-        train_loader = DataLoader(trn_dataset,
-                                batch_size=run_args.batch_size, 
-                                num_workers=2,
-                                shuffle=True,
-                                # sampler=trn_sampler
-                                )
-
-        valid_loader = DataLoader(val_dataset,
-                                batch_size=run_args.batch_size,
-                                num_workers=2,
-                                shuffle=False,
-                                # sampler=val_sampler
-                                )
-
-        # Test dataset
-        # tst_dataset = datasets.MNIST(root='./data', train=False,
-        # tst_dataset = datasets.EMNIST(root='./data', train=False, split='balanced',
-        #                 transform=transforms.Compose([
-        #                     # transforms.RandomRotation(30, fill=(0,)),
-        #                     transforms.Resize([res,res], antialias=True),
-        #                     transforms.ToTensor(),
-        #                     #transforms.Normalize((0.1307,), (0.3081,))
-        #                 ]),
-        #                 download=True)
-        # test_loader = DataLoader(tst_dataset,
-        #         batch_size=run_args.batch_size, shuffle=True, num_workers=4
-        # )
-        if run_args.model_type == 'MWS':
-            from models.mws import handwritten_characters as mws
-            train_loader = mws.data.get_data_loader(trn_dataset.data/255,
-                                                    run_args.batch_size,
-                                                    run_args.device, ids=True)
-            valid_loader = mws.data.get_data_loader(val_dataset.data/255,
-                                                    run_args.batch_size, 
-                                                    run_args.device, 
-                                                    id_offset=len(trn_dataset),
-                                                    ids=True)
-        data_loader = train_loader, valid_loader
-    elif run_args.dataset == 'generative_model':
-        # train and test dataloader
-        data_loader = synthetic.get_data_loader(generative_model, 
-                                                batch_size=run_args.batch_size,
-                                                device=run_args.device)
-    elif run_args.dataset == 'multimnist':
-        keep_classes = ['11', '77', '17', '71',]# '171']
-        data_loader = (multimnist.get_dataloader(keep_classes=keep_classes,
-                                                device=run_args.device,
-                                                batch_size=run_args.batch_size,
-                                                shuffle=True,
-                                                transform=transforms.Compose([
-                    transforms.GaussianBlur(kernel_size=3),
-                    transforms.Resize([28, 28])
-                   ])), None)
-    else:
-        raise NotImplementedError
+    if run_args.model_type == 'MWS':
+        from models.mws import handwritten_characters as mws
+        train_loader = mws.data.get_data_loader(trn_dataset.data/255,
+                                                run_args.batch_size,
+                                                run_args.device, ids=True)
+        test_loader = mws.data.get_data_loader(tst_dataset.data/255,
+                                                run_args.batch_size, 
+                                                run_args.device, 
+                                                id_offset=len(trn_dataset),
+                                                ids=True)
+    data_loader = train_loader, test_loader
+    # elif run_args.dataset == 'generative_model':
+    #     # train and test dataloader
+    #     data_loader = synthetic.get_data_loader(generative_model, 
+    #                                             batch_size=run_args.batch_size,
+    #                                             device=run_args.device)
+    # elif run_args.dataset == 'multimnist':
+    #     keep_classes = ['11', '77', '17', '71',]# '171']
+    #     data_loader = (multimnist.get_dataloader(keep_classes=keep_classes,
+    #                                             device=run_args.device,
+    #                                             batch_size=run_args.batch_size,
+    #                                             shuffle=True,
+    #                                             transform=transforms.Compose([
+    #                 transforms.GaussianBlur(kernel_size=3),
+    #                 transforms.Resize([28, 28])
+    #                ])), None)
+    # else:
+    #     raise NotImplementedError
       
     if run_args.model_type == 'Base':
         # Generative model
@@ -718,6 +647,7 @@ def init(run_args, device):
                 only_rsd_ratio_pres=run_args.only_rsd_ratio_pres,
                 hidden_dim=hid_dim,
                 bern_img_dist=run_args.bern_img_dist,
+                dataset=run_args.dataset,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -837,12 +767,20 @@ def init_optimizer(run_args, model):
              'lr': run_args.bl_lr,
              'weight_decay': run_args.weight_decay,}
             ])
+            patience, threshold = 5000, 30
+            if run_args.dataset == 'EMNIST':
+                patience, threshold = 500, 100
+            if run_args.dataset in ['Omniglot', 'KMNIST', 'Quickdraw']:
+                patience, threshold = 1, 100
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            # for direct training on omniglot
-            # optimizer, mode='max',factor=0.1, patience=2000, threshold=50, 
-            optimizer, mode='max',factor=0.1, patience=5000, threshold=30, 
-            min_lr=[1e-4, 1e-3, 1e-3], threshold_mode='abs'
-            )
+                        optimizer, mode='max',factor=0.1, patience=patience, 
+                        threshold=threshold, threshold_mode='abs', min_lr=[
+                            1e-4, 
+                            1e-3, 
+                            1e-3
+                            ])
+            # lambda1 = lambda epoch: 9*torch.heaviside(torch.tensor(epoch,dtype=int), torch.tensor(-1,dtype=int)) + 1
+            # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda1)
         else:
             optimizer = torch.optim.Adam([
             {

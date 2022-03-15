@@ -20,7 +20,7 @@ from plot import display_transform
 from models.mws.handwritten_characters.train import get_log_p_and_kl
 
 mws_transform = transforms.Resize([50, 50], antialias=True)
-NROW = 8
+NROW = 32
 
 def marginal_likelihoods(model, stats, test_loader, args, 
                         save_imgs_dir=None,
@@ -30,7 +30,8 @@ def marginal_likelihoods(model, stats, test_loader, args,
                         only_marginal_likelihood_evaluation=True,
                         only_reconstruction=False,
                         dataset_derived_std=False,
-                        log_to_file=False):
+                        log_to_file=False,
+                        recons_per_img=1):
     '''Compute the marginal likelihood through IWAE's k samples and log the 
     reconstruction through `writer` and `save_imgs_dir`.
         If `train_loader` and `optimizer` is not None, do some finetuning
@@ -64,12 +65,10 @@ def marginal_likelihoods(model, stats, test_loader, args,
     if dataset_derived_std:
         # use dataset derived std for evaluating marginal likelihood
         ds = test_loader.dataset
-        if dataset_name is not None and dataset_name == "Omniglot":
-            ds = torch.stack([1- img for img, _ in ds], dim=0)
-        else:
-            ds = torch.stack([img for img, _ in ds], dim=0)
-        ds_std = torch.std(ds,dim=0)
-        generative_model.imgs_dist_std = torch.nn.Parameter(ds_std.cuda())
+        ds = torch.stack([img for img, _ in ds], dim=0)
+        ds_var = torch.var(ds,dim=0)
+        imgs_dist_scale = torch.nn.Parameter(torch.sqrt(ds_var/2).cuda())
+        generative_model.imgs_dist_std = imgs_dist_scale
 
     generative_model.eval(); guide.eval()
 
@@ -79,9 +78,6 @@ def marginal_likelihoods(model, stats, test_loader, args,
                     # for mll evaluation
                     imgs = mws_transform(imgs).squeeze(1)
                     obs_id = target
-            if dataset_name is not None and dataset_name == "Omniglot":
-                # inverse black and white
-                imgs = 1 - imgs
 
             imgs = imgs.to(args.device)
 
@@ -171,12 +167,14 @@ def marginal_likelihoods(model, stats, test_loader, args,
                                     epoch=epoch,
                                     writer_tag=f'Test_{args.save_model_name}',
                                     dataset_name=dataset_name,
+                                    recons_per_img=recons_per_img,
                                     )
 
         if log_to_file:
-            if os.path.exists("eval_result.csv"):
+            log_file_name = "eval_mll.csv"
+            if os.path.exists(log_file_name):
                 print("File exist.") 
-                eval_df = pd.read_csv('eval_result.csv', header=0, index_col=0)
+                eval_df = pd.read_csv(log_file_name, header=0, index_col=0)
                 print(eval_df)
             else:
                 eval_df = pd.DataFrame()
@@ -185,12 +183,15 @@ def marginal_likelihoods(model, stats, test_loader, args,
             else:
                 mll = loss_tuple[0].mean().detach().cpu().numpy()
             eval_df = eval_df.append({
-                "Model_name": args.save_model_name,
-                "dataset": dataset_name,
-                "num_samples": k,
-                "marginal likelihood": mll,
-            }, ignore_index=True)
-            eval_df.to_csv("./eval_result.csv")
+                                "model_name": args.save_model_name,
+                                "seed": args.seed,
+                                "source_dataset": args.dataset,
+                                "source_ite": ite_so_far,
+                                "target_dataset": dataset_name,
+                                "num_samples": int(k),
+                                "marginal_likelihood": mll,
+                            }, ignore_index=True)
+            eval_df.to_csv(log_file_name)
         writer.flush()
 
 def stroke_mll_plot(model, val_loader, args, writer, epoch):
@@ -251,20 +252,24 @@ def stroke_mll_plot(model, val_loader, args, writer, epoch):
                              'Label': labels})
     plot.plot_stroke_mll_swarm_plot(plot_data, args, writer, epoch)
     
-def classification_evaluation(guide, args, writer, dataset, model_tag=None,
+def classification_evaluation(guide, args, writer, dataset, stats, 
+                                                            model_tag=None,
                                                             dataset_name=None,
-                                                            batch_size=64):
+                                                            batch_size=64,
+                                                            log_to_file=True,
+                                                        clf_trn_interations=10):
     '''Train two classification models:
     one using the `guide` output; 
     the other using the raw image output
     and log both's accuracy throught `writer`
     '''
+    ite_so_far = len(stats.trn_losses)
     guide_classifier, dataloaders, optimizer, clf_stats = \
                             util.init_classification_nets(guide, args, dataset, 
                                                          batch_size)
     train_loader, test_loader = dataloaders
     log_interval = 100
-    num_iterations = args.clf_trn_interations
+    num_iterations = clf_trn_interations
     iteration = 0 # iterations-so-far
     epoch = 0
     best_accuray, best_epoch = 0, 0
@@ -366,6 +371,28 @@ def classification_evaluation(guide, args, writer, dataset, model_tag=None,
             writer.add_scalar(f"{dataset}/Test/Classification_accuracy", 
                                                     guide_clf_loss, epoch)
             clf_stats.tst_accuracy.append(guide_clf_loss.item())
+            
+        if log_to_file:
+            log_file_name = "eval_clf.csv"
+            if os.path.exists(log_file_name):
+                print("File exist.") 
+                eval_df = pd.read_csv(log_file_name, header=0, index_col=0)
+                print(eval_df)
+            else:
+                eval_df = pd.DataFrame()
+
+            eval_df = eval_df.append({
+                                "model_name": args.save_model_name,
+                                "seed": args.seed,
+                                "source_dataset": args.dataset,
+                                "source_ite": ite_so_far,
+                                "target_dataset": dataset_name,
+                                "target_dataset": dataset_name,
+                                "best_accuracy": best_accuray.detach().cpu().numpy(),
+                                "best_epoch": best_epoch
+                            }, ignore_index=True)
+            eval_df.to_csv(log_file_name)
+
 
 def unconditioned_generation(model, args, writer, in_img):
     '''draw samples conditioned on nothing from the generative model
@@ -403,7 +430,12 @@ def unconditioned_generation(model, args, writer, in_img):
                                           decoder_param=decoder_param,
                                           char_cond_gen=False)
         gen_imgs = gen_out.canvas
-        gen_imgs = display_transform(gen_imgs)
+
+        gen.sigma = decoder_param.sigma
+        gen.sgl_strk_tanh_slope = decoder_param.slope[0]
+        gen.add_strk_tanh_slope = decoder_param.slope[1][:, :, -1]
+        gen_imgs = gen.renders_imgs(gen_out.z_smpl)
+        gen_imgs = display_transform(gen_imgs.squeeze(0))
 
     gen_img_grid = make_grid(gen_imgs, nrow=NROW)
     writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid)
@@ -452,7 +484,6 @@ def character_conditioned_generation(model, args, writer, imgs):
                                                                         dim=0)                                       
     disp_imgs = disp_imgs.transpose(0, 1).reshape(2*bs, 1, 64, 64)
     gen_img_grid = make_grid(disp_imgs, nrow=n_samples+1)
-    breakpoint()
     writer.add_image(f'Character-conditioned Generation', gen_img_grid) 
     return
     
@@ -467,8 +498,8 @@ def get_args_parser():
     
     parser.add_argument("--save_model_name", default=None, type=str, 
                         help='name for ckpt dir')
-    # parser.add_argument("--clf_trn_interations", default=4, type=int, help=" ")
     parser.add_argument("--clf_trn_interations", default=400000, type=int, help=" ")
+    # parser.add_argument("--clf_trn_interations", default=20, type=int, help=" ")
     return parser
 
 if __name__ == "__main__":
@@ -476,6 +507,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Choose the dataset to test on
+    mll_eval = True
+    recon_eval = True
+    clf_eval = True
+    uncon_eval = True
     marginal_likelihood_test_datasets = [
                      "Quickdraw",
                      "MNIST",
@@ -491,6 +526,7 @@ if __name__ == "__main__":
                      "QMNIST", 
                      "KMNIST", 
                      "Quickdraw",
+                    #  "Omniglot", 
                     ]
     
     # Init the models
@@ -509,73 +545,95 @@ if __name__ == "__main__":
     else:
         gen, guide = model
     res = gen.res
-    writer = SummaryWriter(log_dir=f"./log/debug/{args.save_model_name}",)
+    writer = SummaryWriter(log_dir=f"/om/user/ycliang/log/eval/{args.save_model_name}",)
 
-    # for dataset in marginal_likelihood_test_datasets:
-    #     print(f"===> Begin evaluation on {dataset} dataset")
+    for dataset in marginal_likelihood_test_datasets:
 
-    #     # Evaluate marginal likelihood
-    #     train_loader, test_loader = util.init_dataloader(res, dataset, 
-    #                                                      batch_size=64)
-    #     print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
-    #     marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-    #                         args=trn_args, save_imgs_dir=None, epoch=None, 
-    #                         writer=writer, 
-    #                         # k=1, # used for debug why the signs are different
-    #                         k=2, # use for current results
-    #                     train_loader=None, optimizer=None, scheduler=scheduler,
-    #                         # train_loader=train_loader, optimizer=optimizer,
-    #                         dataset_name=dataset,
-    #                         finetune_ite=0,
-    #                         only_marginal_likelihood_evaluation=True,
-    #                         only_reconstruction=False,
-    #                         dataset_derived_std=True,
-    #                         log_to_file=True)
-    #     print(f"===> Done elbo_evalution on {dataset}\n")
+        # Evaluate marginal likelihood
+        if mll_eval or recon_eval:
+            train_loader, test_loader, _,_ = util.init_dataloader(res, dataset, 
+                                                            batch_size=2)
+        if mll_eval:
+            print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
+            marginal_likelihoods(model=model, stats=stats, 
+                            test_loader=test_loader, 
+                            args=trn_args, save_imgs_dir=None, epoch=None, 
+                            writer=writer, 
+                            # k=1, # used for debug why the signs are different
+                            k=200, # use for current results
+                            train_loader=None, 
+                            optimizer=None, scheduler=scheduler,
+                            # train_loader=train_loader, optimizer=optimizer,
+                            dataset_name=dataset,
+                            finetune_ite=0,
+                            only_marginal_likelihood_evaluation=True,
+                            only_reconstruction=False,
+                            dataset_derived_std=True,
+                            log_to_file=True)
+            print(f"===> Done elbo_evalution on {dataset}\n")
         
     #     # train_loader, test_loader = init_dataloader(res, dataset, batch_size=64)
-    #     print(f"===> Begin Reconstruction testing on {dataset}")
-    #     trn_args.save_model_name = args.save_model_name
-    #     marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
-    #                         args=trn_args, save_imgs_dir=None, epoch=None, 
-    #                         writer=writer, k=1,
-    #                         train_loader=None, optimizer=None,
-    #                         dataset_name=dataset, 
-    #                         only_marginal_likelihood_evaluation=False,
-    #                         only_reconstruction=True)
-    #     print(f"===> Done Reconstruction on {dataset}\n")
+        if recon_eval:
+            print(f"===> Begin Reconstruction testing on {dataset}")
+            trn_args.save_model_name = args.save_model_name
+            marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+                                args=trn_args, save_imgs_dir=None, epoch=None, 
+                                writer=writer, k=1,
+                                train_loader=None, optimizer=None,
+                                dataset_name=dataset, 
+                                only_marginal_likelihood_evaluation=False,
+                                only_reconstruction=True)
+            print(f"===> Done Reconstruction on {dataset}\n")
 
-    #     # Evaluate classification
-    # for dataset in clf_test_datasets:
-    #     # train_loader, test_loader = util.init_dataloader(res, dataset, 
-    #     #                                                  batch_size=64)
-    #     print(f"===> Begin Classification evaluation on {dataset}")
-    #     classification_evaluation(guide, args, writer, dataset, 
-    #                                 dataset_name=dataset, batch_size=64)    
-    #     print(f"===> Done clf_evaluation on {dataset}\n")
-            
-    #     # Character-conditioned generation
-    #     # Alphabet-conditioned generation
-    #     # print(f"===> Done testing on {dataset} dataset \n\n")
+            # print(f'===> Generating multiple parse for a data')
+            # trn_args.save_model_name = args.save_model_name
+            # marginal_likelihoods(model=model, stats=stats, test_loader=test_loader, 
+            #                     args=trn_args, save_imgs_dir=None, epoch=None, 
+            #                     writer=writer, k=1,
+            #                     train_loader=None, optimizer=None,
+            #                     dataset_name=dataset, 
+            #                     only_marginal_likelihood_evaluation=False,
+            #                     only_reconstruction=True,
+            #                     recons_per_img=10)
+            # print(f'===> Done generating multiple parse for a data')
+
+    # Evaluate classification
+    if clf_eval:
+        for dataset in clf_test_datasets:
+            train_loader, test_loader, _,_ = util.init_dataloader(res, dataset, 
+                                                             batch_size=64)
+            print(f"===> Begin Classification evaluation on {dataset}")
+            classification_evaluation(guide, trn_args, writer, dataset, stats=stats, 
+                                        dataset_name=dataset, batch_size=64,
+                                clf_trn_interations=args.clf_trn_interations)    
+            print(f"===> Done clf_evaluation on {dataset}\n")
+                
+            # Character-conditioned generation
+            # Alphabet-conditioned generation
+            # print(f"===> Done testing on {dataset} dataset \n\n")
 
     # Unconditioned generation
-    num_to_sample = 64
-    train_loader, _ = util.init_dataloader(res, 'MNIST', batch_size=64)
-    in_img, n = [], 0
-    for imgs, _ in train_loader:
-        imgs = imgs.to(device)
-        in_img.append(imgs)
-        n += imgs.shape[0]
-        if n >= num_to_sample:
-            in_img = torch.cat(in_img, dim=0)
-            break
+    if uncon_eval:
+        num_to_sample = 64
+        train_loader, _, _, _ = util.init_dataloader(res, trn_args.dataset, 
+                                                    batch_size=num_to_sample)
+        in_img, _ = next(iter(train_loader))
+        in_img = in_img.to(device)
+        # in_img, n = [], 0
+        # for imgs, _ in train_loader:
+        #     imgs = imgs.to(device)
+        #     in_img.append(imgs)
+        #     n += imgs.shape[0]
+        #     if n >= num_to_sample:
+        #         in_img = torch.cat(in_img, dim=0)
+        #         break
 
-    print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
-    unconditioned_generation(model=model, 
-                             args=trn_args,
-                             writer=writer, 
-                             in_img=in_img[:num_to_sample])
-    print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
+        print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
+        unconditioned_generation(model=model, 
+                                args=trn_args,
+                                writer=writer, 
+                                in_img=in_img[:num_to_sample])
+        print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
 
     # print(f"===> Begin Character-conditioned generation on with {args.save_model_name}")
     # character_conditioned_generation(model=model,

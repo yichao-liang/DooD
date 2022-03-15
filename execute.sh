@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=
+#SBATCH --job-name=ev
 #SBATCH --partition=tenenbaum
 #SBATCH --qos=tenenbaum
 #SBATCH --nodes=1

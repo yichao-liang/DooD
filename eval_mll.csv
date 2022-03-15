@@ -1,0 +1,7 @@
+,model_name,seed,source_dataset,target_dataset,num_samples,marginal_likelihood,source_ite
+0,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,Quickdraw,2,843.9588,200001.0
+1,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,MNIST,2,513.36127,200001.0
+2,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,KMNIST,2,884.6036,200001.0
+3,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,EMNIST,2,680.22986,200001.0
+4,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,QMNIST,2,513.7653,200001.0
+5,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,Omniglot,2,515.3079,200001.0

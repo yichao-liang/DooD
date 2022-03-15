@@ -106,8 +106,6 @@ def make_lv_dataset(lv_path, guide, dataloaders,
         if model_name == 'MWS':
             imgs = imgs.squeeze(1)
             obs_id = ys
-        if dataset_name != None and dataset_name == 'Omniglot':
-            imgs = 1 - imgs
         bs = imgs.shape[0]
         imgs = imgs.cuda()
 

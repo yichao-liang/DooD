@@ -136,35 +136,11 @@ full_no_canvas.remove('--use_canvas')
 exp_dict = {
     # Mar 9
     # v3.1: based on v0.1, uses continousBernoulli img dist; β9
-    'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
             '--log_param',
-            '--detach_canvas_so_far', # detachRsdNotRsdEm
-            # '--no_pres_rnn',
-            '--no_pres_post_rnn', # noPrPosRnn
-
-            '--use_residual', # detachRsdNotRsdEm
-            '--residual_pixel_count', # detachRsdNotRsdEm
-            # '--detach_rsd_embed', #detachRsdNotRsdEm
-            '--update_reinforce_loss', # normRfLoss
-            '--sep_where_pres_net', # sepPrWrNet
-            '--dependent_prior', # dp
-            '--prior_dependency', 'wt|wr', # t|r
-            # '--save_history_ckpt',
-            '--strokes_per_img', '6', # 6strk
-            # '--residual_no_target', # noTarget
-            # '--no_what_post_rnn', # noWtPrPosRnn
-            '--bern_img_dist', # bern
-         ],
-    # Mar 6
-    # v2.1: train directly on omniglot
-    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni': basic_full_model +\
-        [
-            '--anneal_lr', # anNonPrLr
-            '--anneal_non_pr_net_lr', # anNonPrLr
-            # '--log_param',
             '--detach_canvas_so_far', # detachRsdNotRsdEm
             # '--no_pres_rnn',
             '--no_pres_post_rnn', # noPrPosRnn
@@ -180,8 +156,131 @@ exp_dict = {
             '--strokes_per_img', '6', # 6strk
             # '--residual_no_target', # noTarget
             # '--no_what_post_rnn', # noWtPrPosRnn
-            "--z_where_type", '5', #5wr
+            '--bern_img_dist', # bern
+         ],
+    # Mar 6
+    # v2.1: train directly on omniglot
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            # '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wr|wt', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            # "--z_where_type", '5', #5wr
+            '--dataset', 'EMNIST',
+            # '--lr', '1e-4',
+         ],
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            # '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wr|wt', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            # "--z_where_type", '5', #5wr
+            '--dataset', 'KMNIST',
+            # '--lr', '1e-4',
+         ],
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            # '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wr|wt', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            # "--z_where_type", '5', #5wr
+            '--dataset', 'Quickdraw',
+            # '--lr', '1e-4',
+         ],
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            # '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wr|wt', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            # "--z_where_type", '5', #5wr
             '--dataset', 'Omniglot',
+            # '--lr', '1e-4',
+         ],
+    # 2.1.2
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-consPr': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            # '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wr|wt', # t|r
+            # '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            # "--z_where_type", '5', #5wr
+            '--dataset', 'Omniglot',
+            '--constrain_z_pres_param',
+            # '--lr', '1e-4',
          ],
     # v2.2
     'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk-omni': basic_full_model +\
@@ -233,7 +332,7 @@ exp_dict = {
          ],
     # Mar 5
     # v1.1 # use 5dim z_where
-    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -256,7 +355,7 @@ exp_dict = {
             "--z_where_type", '5', #5wr
          ],
     # v1.1 44strk
-    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-44strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-44strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -280,7 +379,7 @@ exp_dict = {
             "--z_where_type", '5', #5wr
          ],
     # v1.2
-    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -303,7 +402,7 @@ exp_dict = {
             "--z_where_type", '5', #5wr
          ],
     # v1.3
-    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -326,7 +425,7 @@ exp_dict = {
             "--z_where_type", '5', #5wr
          ],
     # current best model v0.1; β3
-    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-65strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -341,14 +440,14 @@ exp_dict = {
             '--update_reinforce_loss', # normRfLoss
             '--sep_where_pres_net', # sepPrWrNet
             '--dependent_prior', # dp
-            '--prior_dependency', 'wr|wt', # t|r
-            # '--save_history_ckpt',
+            '--prior_dependency', 'wt|wr', # t|r
+            '--save_history_ckpt',
             '--strokes_per_img', '6', # 6strk
             # '--residual_no_target', # noTarget
             # '--no_what_post_rnn', # noWtPrPosRnn
          ],
     # v0.2; β2
-    'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-65strk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr
@@ -370,7 +469,7 @@ exp_dict = {
             # '--no_what_post_rnn', # noWtPrPosRnn
          ],
     # v0.3; β2
-    'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-65eestrk': basic_full_model +\
+    'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65eestrk': basic_full_model +\
         [
             '--anneal_lr', # anNonPrLr
             '--anneal_non_pr_net_lr', # anNonPrLr

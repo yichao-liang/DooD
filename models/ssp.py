@@ -72,7 +72,8 @@ class GenerativeModel(nn.Module):
         self.maxnorm = maxnorm
         self.sgl_strk_tanh = sgl_strk_tanh
         self.add_strk_tanh = add_strk_tanh
-        self.constrain_param = constrain_param
+        # self.constrain_param = constrain_param
+        self.constrain_smpl = not constrain_param
         self.intr_ll = intermediate_likelihood
         if self.intr_ll == "Geom":
             self.intr_ll_geo_p = torch.nn.Parameter(torch.tensor(-10.), 
@@ -309,8 +310,9 @@ class GenerativeModel(nn.Module):
             # else:
             _, loc, std = self.gen_pr_wr_mlp(mlp_in)
             loc, std = loc.squeeze(-1), std.squeeze(-1)
-            # if not self.constrain_param:
-            #     loc, std = constrain_z_where(self.z_where_type, loc, std)
+            # if self.constrain_smpl:
+            #     loc = constrain_z_where(self.z_where_type, 
+            #                             loc,)
 
             # added to keep prior from being to high (positive)
             # so to use it to limit the number of steps.
@@ -833,9 +835,9 @@ class GenerativeModel(nn.Module):
             imgs = self.img_dist(latents).sample()
 
         return GenReturn(z_smpl=ZSample(
-                                    z_pres=z_pres_smpl,
-                                    z_what=z_what_smpl,
-                                    z_where=z_where_smpl,),
+                                    z_pres=z_pres_smpl.unsqueeze(0),
+                                    z_what=z_what_smpl.unsqueeze(0),
+                                    z_where=z_where_smpl.unsqueeze(0),),
                         canvas=canvas)
 
     def generation_step(self, p_state, canvas, z_pms=None, 
@@ -1050,6 +1052,7 @@ class Guide(template.Guide):
                         no_what_post_rnn:bool=False,
                         no_pres_post_rnn:bool=False,
                         bern_img_dist=False,
+                        dataset=None,
                 ):
         '''
         Args:
@@ -1093,7 +1096,8 @@ class Guide(template.Guide):
                 no_pres_post_rnn=no_pres_post_rnn,
                 )
         # Parameters
-        self.constrain_param = constrain_param
+        # self.constrain_param = constrain_param
+        self.constrain_smpl = not constrain_param
         self.sgl_strk_tanh = sgl_strk_tanh
         self.add_strk_tanh = add_strk_tanh
         self.render_at_the_end = render_at_the_end
@@ -1134,10 +1138,14 @@ class Guide(template.Guide):
                                   z_where_type=self.z_where_type,
                                   z_where_dim=self.z_where_dim,
                                   hidden_dim=hidden_dim,
-                                  num_layers=num_mlp_layers,) 
+                                  num_layers=num_mlp_layers,
+                                  dataset=dataset,
+                                  constrain_param=constrain_param,
+                                  ) 
             self.pres_mlp = PresMLP(in_dim=self.pr_mlp_in_dim,
                                 hidden_dim=hidden_dim,
-                                num_layers=num_mlp_layers)
+                                num_layers=num_mlp_layers,
+                                dataset=dataset)
         else:
             self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
@@ -1157,16 +1165,19 @@ class Guide(template.Guide):
                                       num_layers=num_mlp_layers,
                                       maxnorm=self.maxnorm,
                                       sgl_strk_tanh=self.sgl_strk_tanh,
-                                      spline_decoder=spline_decoder)
+                                      spline_decoder=spline_decoder,
+                                      dataset=dataset,
+                                      )
 
         self.wt_mlp = WhatMLP(in_dim=self.wt_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
                                   hid_dim=self.wt_rnn_hid_dim,
                                   num_layers=num_mlp_layers,
-                                  constrain_param=constrain_param
+                                  constrain_param=constrain_param,
+                                  dataset=dataset,
                                   )
 
-    def forward(self, imgs, num_particles=1):
+    def forward(self, imgs, num_particles=1):#, writer=None):
         '''
         Args: 
             img: [bs, 1, H, W]
@@ -1216,7 +1227,8 @@ class Guide(template.Guide):
             # state.z_pres: [ptcs, bs, 1]
             mask_prev[:, :, t] = state.z_pres.squeeze()
 
-            if self.constrain_z_pres_param_this_ite and t >= 2:
+            if self.constrain_z_pres_param_this_ite:
+            # if t==0:
                 self.constrain_z_pres_param_this_step = True
                 # some experimental condition
             else: self.constrain_z_pres_param_this_step = False
@@ -1301,6 +1313,8 @@ class Guide(template.Guide):
                                         slope=add_strk_tanh_slope[:, :, t-1])
                     if self.detach_canvas_so_far:
                         canvas = canvas.detach()
+                    # from plot import debug_plot as dp
+                    # dp(imgs, canvas, writer, t)
                 else:
                     canvas_so_far = (canvas[:, :, t:t+1] +
                                      canvas_step.unsqueeze(2))

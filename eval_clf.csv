@@ -1,0 +1,6 @@
+,model_name,seed,source_dataset,source_ite,target_dataset,best_accuracy,best_epoch
+0,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,200001.0,EMNIST,0.025227962,1.0
+1,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,200001.0,MNIST,0.13385715,1.0
+2,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,200001.0,QMNIST,0.128625,1.0
+3,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,200001.0,KMNIST,0.10957143,1.0
+4,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-0,0,Omniglot,200001.0,Quickdraw,0.1077,1.0

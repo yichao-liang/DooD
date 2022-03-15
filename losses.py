@@ -36,7 +36,10 @@ def get_loss_sequential(generative_model,
         c, v, alpha: parameters for NVIL algorithm for centering, normalizing
             the REINFORCE learning signals.
     '''
-    if args.constrain_z_pres_param and iteration > 9001 and iteration < 14000:
+    # beta=3
+    if iteration >= 60000:
+        guide.wt_mlp.more_range, guide.where_mlp.more_range = True, True
+    if args.constrain_z_pres_param and iteration < 10000:
         # the second clause is some experimental condition
         guide.constrain_z_pres_param_this_ite = True
     else: guide.constrain_z_pres_param_this_ite = False
@@ -245,6 +248,7 @@ def get_loss_sequential(generative_model,
 
             if args.log_param:
                 log_z_post_samples = True
+                z_pres = z_pres_smpls.view(prod(shp)).detach().cpu().numpy()
                 # this includes: renderer parameters, prior parameters,
                 # posterior parameters and posterior samples
                 # renderer parameters
@@ -267,10 +271,11 @@ def get_loss_sequential(generative_model,
                 
                 # z prior parameters
                 # if generative_model.prior_dist == 'Sequential':
+                #     pr_pri_p = guide.internal_decoder.z_pres_p.detach().cpu()
+                #     pr_pri_p = pr_pri_p.view(prod(shp), -1).numpy()[z_pres==1]
                 #     writer.add_histogram(
                 #                 f"{writer_tag}Parameters/z_pres_prior.p",
-                #                 guide.internal_decoder.z_pres_p.detach(), 
-                #                 iteration)
+                #                 pr_pri_p, iteration)
                 #     writer.add_histogram(
                 #                 f"{writer_tag}Parameters/z_what_prior.loc",
                 #                 guide.internal_decoder.z_what_loc.detach(), 
@@ -279,10 +284,13 @@ def get_loss_sequential(generative_model,
                 #                 f"{writer_tag}Parameters/z_what_prior.std",
                 #                 guide.internal_decoder.z_what_std.detach(), 
                 #                 iteration)
-                #     writer.add_histogram(
-                #             f"{writer_tag}Parameters/z_where_prior.loc.scale",
-                #             guide.internal_decoder.z_where_loc.detach()[:, 0], 
-                #             iteration)
+                    # wr_pri_scale_mean = guide.internal_decoder.z_where_loc.\
+                    #                                 detach()[:, :, :, 0].cpu()
+                    # wr_pri_scale_mean = wr_pri_scale_mean.view(prod(shp), -1
+                    #                                     ).numpy()[z_pres==1]
+                    # writer.add_histogram(
+                    #         f"{writer_tag}Parameters/z_where_prior.scale.mean",
+                    #         wr_pri_scale_mean, iteration)
                 #     writer.add_histogram(
                 #             f"{writer_tag}Parameters/z_where_prior.loc.shift",
                 #             guide.internal_decoder.z_where_loc.detach()[:, 1:3], 
@@ -368,7 +376,6 @@ def get_loss_sequential(generative_model,
                 if log_z_post_samples:
                     # writer.add_histogram(f"{writer_tag}Samples/z_pres",
                     #                 z_pres_smpls, iteration)
-                    z_pres = z_pres_smpls.view(prod(shp)).detach().cpu().numpy()
                     z_where = guide_out.z_smpl.z_where.detach().cpu()
                     if guide.z_where_type == '5':
                         z_where_scale = z_where[:, :, :, 0:2].view(prod(shp),-1
@@ -385,6 +392,8 @@ def get_loss_sequential(generative_model,
                         if guide.z_where_type == '4_rotate':
                             z_where_rot = z_where[:, :, :, 3].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]   
+                    z_what = guide_out.z_smpl.z_what.detach().cpu()
+                    z_what = z_what.view(prod(shp),-1).numpy()[z_pres==1]
                     if z_pres.sum() > 0:
                         writer.add_histogram(f"{writer_tag}Samples/z_where.scale",
                                                     z_where_scale, iteration)
@@ -393,8 +402,8 @@ def get_loss_sequential(generative_model,
                         if guide.z_where_type in ['5', '4_rotate']:
                             writer.add_histogram(f"{writer_tag}Samples/z_where.rotate",
                                                     z_where_rot, iteration)
-                    # writer.add_histogram(f"{writer_tag}Samples/z_what",
-                    #                 guide_out.z_smpl.z_what.detach(), iteration)
+                        writer.add_histogram(f"{writer_tag}Samples/z_what",
+                                                            z_what, iteration)
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
     return SequentialLoss(overall_loss=loss, 
