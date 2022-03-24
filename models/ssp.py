@@ -418,66 +418,69 @@ class GenerativeModel(nn.Module):
                                     pri_wr.view(prod(bs), -1)], dim=-1)
             if self.use_bezier_rnn:
                 pi, loc, std, cor = self.bezier_rnn(mlp_in)
-                pi = pi.view(*bs, pts_per_strk, n_comp)
-                loc = loc.view([*bs, pts_per_strk, n_comp, 2])
-
-                if self.correlated_latent:
-                    cor = cor.view([*bs, pts_per_strk, n_comp])
-                    tril = torch.diag_embed(std)
-                    tril[:, :, :, 1, 0] = cor
-                    tril = tril.view([*bs, pts_per_strk, n_comp, 2, 2])
-                    
-                    if sample or self.constrain_var:
-                        print("cons what")
-                        cov = tril @ tril.transpose(-1,-2)
-                        cov = cov * .01
-                        # print("what cov", cov)
-                        tril = torch.linalg.cholesky(cov, upper=False)
-
-                    comp = MultivariateNormal(loc=loc, scale_tril=tril)
-                    mix = Categorical(logits=pi)
-                    dist = Independent(MixtureSameFamily(mix, comp),
-                                    reinterpreted_batch_ndims=1)
-                else:
-                    std = std.view([*bs, pts_per_strk, n_comp, 2])
-                    comp = Independent(Normal(loc,std),
-                                    reinterpreted_batch_ndims=1)
-                    mix = Categorical(logits=pi)
-                    dist = Independent(MixtureSameFamily(mix, comp),
-                                    reinterpreted_batch_ndims=1)
             else:
                 pi, loc, std, cor = self.gen_wt_mlp(mlp_in)
 
-                # [bs, pts_per_strk, 2]
-                loc = loc.view([*bs, n_comp, pts_per_strk, 2])
-                std = std.view([*bs, n_comp, pts_per_strk, 2])
-                # [prod(bs), pts_per_strk, 2, 2]
+            pi = pi.view(*bs, pts_per_strk, n_comp)
+            loc = loc.view([*bs, pts_per_strk, n_comp, 2])
 
-                if self.correlated_latent:
-                    tril = torch.diag_embed(std.view(
-                                            prod(bs)*n_comp, pts_per_strk, -1))
-                    tril[:, :, 1, 0] = cor.reshape(prod(bs)*n_comp, 
-                                                   pts_per_strk,)
-                    tril = tril.view([*bs, n_comp, pts_per_strk, 2, 2])
+            if self.correlated_latent:
+                cor = cor.view([*bs, pts_per_strk, n_comp])
+                tril = torch.diag_embed(std)
+                tril[:, :, :, 1, 0] = cor
+                tril = tril.view([*bs, pts_per_strk, n_comp, 2, 2])
+                
+                if sample or self.constrain_var:
+                    print("cons what")
+                    cov = tril @ tril.transpose(-1,-2)
+                    cov = cov * .01
+                    # print("what cov", cov)
+                    tril = torch.linalg.cholesky(cov, upper=False)
+
+                comp = MultivariateNormal(loc=loc, scale_tril=tril)
+                mix = Categorical(logits=pi)
+                dist = Independent(MixtureSameFamily(mix, comp),
+                                reinterpreted_batch_ndims=1)
+            else:
+                std = std.view([*bs, pts_per_strk, n_comp, 2])
+                comp = Independent(Normal(loc,std),
+                                reinterpreted_batch_ndims=1)
+                mix = Categorical(logits=pi)
+                dist = Independent(MixtureSameFamily(mix, comp),
+                                reinterpreted_batch_ndims=1)
+            # else:
+            #     pi, loc, std, cor = self.gen_wt_mlp(mlp_in)
+
+            #     # [bs, pts_per_strk, 2]
+            #     loc = loc.view([*bs, n_comp, pts_per_strk, 2])
+            #     std = std.view([*bs, n_comp, pts_per_strk, 2])
+            #     # [prod(bs), pts_per_strk, 2, 2]
+
+            #     if self.correlated_latent:
+            #         tril = torch.diag_embed(std.view(
+            #                                 prod(bs)*n_comp, pts_per_strk, -1))
+            #         tril[:, :, 1, 0] = cor.reshape(prod(bs)*n_comp, 
+            #                                        pts_per_strk,)
+            #         tril = tril.view([*bs, n_comp, pts_per_strk, 2, 2])
 
 
-                    if sample or self.constrain_var:
-                        print("cons what")
-                        cov = tril @ tril.transpose(-1,-2)
-                        print("what cov", cov)
-                        cov = cov * .01
-                        tril = torch.linalg.cholesky(cov, upper=False)
+            #         if sample or self.constrain_var:
+            #             print("cons what")
+            #             cov = tril @ tril.transpose(-1,-2)
+            #             print("what cov", cov)
+            #             cov = cov * .01
+            #             tril = torch.linalg.cholesky(cov, upper=False)
 
-                    comp = Independent(
-                                MultivariateNormal(loc=loc, scale_tril=tril), 
-                            reinterpreted_batch_ndims=1)
-                else:
-                    comp = Independent(Normal(
-                            loc, std),
-                        reinterpreted_batch_ndims=2)
+            #         comp = Independent(
+            #                     MultivariateNormal(loc=loc, scale_tril=tril), 
+            #                 reinterpreted_batch_ndims=1)
+            #     else:
+            #         comp = Independent(Normal(
+            #                 loc, std),
+            #             reinterpreted_batch_ndims=2)
 
-                mix = Categorical(logits=pi.view(*bs, -1))
-                dist = MixtureSameFamily(mix, comp)
+            #     mix = Categorical(logits=pi.view(*bs, -1))
+            #     dist = MixtureSameFamily(mix, comp)
 
         elif self.prior_dist == "Independent":
             loc, std = self.pts_loc.expand(*bs, self.pts_per_strk, 2), \

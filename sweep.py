@@ -105,7 +105,7 @@ if __name__ == '__main__':
     # exp_name = 'AIR'
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
-    train_not_test = False
+    train_not_test = True
     if train_not_test:
         train, evaluate = True, False
     else:

@@ -461,13 +461,15 @@ class WhatPriorMLP(nn.Module):
         self.seq = util.init_mlp(in_dim=in_dim, 
                                 out_dim=
                         # mix_weight + pts loc, std + pts cor
-                n_comp + n_comp * pts_per_strk * 2 * 2 + n_comp * pts_per_strk,
+                                    n_comp * pts_per_strk +
+                                    n_comp * pts_per_strk * 2 * 2 +
+                                    n_comp * pts_per_strk,  
                                 hidden_dim=hid_dim,
                                 num_layers=num_layers)
         self.seq.linear_modules[-1].weight.data.zero_()
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                     # mix_weight
-                    [.1] * n_comp +
+                    [.1] * n_comp * pts_per_strk +
                     # loc: init at .5 + randn noise after the sigmoid
                     (torch.randn(n_comp*pts_per_strk*2) * .01).tolist() +
                     # std: init at .2 after the sigmoid
@@ -478,30 +480,33 @@ class WhatPriorMLP(nn.Module):
 
     def forward(self, h):
         '''
-        logits = [bs, n_comp]
-        all_loc, all_std [bs, n_comp, pts_per_strk * 2]
-        all_cor [bs, n_comp, pts_per_strk]
+        old:
+            logits = [bs, n_comp]
+            all_loc, all_std [bs, n_comp, pts_per_strk * 2]
+            all_cor [bs, n_comp, pts_per_strk]
+        new:
+            logits = [bs, pts_per_strk, n_comp]
+            all_loc, all_std [bs, pts_per_strk, n_comp, 2]
+            all_cor [bs, pts_per_strk, n_comp]
         '''
         z = self.seq(h)
         bs = z.shape[0]
+        nc, pps = self.n_comp, self.pts_per_strk
+        tot_comp = nc * pps
 
-        logits = z[:, :self.n_comp]
-        all_loc = constrain_z_what(
-                        z[:, self.n_comp: 
-                             self.n_comp + self.n_comp * (self.pts_per_strk) * 2
+
+        logits = z[:, :tot_comp].view(bs, pps, nc)
+        all_loc = constrain_z_what(z[:, tot_comp: tot_comp + tot_comp * 2
                                     ].reshape(bs * self.n_comp, -1),
-                        more_range=True
-                    ).view(bs, self.n_comp, -1)
-        all_std = torch.sigmoid(z[:, 
-                        self.n_comp + self.n_comp * (self.pts_per_strk) * 2:
-                        -self.n_comp * self.pts_per_strk
-                                    ].reshape(bs * self.n_comp, -1)
-                    ).view(bs, self.n_comp, -1) + 1e-9
+                                    more_range=True
+                                ).view(bs, pps, nc, 2)
 
-        all_cor = util.constrain_parameter(
-                        z[:, -self.n_comp * self.pts_per_strk:],
-                        min=-1, max=1
-                    ).view(bs, self.n_comp, -1)
+        all_std = torch.sigmoid(z[:, tot_comp + tot_comp * 2: -tot_comp 
+                                    ].reshape(bs * self.n_comp, -1)
+                                ).view(bs, pps, nc, 2) + 1e-9
+
+        all_cor = util.constrain_parameter(z[:, -tot_comp:], min=-1, max=1
+                                ).view(bs, pps, nc)
         
         return logits, all_loc, all_std, all_cor
 
@@ -552,7 +557,6 @@ class ControlPointPriorRNN(nn.Module):
                     h = torch.zeros(bs, self.hid_dim).to(device)
                 )
         pis, locs, stds, cors = [], [], [], []
-        samples = []
 
         for _ in range(self.pts_per_strk):
             # [bs, in_dim]
@@ -560,13 +564,14 @@ class ControlPointPriorRNN(nn.Module):
             h = self.rnn(rnn_in, state.h)
             
             # control point dist param
-            # [bs, n_comp], [bs, n_comp, 2], _, [bs, n_comp, 1]
+            # new: [bs, 1, n_comp], [bs, 1, n_comp, 2], _, [bs, 1, n_comp]
+            # with new shape we can just stack them up at dim 1
             pi, loc, std, cor = self.mlp(h)
 
             if self.correlated_latent:
                 # [bs, n_comp, 2, 2]
                 tril = torch.diag_embed(std)
-                tril[:, :, 1, 0:1] = cor
+                tril[:, :, :, 1, 0] = cor
                 comp = MultivariateNormal(loc, scale_tril=tril)
             else:
                 comp = Independent(Normal(loc, std), 
@@ -574,7 +579,7 @@ class ControlPointPriorRNN(nn.Module):
             mix = Categorical(logits=pi)
             dist = MixtureSameFamily(mix, comp)
 
-            z_what = dist.sample()
+            z_what = dist.sample().view(bs, -1)
             
             pis.append(pi), locs.append(loc)
             stds.append(std), cors.append(cor)
@@ -583,17 +588,9 @@ class ControlPointPriorRNN(nn.Module):
                 z_what=z_what,
                 h=h,
             )
-        
-        pi = torch.stack(pis, dim=-1).view(bs, self.n_comp, self.pts_per_strk
-                                            ).transpose(1, 2)
 
-        loc = torch.stack(locs, dim=-1).view(bs, self.n_comp, 
-                                                self.pts_per_strk, 2
-                                            ).transpose(1,2)
-        std = torch.stack(stds, dim=-1).view(bs, self.n_comp, 
-                                                self.pts_per_strk, 2
-                                            ).transpose(1,2)
-        cor = torch.stack(cors, dim=-1).view(bs, self.n_comp, self.pts_per_strk
-                                            )
-        
+        pi = torch.cat(pis, dim=1)
+        loc = torch.cat(locs, dim=1)
+        std = torch.cat(stds, dim=1)
+        cor = torch.cat(cors, dim=1)
         return pi, loc, std, cor

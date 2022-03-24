@@ -48,10 +48,11 @@
 # sbatch execute.sh python sweep.py --beta 4 -m mnIm --seed 13
 # sbatch execute.sh python sweep.py --beta 4 -m mnIm --seed 14
 
-# sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 0 
-# sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 1
-# sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 2
-# sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 3
+sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 5 
+sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 6
+sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 7
+sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 8
+sbatch execute.sh python sweep.py --beta 4 -m mnIm10 --seed 9
 
 # sbatch execute.sh python sweep.py --beta 4 -m mnBzR --seed 0
 # sbatch execute.sh python sweep.py --beta 4 -m mnBzR --seed 1
