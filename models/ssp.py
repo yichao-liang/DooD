@@ -13,6 +13,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Independent, Normal, Laplace, Bernoulli,\
     ContinuousBernoulli
+from torch.distributions.categorical import Categorical
+from torch.distributions.mixture_same_family import MixtureSameFamily
+from torch.distributions.multivariate_normal import MultivariateNormal
 from einops import rearrange
 from kornia.morphology import dilation, erosion
 
@@ -64,6 +67,12 @@ class GenerativeModel(nn.Module):
                                                 no_rnn=False,
                                                 prior_dependency='wr|wt',
                                                 bern_img_dist=True,
+                                                linear_sum=True,
+                                                n_comp=4,
+                                                correlated_latent=True,
+                                                use_bezier_rnn=False,
+                                                condition_by_img=False,
+                                                constrain_var=False,
                                                     ):
         super().__init__()
         self.max_strks = max_strks
@@ -72,6 +81,11 @@ class GenerativeModel(nn.Module):
         self.maxnorm = maxnorm
         self.sgl_strk_tanh = sgl_strk_tanh
         self.add_strk_tanh = add_strk_tanh
+        self.n_comp = n_comp
+        self.correlated_latent = correlated_latent
+        self.use_bezier_rnn = use_bezier_rnn
+        self.constrain_var = constrain_var
+        self.condition_by_img = condition_by_img
         # self.constrain_param = constrain_param
         self.constrain_smpl = not constrain_param
         self.intr_ll = intermediate_likelihood
@@ -141,7 +155,10 @@ class GenerativeModel(nn.Module):
             self.wt_mlp_in_dim = self.h_dim
 
             if self.dependent_prior: 
-                # self.style_in_dim += feature_extractor_out_dim
+                if condition_by_img:
+                    feature_extractor_out_dim = hidden_dim
+                    self.wt_mlp_in_dim += feature_extractor_out_dim
+
                 if self.prior_dependency == 'wr|wt':
                     # if self.sep_where_pres_net:
                     #     self.wr_mlp_in_dim += 10
@@ -168,20 +185,34 @@ class GenerativeModel(nn.Module):
             #                         hidden_dim=hidden_dim,
             #                         num_layers=num_mlp_layers)
             # else:
+            pri_mlp_hid_dim = 256
             self.gen_pr_wr_mlp = PresWherePriorMLP(
                                                 in_dim=self.pr_wr_mlp_in_dim,
                                                 z_where_type=z_where_type,
                                                 z_where_dim=self.z_where_dim,
-                                                hidden_dim=hidden_dim,
+                                                hidden_dim=pri_mlp_hid_dim,
                                                 num_layers=num_mlp_layers,
-                                                constrain_param=constrain_param)
+                                                # constrain_param=constrain_param,
+                                                n_comp=n_comp
+                                            )
             # self.renderer_param_mlp = RendererParamMLP(in_dim=self.h_dim,)
-            self.gen_wt_mlp = WhatPriorMLP(
+            if use_bezier_rnn:
+                self.bezier_rnn = ControlPointPriorRNN(
+                                        # + 2 for prev point sample
+                                        in_dim=self.wt_mlp_in_dim+2,
+                                        pts_per_strk=self.pts_per_strk,
+                                        hid_dim=pri_mlp_hid_dim,
+                                        n_comp=n_comp,
+                                        correlated_latent=correlated_latent,
+                                    )
+            else:
+                self.gen_wt_mlp = WhatPriorMLP(
                                                 in_dim=self.wt_mlp_in_dim,
                                                 pts_per_strk=self.pts_per_strk,
-                                                hid_dim=hidden_dim,
+                                                hid_dim=pri_mlp_hid_dim,
                                                 num_layers=num_mlp_layers,
-                                                constrain_param=constrain_param)
+                                                n_comp=n_comp
+                                                )
         else:
             raise NotImplementedError
         self.imgs_dist_std = torch.nn.Parameter(torch.ones(1, res, res), 
@@ -233,7 +264,8 @@ class GenerativeModel(nn.Module):
         return util.constrain_parameter(self.imgs_dist_std, min=1e-2, max=1)
         # return util.constrain_parameter(self.imgs_dist_std, min=1e-4, max=1)
         
-    def presence_dist(self, h_l=None, bs=[1, 3], pri_wt=None, t=0):
+    def presence_dist(self, h_l=None, bs=[1, 3], pri_wt=None, t=0, 
+                      sample=False):
         '''(z_pres Prior) Batched presence distribution 
         It can be | sequential where it has to have h_l, or
                   | independent | with fixed prior, or
@@ -265,8 +297,11 @@ class GenerativeModel(nn.Module):
                 # if self.sep_where_pres_net:
                 #     z_pres_p = self.gen_pr_mlp(mlp_in)
                 # else:
-                z_pres_p, _, _ = self.gen_pr_wr_mlp(mlp_in)
+                z_pres_p, _, _, _, _ = self.gen_pr_wr_mlp(mlp_in)
                 z_pres_p = z_pres_p.squeeze(-1)
+                if sample: 
+                    print(f"z_pres param at {t}", z_pres_p)
+                    z_pres_p[z_pres_p < .9] = 0.
         elif self.prior_dist == "Independent":
             z_pres_p = self.z_pres_prob.expand(*bs)
             if not self.fixed_prior:
@@ -283,7 +318,8 @@ class GenerativeModel(nn.Module):
 
         return dist
 
-    def transformation_dist(self, h_l=None, bs=[1, 3], pri_wt=None):
+    def transformation_dist(self, h_l=None, bs=[1, 3], pri_wt=None, 
+                            sample=False):
         '''(z_where Prior) Batched transformation distribution.
         It can be | sequential where it has to have h_l, or
                   | independent | with fixed prior, or
@@ -308,17 +344,40 @@ class GenerativeModel(nn.Module):
             # if self.sep_where_pres_net:
             #     loc, std = self.gen_wr_mlp(mlp_in)
             # else:
-            _, loc, std = self.gen_pr_wr_mlp(mlp_in)
-            loc, std = loc.squeeze(-1), std.squeeze(-1)
-            # if self.constrain_smpl:
-            #     loc = constrain_z_where(self.z_where_type, 
-            #                             loc,)
-
-            # added to keep prior from being to high (positive)
-            # so to use it to limit the number of steps.
-            # std = util.constrain_parameter(std, min=1e-3, max=1)
+            _, pi, loc, std, cor = self.gen_pr_wr_mlp(mlp_in)
+            n_comp = pi.shape[1]
+            wr_dim = self.z_where_dim
+            loc = loc.view(*bs, n_comp, -1)
+            std = std.view(*bs, n_comp, -1)
+            cor = cor.view(*bs, n_comp)
             self.z_where_loc = loc
             self.z_where_std = std
+            self.z_where_cor = cor
+
+            mix = Categorical(logits=pi.view(*bs, -1))
+            if self.correlated_latent:
+                # [ptcs, bs , n_comp, where_dim, where_dim]
+                cor = cor.view(prod(bs), n_comp)
+                tril = torch.diag_embed(std.view(prod(bs)*n_comp, -1)).view(
+                                            prod(bs), n_comp, wr_dim, wr_dim)
+                tril[:, :, 1, 0] = cor
+                tril = tril.view(*bs, n_comp, wr_dim, wr_dim)
+
+                if sample or self.constrain_var:
+                    print("cons where")
+                    cov = tril @ tril.transpose(-1,-2)
+                    print("where cov", cov)
+                    cov[:,:,:2] = cov[:,:,:2] * 0.01 # shift
+                    cov[:,:,2] = cov[:,:,2] * 0.7 # scale
+                    cov[:,:,3] = cov[:,:,3] * 0.7 # rot
+                    # cov[:, :, :, 1]
+                    tril = torch.linalg.cholesky(cov, upper=False)
+
+                comp = MultivariateNormal(loc=loc, scale_tril=tril)
+            else:
+                comp = Independent(Normal(loc, std), 
+                        reinterpreted_batch_ndims=1)
+            dist = MixtureSameFamily(mix, comp)
 
         elif self.prior_dist == "Independent":
             loc, std = self.z_where_loc.expand(*bs, self.z_where_dim), \
@@ -327,17 +386,20 @@ class GenerativeModel(nn.Module):
                 loc = constrain_z_where(z_where_type=self.z_where_type,
                                         z_where_loc=loc.squeeze(0))
                 std = util.constrain_parameter(std, min=1e-6, max=1)      
+            dist = Independent(Normal(
+                        loc.view(*bs, -1), std.view(*bs, -1)
+                    ), reinterpreted_batch_ndims=1,)
         else:
             raise NotImplementedError
 
-        dist = Independent(
-                        Normal(loc.view(*bs, -1), std.view(*bs, -1)), 
-                        reinterpreted_batch_ndims=1,)
         assert (dist.event_shape == torch.Size([self.z_where_dim]) and 
                 dist.batch_shape == torch.Size([*bs]))
+
         return dist
     
-    def control_points_dist(self, h_c=None, bs=[1, 3], pri_wr=None):
+    def control_points_dist(self, h_c=None, bs=[1, 3], pri_wr=None, 
+                            
+                            sample=False):
         '''(z_what Prior) Batched control points distribution
         It can be | sequential where it has to have h_l, or
                   | independent | with fixed prior, or
@@ -348,17 +410,74 @@ class GenerativeModel(nn.Module):
         Return:
             dist event_shape: [pts_per_strk, 2]
         '''
-
+        n_comp, pts_per_strk = self.n_comp, self.pts_per_strk
         if self.prior_dist == "Sequential" and h_c is not None:
             mlp_in = h_c.view(prod(bs), -1).clone()
             if pri_wr != None and self.prior_dependency == 'wt|wr':
                 mlp_in = torch.cat([h_c.view(prod(bs), -1),
                                     pri_wr.view(prod(bs), -1)], dim=-1)
-            loc, std = self.gen_wt_mlp(mlp_in)
-            # [bs, pts_per_strk, 2]
-            loc = loc.view([*bs, self.pts_per_strk, 2])
-            std = std.view([*bs, self.pts_per_strk, 2])
+            if self.use_bezier_rnn:
+                pi, loc, std, cor = self.bezier_rnn(mlp_in)
+                pi = pi.view(*bs, pts_per_strk, n_comp)
+                loc = loc.view([*bs, pts_per_strk, n_comp, 2])
 
+                if self.correlated_latent:
+                    cor = cor.view([*bs, pts_per_strk, n_comp])
+                    tril = torch.diag_embed(std)
+                    tril[:, :, :, 1, 0] = cor
+                    tril = tril.view([*bs, pts_per_strk, n_comp, 2, 2])
+                    
+                    if sample or self.constrain_var:
+                        print("cons what")
+                        cov = tril @ tril.transpose(-1,-2)
+                        cov = cov * .01
+                        # print("what cov", cov)
+                        tril = torch.linalg.cholesky(cov, upper=False)
+
+                    comp = MultivariateNormal(loc=loc, scale_tril=tril)
+                    mix = Categorical(logits=pi)
+                    dist = Independent(MixtureSameFamily(mix, comp),
+                                    reinterpreted_batch_ndims=1)
+                else:
+                    std = std.view([*bs, pts_per_strk, n_comp, 2])
+                    comp = Independent(Normal(loc,std),
+                                    reinterpreted_batch_ndims=1)
+                    mix = Categorical(logits=pi)
+                    dist = Independent(MixtureSameFamily(mix, comp),
+                                    reinterpreted_batch_ndims=1)
+            else:
+                pi, loc, std, cor = self.gen_wt_mlp(mlp_in)
+
+                # [bs, pts_per_strk, 2]
+                loc = loc.view([*bs, n_comp, pts_per_strk, 2])
+                std = std.view([*bs, n_comp, pts_per_strk, 2])
+                # [prod(bs), pts_per_strk, 2, 2]
+
+                if self.correlated_latent:
+                    tril = torch.diag_embed(std.view(
+                                            prod(bs)*n_comp, pts_per_strk, -1))
+                    tril[:, :, 1, 0] = cor.reshape(prod(bs)*n_comp, 
+                                                   pts_per_strk,)
+                    tril = tril.view([*bs, n_comp, pts_per_strk, 2, 2])
+
+
+                    if sample or self.constrain_var:
+                        print("cons what")
+                        cov = tril @ tril.transpose(-1,-2)
+                        print("what cov", cov)
+                        cov = cov * .01
+                        tril = torch.linalg.cholesky(cov, upper=False)
+
+                    comp = Independent(
+                                MultivariateNormal(loc=loc, scale_tril=tril), 
+                            reinterpreted_batch_ndims=1)
+                else:
+                    comp = Independent(Normal(
+                            loc, std),
+                        reinterpreted_batch_ndims=2)
+
+                mix = Categorical(logits=pi.view(*bs, -1))
+                dist = MixtureSameFamily(mix, comp)
 
         elif self.prior_dist == "Independent":
             loc, std = self.pts_loc.expand(*bs, self.pts_per_strk, 2), \
@@ -367,13 +486,13 @@ class GenerativeModel(nn.Module):
             if not self.fixed_prior:
                 loc = constrain_z_what(loc)
                 std = torch.sigmoid(std) + 1e-12
+            dist =  Independent(Normal(loc, std), reinterpreted_batch_ndims=2)
         else:
             raise NotImplementedError
 
-        dist =  Independent(Normal(loc, std), reinterpreted_batch_ndims=2)
         self.z_what_loc = loc
         self.z_what_std = std
-
+        self.z_what_cor = cor.view(*bs, n_comp, -1)
         assert (dist.event_shape == torch.Size([self.pts_per_strk, 2]) and 
                 dist.batch_shape == torch.Size([*bs]))
         return dist
@@ -713,7 +832,8 @@ class GenerativeModel(nn.Module):
                     bs=[1], 
                     in_img=None, 
                     decoder_param=None,
-                    char_cond_gen=False):
+                    char_cond_gen=False,
+                    linear_sum=True):
         '''
         Args:
             bs::list: representing the shape of generated image, e.g. [bs]
@@ -740,6 +860,10 @@ class GenerativeModel(nn.Module):
             if canvas is None:
                 canvas = torch.zeros(*bs, 1, self.res, self.res,
                                                             device=self.device)
+                strk_img = None
+                if linear_sum:
+                    strk_img = torch.zeros(*bs, self.max_strks, 1, self.res, 
+                                                self.res, device=self.device)
 
             if z_pms is not None:
                 char_cond_gen = True
@@ -768,6 +892,7 @@ class GenerativeModel(nn.Module):
                              z_what=z_what)
 
             for t in range(self.max_strks):
+                print(f"sampling time {t}")
                 if char_cond_gen:#and t==0:
                     result = self.generation_step(state, canvas, in_img, 
                         z_pms=ZLogProb(
@@ -814,15 +939,25 @@ class GenerativeModel(nn.Module):
                             z_what_smpl[:, t:t+1].unsqueeze(0),
                             z_where_smpl[:, t:t+1].unsqueeze(0))
                 canvas_step = self.renders_imgs(latents).squeeze(0)
-                # todo: make sure the shape is correct
-                canvas = canvas + canvas_step
-
-                if t > 0:
-                    add_slope = decoder_param.slope[1][0, :, t-1]
-                    canvas = util.normalize_pixel_values(canvas, 
+                
+                if linear_sum:
+                    # breakpoint()
+                    strk_img[:, t] = canvas_step
+                    canvas = torch.sum(strk_img[:, :t+1], dim=1)
+                    add_slope = decoder_param.slope[1][0, :, 0]
+                    canvas = util.normalize_pixel_values(canvas,
+                                                         method='tanh',
+                                                         slope=add_slope)
+                else:
+                    canvas = canvas + canvas_step
+                    if t > 0:
+                        add_slope = decoder_param.slope[1][0, :, t-1]
+                        canvas = util.normalize_pixel_values(canvas, 
                                                 method='tanh',
                                                 slope=add_slope)
-            imgs = canvas
+            if not linear_sum:
+                canvas = None
+            # imgs = canvas
         else:
             # todo 2: with the guide, z_pres are in the right format, but the sampled 
             # todo 2: ones are not
@@ -853,7 +988,7 @@ class GenerativeModel(nn.Module):
             z_where: [bs, z_where_dim]
             z_what: [bs, num_pts, 2]
         '''
-        bs = canvas.size(0)
+        bs, img_dim = canvas.shape[0], canvas.shape[1:]
         
         canvas_embed = self.img_feature_extractor(canvas).view(bs, -1)
 
@@ -889,21 +1024,31 @@ class GenerativeModel(nn.Module):
         if self.dependent_prior:
             if self.prior_dependency == 'wt|wr':
                 # [bs]
-                z_pres = self.presence_dist(h_l, [bs], pri_wt=None, t=t
-                                                ).sample()
+                z_pres = self.presence_dist(h_l, [bs], pri_wt=None, t=t,
+                                                sample=True).sample()
                 # [bs, where_dim]
-                z_where = self.transformation_dist(h_l, [bs], pri_wt=None
-                                                ).sample()
+                z_where = self.transformation_dist(h_l, [bs], pri_wt=None,
+                                                sample=True).sample()
+                pri_wr = z_where
+                if self.condition_by_img:
+                    glmps = util.spatial_transform(
+                        canvas.view(bs, *img_dim),
+                        util.get_affine_matrix_from_param(
+                            z_where.view(bs, -1),
+                            z_where_type=self.z_where_type))
+                    glmps_em = self.img_feature_extractor(glmps
+                                            ).view(bs, -1).detach()
+                    pri_wr = torch.cat([pri_wr, glmps_em], -1)
                 # [bs, num_pts, 2]
-                z_what = self.control_points_dist(h_c, [bs], pri_wr=z_where
-                                                  ).sample()
+                z_what = self.control_points_dist(h_c, [bs], pri_wr=pri_wr,
+                                                sample=True).sample()
             elif self.prior_dependency == 'wr|wt':
-                z_what = self.control_points_dist(h_c, [bs], pri_wr=None
-                                                ).sample()
-                z_pres = self.presence_dist(h_l, [bs], pri_wt=z_what, t=t
-                                                ).sample()
-                z_where = self.transformation_dist(h_l, [bs], pri_wt=z_what
-                                                ).sample()
+                z_what = self.control_points_dist(h_c, [bs], pri_wr=None,
+                                                sample=True).sample()
+                z_pres = self.presence_dist(h_l, [bs], pri_wt=z_what, t=t,
+                                                sample=True).sample()
+                z_where = self.transformation_dist(h_l, [bs], pri_wt=z_what,
+                                                sample=True).sample()
             else:
                 raise NotImplementedError
         else:
@@ -1053,6 +1198,11 @@ class Guide(template.Guide):
                         no_pres_post_rnn:bool=False,
                         bern_img_dist=False,
                         dataset=None,
+                        linear_sum=True,
+                        n_comp=4,
+                        correlated_latent=False,
+                        use_bezier_rnn=False,
+                        condition_by_img=True,
                 ):
         '''
         Args:
@@ -1061,6 +1211,7 @@ class Guide(template.Guide):
         '''
         self.pts_per_strk = pts_per_strk
         self.z_what_dim = self.pts_per_strk * 2
+        self.linear_sum = linear_sum
         super().__init__(
                 max_strks=max_strks, 
                 img_dim=img_dim,
@@ -1102,6 +1253,7 @@ class Guide(template.Guide):
         self.add_strk_tanh = add_strk_tanh
         self.render_at_the_end = render_at_the_end
         self.prior_dependency = prior_dependency
+        self.condition_by_img = condition_by_img
 
         # Internal renderer
         if self.use_canvas or self.prior_dist == 'Sequential':
@@ -1129,28 +1281,34 @@ class Guide(template.Guide):
                                             prior_dependency=prior_dependency,
                                             hidden_dim=hidden_dim,
                                             bern_img_dist=bern_img_dist,
+                                            linear_sum=linear_sum,
+                                            n_comp=n_comp,
+                                            correlated_latent=correlated_latent,
+                                            use_bezier_rnn=use_bezier_rnn,
+                                            condition_by_img=condition_by_img,
                                         )
         # Inference networks
         # Style_mlp:
         #   rnn hidden state -> (z_pres, z_where dist parameters)
+        post_mlp_hid_dim = 256
         if self.sep_where_pres_net:
             self.where_mlp = WhereMLP(in_dim=self.wr_mlp_in_dim,
                                   z_where_type=self.z_where_type,
                                   z_where_dim=self.z_where_dim,
-                                  hidden_dim=hidden_dim,
+                                  hidden_dim=post_mlp_hid_dim,
                                   num_layers=num_mlp_layers,
                                   dataset=dataset,
                                   constrain_param=constrain_param,
                                   ) 
             self.pres_mlp = PresMLP(in_dim=self.pr_mlp_in_dim,
-                                hidden_dim=hidden_dim,
+                                hidden_dim=post_mlp_hid_dim,
                                 num_layers=num_mlp_layers,
                                 dataset=dataset)
         else:
             self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
                                       z_where_dim=self.z_where_dim,
-                                      hidden_dim=hidden_dim,
+                                      hidden_dim=post_mlp_hid_dim,
                                       num_layers=num_mlp_layers,
                                       constrain_param=constrain_param,
                                       spline_decoder=spline_decoder,
@@ -1161,7 +1319,7 @@ class Guide(template.Guide):
             render_mlp_in_dim = self.pr_wr_mlp_in_dim
         self.renderer_param_mlp = RendererParamMLP(
                                       in_dim=render_mlp_in_dim,
-                                      hidden_dim=hidden_dim,
+                                      hidden_dim=post_mlp_hid_dim,
                                       num_layers=num_mlp_layers,
                                       maxnorm=self.maxnorm,
                                       sgl_strk_tanh=self.sgl_strk_tanh,
@@ -1171,7 +1329,7 @@ class Guide(template.Guide):
 
         self.wt_mlp = WhatMLP(in_dim=self.wt_mlp_in_dim,
                                   pts_per_strk=self.pts_per_strk,
-                                  hid_dim=self.wt_rnn_hid_dim,
+                                  hid_dim=post_mlp_hid_dim,
                                   num_layers=num_mlp_layers,
                                   constrain_param=constrain_param,
                                   dataset=dataset,
@@ -1220,7 +1378,7 @@ class Guide(template.Guide):
          z_pres_lprb, z_where_lprb, z_what_lprb,
          z_pres_prir, z_where_prir, z_what_prir,
          sigmas, h_ls, h_cs, sgl_strk_tanh_slope, add_strk_tanh_slope, 
-         canvas, residual) = self.initialize_state(imgs, ptcs)
+         canvas, residual, strk_img) = self.initialize_state(imgs, ptcs)
 
         for t in range(self.max_strks):
             # following the online example
@@ -1290,29 +1448,46 @@ class Guide(template.Guide):
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 
+                
                 if self.intr_ll is None:
                     prev_canv = canvas
-                    canvas = canvas + canvas_step
-                    # not using detach_canvas is disencouraged
-                    if self.add_strk_tanh and not self.detach_canvas_so_far:
-                        canvas = util.normalize_pixel_values(
-                                        canvas, 
-                                        method='tanh', 
-                                        slope=add_strk_tanh_slope[:, :, t])
-                    # in case of detach_canvas_so_far, the return canvas is
-                    # None. The last add_strk_slope is thus used twice, 1 for 
-                    # the last step, one for rendering the whole recon. We can
-                    # potentially improve it by the following modification. 
-                    # This isn't good when canvas is not detached because it
-                    # complicates the gradient graph
-                    if (self.add_strk_tanh and t > 0 and\
-                        self.detach_canvas_so_far):
-                        canvas = util.normalize_pixel_values(
-                                        canvas, 
-                                        method='tanh', 
-                                        slope=add_strk_tanh_slope[:, :, t-1])
-                    if self.detach_canvas_so_far:
-                        canvas = canvas.detach()
+                    
+                    if self.linear_sum:
+                        # save canvas step
+                        strk_img[:, :, t] = canvas_step
+                        canvas = torch.sum(strk_img[:, :, :t+1], dim=2)
+                        if self.add_strk_tanh:
+                            canvas = util.normalize_pixel_values(
+                                            canvas, 
+                                            method='tanh', 
+                                            slope=add_strk_tanh_slope[:, :, 0])
+                        if (self.detach_canvas_so_far and\
+                            t+1 != self.max_strks):
+                            # when t+1 = max_strks it doesn't have to detached
+                            canvas = canvas.detach()
+                    else:
+                        canvas = canvas + canvas_step
+                        # not using detach_canvas is disencouraged
+                            
+                        if self.add_strk_tanh and not self.detach_canvas_so_far:
+                            canvas = util.normalize_pixel_values(
+                                            canvas, 
+                                            method='tanh', 
+                                            slope=add_strk_tanh_slope[:, :, t])
+                        # in case of detach_canvas_so_far, the return canvas is
+                        # None. The last add_strk_slope is thus used twice, 1 for 
+                        # the last step, one for rendering the whole recon. We can
+                        # potentially improve it by the following modification. 
+                        # This isn't good when canvas is not detached because it
+                        # complicates the gradient graph
+                        if (self.add_strk_tanh and t > 0 and\
+                            self.detach_canvas_so_far):
+                            canvas = util.normalize_pixel_values(
+                                            canvas, 
+                                            method='tanh', 
+                                            slope=add_strk_tanh_slope[:, :, t-1])
+                        if self.detach_canvas_so_far:
+                            canvas = canvas.detach()
                     # from plot import debug_plot as dp
                     # dp(imgs, canvas, writer, t)
                 else:
@@ -1347,9 +1522,32 @@ class Guide(template.Guide):
                     if self.prior_dependency == 'wr|wt':
                         pri_wt = state.z_what.view(*shp, -1).detach()
                         pri_wr = None
+                        if self.condition_by_img:
+                            self.internal_decoder.sigma = sigmas[:, :, t:t+1
+                                                                    ].clone()
+                            self.internal_decoder.sgl_strk_tanh_slope = \
+                                    sgl_strk_tanh_slope[:, :, t:t+1]
+                            glmps = self.internal_decoder.renders_glimpses(
+                                            state.z_what.unsqueeze(2)
+                                            ).view(prod(shp), *img_dim)
+                            glmps_em = self.img_feature_extractor(glmps
+                                                    ).view(*shp, -1).detach()
+                            pri_wt = torch.cat([pri_wt, glmps_em], -1)
+
                     elif self.prior_dependency == 'wt|wr':
                         pri_wt = None
                         pri_wr = state.z_where.view(*shp, -1)
+                        if self.condition_by_img:
+                            # if not detach, the gradients are passed from
+                            # prior to post nets
+                            glmps = util.spatial_transform(
+                                prev_canv.view(prod(shp), *img_dim),
+                                util.get_affine_matrix_from_param(
+                                    state.z_where.view(prod(shp), -1),
+                                    z_where_type=self.z_where_type))
+                            glmps_em = self.img_feature_extractor(glmps
+                                                    ).view(*shp, -1)#.detach()
+                            pri_wr = torch.cat([pri_wr, glmps_em], -1)#.detach()
                     else:
                         raise NotImplementedError
                     
@@ -1383,6 +1581,8 @@ class Guide(template.Guide):
                                         ) * z_pres_smpl[:, :, t].clone()
 
         # todo 1: init the distributions which can be returned; can be useful
+        if self.detach_canvas_so_far and not self.linear_sum:
+            canvas = None
         data = GuideReturn(z_smpl=ZSample(
                                 z_pres=z_pres_smpl, 
                                 z_what=z_what_smpl,
@@ -1400,7 +1600,7 @@ class Guide(template.Guide):
                            decoder_param=DecoderParam(
                                sigma=sigmas,
                                slope=(sgl_strk_tanh_slope, add_strk_tanh_slope)),
-                           canvas=None if self.detach_canvas_so_far else canvas,
+                           canvas=canvas,
                            residual=residual,
                            z_prior=ZLogProb(
                                z_pres=z_pres_prir,
@@ -1694,6 +1894,10 @@ class Guide(template.Guide):
         '''
         mask_prev = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
 
+        strk_img = None
+        if self.linear_sum:
+            strk_img = torch.zeros(ptcs, bs, self.max_strks, *self.img_dim,
+                                                        device=imgs.device)
         if self.use_canvas:
             if self.intr_ll:
                 canvas = torch.zeros(ptcs, bs, self.max_strks + 1, *self.img_dim, 
@@ -1725,7 +1929,7 @@ class Guide(template.Guide):
                 z_pres_lprb, z_where_lprb, z_what_lprb,
                 z_pres_prir, z_where_prir, z_what_prir, 
                 sigmas, h_ls, h_cs, sgl_strk_tanh_slope, add_strk_tanh_slope, 
-                canvas, residual)
+                canvas, residual, strk_img)
     
     def character_conditioned_sampling(self, cond_img, n_samples=7):
         '''Only useful when it has an internal render, o/w it returns None and 

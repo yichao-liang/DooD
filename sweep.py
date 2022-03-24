@@ -69,11 +69,26 @@ if __name__ == '__main__':
     # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em'
     # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd'
     code_dict = {
-        'mn': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
-        'om': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        'km': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
-        'em': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
-        'qd': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
+        'mn': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-mn',
+        'mnv3': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-noTgt-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'om': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        # 'omv1': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        # 'om5': 'Full-spDec-sqPrior-dp-5wr-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        # 'omv2': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTgt-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        # 'omv3': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTgt-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
+        'km': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
+        'em': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
+        'qd': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
+        'mnCor': 'Full-spDec-sqMCorPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
+        'mnIm': 'Full-spDec-sqMCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
+        'mnIm10': 'Full-spDec-sq10MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
+        'mnBzR': 'Full-spDec-sqMCorPrior-bzRnn-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
+        'mn4': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
+        'mnM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-mn',
+        'omM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-om',
+        'kmM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
+        'emM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
+        'qdM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
     }
     exp_name = code_dict[run_args.m]
     # # beta 4; 3/4 var 1full
@@ -101,7 +116,8 @@ if __name__ == '__main__':
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'/om/user/ycliang/log/full-{run_args.m}/{model_name}',
+                        '--tb_dir', f'/om/user/ycliang/log/debug1/{model_name}',
+                        # '--tb_dir', f'/om/user/ycliang/log/full-{run_args.m}/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',
 

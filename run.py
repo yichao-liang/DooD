@@ -354,7 +354,16 @@ def get_args_parser():
     parser.add_argument('--bern_img_dist', action='store_true',
                         help='''Using continousBernoulli image distribution vs.
                         Laplace''')
-    # parser.add_argument('--half_1s')
+    parser.add_argument('--linear_sum', action='store_true',
+                        help='sum up all the stroke renderings linearly')
+    parser.add_argument('--num_mixtures', default=1,
+                        help='num mixtures for the z_where, z_what GMM')
+    parser.add_argument('--correlated_latent', action='store_true',
+                        help='correlate latent in prior between x, y')
+    parser.add_argument('--use_bezier_rnn', action='store_true',
+                        help='use a rnn for prior control points')
+    parser.add_argument('--condition_by_img', action='store_true',
+                        help='add dependency between prior through image')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')

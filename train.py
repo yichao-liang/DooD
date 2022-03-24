@@ -74,7 +74,7 @@ def train(model,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset, 
                                       fix_img=fix_img,
-                                      has_fix_img=True)
+                                      has_fixed_img=True)
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         # train_loader = itertools.chain(train_loader, val_loader)
@@ -167,7 +167,7 @@ def train(model,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset, 
                                       fix_img=fix_img,
-                                      has_fix_img=True)
+                                      has_fixed_img=True)
 
         epoch += 1
         writer.flush()

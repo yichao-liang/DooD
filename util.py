@@ -32,15 +32,22 @@ logging.basicConfig(
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 
-def init_dataloader(res, dataset, batch_size=64):
+def init_dataloader(res, dataset, batch_size=64, rot=True):
     # Dataloader
     # Train dataset
-    trn_transform_lst = [
+    if rot:
+        trn_transform_lst = [
                             transforms.Resize([120, 120], antialias=True),
                             transforms.RandomRotation(30, fill=(0,)),
                             transforms.Resize([res, res], antialias=True),
                             transforms.ToTensor(),
-                        ]
+                            ]
+    else:
+        trn_transform_lst = [
+                            transforms.Resize([120, 120], antialias=True),
+                            transforms.Resize([res, res], antialias=True),
+                            transforms.ToTensor(),
+                            ]
     tst_transform_lst = [
                             transforms.Resize([res,res], antialias=True),
                             transforms.ToTensor(),
@@ -120,10 +127,12 @@ def init_dataloader(res, dataset, batch_size=64):
         np.random.seed(worker_seed)
         random.seed(worker_seed)
     g = torch.Generator()
-    g.manual_seed(0)
+    g.manual_seed(6)
 
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
-                                num_workers=4)
+                                num_workers=4,
+                                # worker_init_fn=seed_worker, generator=g,
+                                )
     test_loader = DataLoader(tst_dataset, batch_size=batch_size, shuffle=True, 
                                 num_workers=4,
                                 worker_init_fn=seed_worker, generator=g,)
@@ -382,22 +391,22 @@ def incremental_average(m_prev, a, n):
 
 def init_z_where(z_where_type):
     '''
-    '3': (scale, shift x, y)
-    '4_no_rotate': (scale x, y, shift x, y)
-    '4_rotate': (scale, shift x, y, rotate)
-    '5': (scale x, y, shift x, y, rotate
+    '3': (shift x, y, scale, )
+    # '4_no_rotate': (scale x, y, shift x, y)
+    '4_rotate': (shift x, y, scale, rotate)
+    '5': (shift x, y, scale x, y, rotate)
     '''
-    init_z_where_params = {'3': ZWhereParam(torch.tensor([.8,0,0]), 
+    init_z_where_params = {'3': ZWhereParam(torch.tensor([0,0,.8]), 
                                                 torch.tensor([.2,.2,.2]), 3), # AIR?
                                                 # torch.tensor([.2,1,1]), 3), # spline?
                                                 # torch.ones(3)/5, 3),
-                           '4_no_rotate': ZWhereParam(torch.tensor([.3,1,0,0]),
-                                                torch.ones(4)/5, 4),
+                        #    '4_no_rotate': ZWhereParam(torch.tensor([.3,1,0,0]),
+                        #                         torch.ones(4)/5, 4),
                            '4_rotate': ZWhereParam(
-                                                torch.tensor([.8,0,0,0]),
+                                                torch.tensor([0,0,.8,0]),
                                                 torch.tensor([.2,.2,.2,.4]), 4),
                                                 # torch.ones(4)/5, 4),
-                           '5': ZWhereParam(torch.tensor([.8,.8,0,0,0]),
+                           '5': ZWhereParam(torch.tensor([0,0,.8,.8,0]),
                                             torch.tensor([.2,.2,.2,.2,.4]), 5),
                         }
     assert z_where_type in init_z_where_params
@@ -601,6 +610,10 @@ def init(run_args, device):
                     prior_dependency=run_args.prior_dependency,
                     hidden_dim=hid_dim,
                     bern_img_dist=run_args.bern_img_dist,
+                    n_comp=int(run_args.num_mixtures),
+                    correlated_latent=run_args.correlated_latent,
+                    use_bezier_rnn=run_args.use_bezier_rnn,
+                    condition_by_img=run_args.condition_by_img,
                                     ).to(device)
         guide = ssp.Guide(
                 max_strks=int(run_args.strokes_per_img),
@@ -648,6 +661,11 @@ def init(run_args, device):
                 hidden_dim=hid_dim,
                 bern_img_dist=run_args.bern_img_dist,
                 dataset=run_args.dataset,
+                linear_sum=run_args.linear_sum,
+                n_comp=int(run_args.num_mixtures),
+                correlated_latent=run_args.correlated_latent,
+                use_bezier_rnn=run_args.use_bezier_rnn,
+                condition_by_img=run_args.condition_by_img,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         run_args.z_where_type = '3'
@@ -768,9 +786,8 @@ def init_optimizer(run_args, model):
              'weight_decay': run_args.weight_decay,}
             ])
             patience, threshold = 5000, 30
-            if run_args.dataset == 'EMNIST':
-                patience, threshold = 500, 100
-            if run_args.dataset in ['Omniglot', 'KMNIST', 'Quickdraw']:
+            if run_args.dataset in ['EMNIST', 'Omniglot', 'KMNIST', 
+                                    'Quickdraw']:
                 patience, threshold = 1, 100
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                         optimizer, mode='max',factor=0.1, patience=patience, 
@@ -1134,12 +1151,12 @@ def inverse_spatial_transformation(x, theta):
     x_out = spatial_transform(x, r_theta)
     return x_out
 
-def invert_z_where(z_where):
-    z_where_inv = torch.zeros_like(z_where)
-    scale = z_where[:, 0:1]   # (batch, 1)
-    z_where_inv[:, 1:3] = -z_where[:, 1:3] / scale   # (batch, 2)
-    z_where_inv[:, 0:1] = 1 / scale    # (batch, 1)
-    return z_where_inv
+# def invert_z_where(z_where):
+#     z_where_inv = torch.zeros_like(z_where)
+#     scale = z_where[:, 0:1]   # (batch, 1)
+#     z_where_inv[:, 1:3] = -z_where[:, 1:3] / scale   # (batch, 2)
+#     z_where_inv[:, 0:1] = 1 / scale    # (batch, 1)
+#     return z_where_inv
 
 def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     '''Get a batch of 2x3 affine matrix from transformation parameters 
@@ -1150,7 +1167,7 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         thetas [bs, z_where_dim]
         z_where_type::str:
             '3': (scale, shift x, y)
-            '4_rotate': (scale, shift x, y, rotate) or 
+            '4_rotate': (shift x, y, scale, rotate) or 
             '4_no_rotate': (scale x, y, shift x, y)
             '5': (scale x, y, shift x, y, rotate)
     '''
@@ -1167,9 +1184,9 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
                                      angle_sin, angle_cos, torch.empty_like(angle)], 
                                      dim=0).T.view(-1,2,3)
         # 2 scale
-        affine_matrix *= thetas[:, 0].unsqueeze(-1).unsqueeze(-1)  
+        affine_matrix *= thetas[:, 2].unsqueeze(-1).unsqueeze(-1)  
         # 3 translate
-        affine_matrix[:, :, 2] = thetas[:, 1:3] 
+        affine_matrix[:, :, 2] = thetas[:, 0:2] 
         return affine_matrix
 
         # old
@@ -1187,10 +1204,10 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
                                      angle_sin, angle_cos, torch.empty_like(angle)], 
                                      dim=0).T.view(-1,2,3)
         # 2 scale
-        affine_matrix[:, :, 0] *= thetas[:, 0].unsqueeze(-1)  
-        affine_matrix[:, :, 1] *= thetas[:, 1].unsqueeze(-1)  
+        affine_matrix[:, :, 0] *= thetas[:, 2].unsqueeze(-1)  
+        affine_matrix[:, :, 1] *= thetas[:, 3].unsqueeze(-1)  
         # 3 translate
-        affine_matrix[:, :, 2] = thetas[:, 2:4] 
+        affine_matrix[:, :, 2] = thetas[:, 0:2] 
         return affine_matrix
         
         #old
@@ -1215,10 +1232,10 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
                                     torch.empty_like(angle)
                                 ], dim=0).T.view(-1,2,3)
         # 2 scale
-        affine_matrix[:, :, 0] *= thetas[:, 0].unsqueeze(-1)  
-        affine_matrix[:, :, 1] *= thetas[:, 1].unsqueeze(-1)  
+        affine_matrix[:, :, 0] *= thetas[:, 2].unsqueeze(-1)  
+        affine_matrix[:, :, 1] *= thetas[:, 3].unsqueeze(-1)  
         # 3 translate
-        affine_matrix[:, :, 2] = thetas[:, 2:4] 
+        affine_matrix[:, :, 2] = thetas[:, 0:2] 
         return affine_matrix
  
     elif z_where_type == '4_no_rotate':
@@ -1229,9 +1246,9 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         bs = thetas.shape[0]
         affine_matrix = torch.eye(2,3).unsqueeze(0).expand(bs,2,3).to(thetas.device)
         # scale
-        affine_matrix = affine_matrix * thetas[:, 0].unsqueeze(-1).unsqueeze(-1)  
+        affine_matrix = affine_matrix * thetas[:, 2].unsqueeze(-1).unsqueeze(-1)  
         # translate
-        affine_matrix[:, :, 2] = thetas[:, 1:3] 
+        affine_matrix[:, :, 2] = thetas[:, 0:2] 
         # scale = thetas[:, 0:1].expand(-1, 2)
         # translations = thetas[:, 1:3]
         # angle = torch.zeros_like(thetas[:, 0]) 

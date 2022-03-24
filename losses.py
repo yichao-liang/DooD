@@ -378,16 +378,16 @@ def get_loss_sequential(generative_model,
                     #                 z_pres_smpls, iteration)
                     z_where = guide_out.z_smpl.z_where.detach().cpu()
                     if guide.z_where_type == '5':
-                        z_where_scale = z_where[:, :, :, 0:2].view(prod(shp),-1
+                        z_where_shift = z_where[:, :, :, 0:2].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]
-                        z_where_shift = z_where[:, :, :, 2:4].view(prod(shp),-1
+                        z_where_scale = z_where[:, :, :, 2:4].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]
                         z_where_rot = z_where[:, :, :, 4].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]
                     else:
-                        z_where_scale = z_where[:, :, :, 0:1].view(prod(shp),-1
+                        z_where_shift = z_where[:, :, :, 0:2].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]
-                        z_where_shift = z_where[:, :, :, 1:3].view(prod(shp),-1
+                        z_where_scale = z_where[:, :, :, 2:3].view(prod(shp),-1
                                                             ).numpy()[z_pres==1]
                         if guide.z_where_type == '4_rotate':
                             z_where_rot = z_where[:, :, :, 3].view(prod(shp),-1
