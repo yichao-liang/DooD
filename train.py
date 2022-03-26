@@ -111,14 +111,23 @@ def train(model,
                 writer.add_scalar("Train curves/lr.pres", 
                               optimizer.state_dict()['param_groups'][1]['lr'], 
                               iteration)
+
             # Check for nans gradients, parameters
-            if args.log_grad:
-                named_params = get_model_named_params(args, guide, 
-                                                        generative_model)
-                for name, parameter in named_params:
-                    writer.add_scalar(f"Grad_norm/{name}", 
-                                        parameter.grad.norm(2), iteration)
-                #     try:
+            # named_params = get_model_named_params(args, guide, generative_model)
+            # for name, parameter in named_params:
+            #     try:
+            #         if torch.isnan(parameter).any() or\
+            #             torch.isnan(parameter.grad).any():
+            #             print(f"{name}.grad has {parameter.grad.isnan().sum()}"
+            #                     f"/{np.prod(parameter.shape)} nan parameters")
+            #             breakpoint()
+            #         if args.log_grad:
+            #             writer.add_scalar(f"Grad_norm/{name}", 
+            #                         parameter.grad.norm(2), iteration)
+            #     except Exception as e:
+            #         print(e)
+            #         breakpoint()
+
                     ## if (name == 'style_mlp.seq.linear_modules.2.weight' and
                     ##     (parameter.grad.norm(2) > 6e4)):
                     ##     print(f'{name} has grad_norm = {parameter.grad.norm(2)}')
@@ -126,13 +135,6 @@ def train(model,
                     ##                         guide, generative_model, optimizer,
                     ##                         iteration, writer, args)
 
-                    # if torch.isnan(parameter).any() or torch.isnan(parameter.grad).any():
-                    #     print(f"{name}.grad has {parameter.grad.isnan().sum()}"
-                    #           f"/{np.prod(parameter.shape)} nan parameters")
-                    #     breakpoint()
-                # except Exception as e:
-                #     print(e)
-                #     breakpoint()
 
             optimizer.step()
             if args.anneal_lr:

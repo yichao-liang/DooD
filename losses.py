@@ -37,8 +37,8 @@ def get_loss_sequential(generative_model,
             the REINFORCE learning signals.
     '''
     # beta=3
-    if iteration >= 60000:
-        guide.wt_mlp.more_range, guide.where_mlp.more_range = True, True
+    # if iteration >= 60000:
+    #     guide.wt_mlp.more_range, guide.where_mlp.more_range = True, True
     if args.constrain_z_pres_param and iteration < 10000:
         # the second clause is some experimental condition
         guide.constrain_z_pres_param_this_ite = True

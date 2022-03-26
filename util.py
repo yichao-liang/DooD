@@ -32,7 +32,7 @@ logging.basicConfig(
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 
-def init_dataloader(res, dataset, batch_size=64, rot=True):
+def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
     # Dataloader
     # Train dataset
     if rot:
@@ -129,7 +129,8 @@ def init_dataloader(res, dataset, batch_size=64, rot=True):
     g = torch.Generator()
     g.manual_seed(6)
 
-    train_loader = DataLoader(trn_dataset, batch_size=batch_size, shuffle=True, 
+    train_loader = DataLoader(trn_dataset, batch_size=batch_size, 
+                                shuffle=True if shuffle else False, 
                                 num_workers=4,
                                 # worker_init_fn=seed_worker, generator=g,
                                 )
@@ -347,36 +348,29 @@ def debug_gradient(name, param, imgs, guide, generative_model, optimizer,
                 breakpoint()
         va = 1+1
 
-def transform_z_what(z_what, z_where, z_where_type, res):
+def transform_z_what(z_what, z_where, z_where_type):
     '''Apply z_where_mtrx to z_what such that it has a similar result as
     applying the inverse z_where_mtrx to the z_what-rendering.
     Args:
-        z_what [bs, n_pts, 2]
-        z_where_mtrx [bs, z_where_dim]
+        z_what [bs, n_strk, n_pts, 2]
+        z_where [bs, n_strk, z_where_dim]
+        z_where_type::str
         res (int): resolution for target image; used in affine_grid
     Return:
-        transformed_z_what [bs, n_pts, 2]
+        transformed_z_what [bs, n_strk, n_pts, 2]
     '''
-    bs, n_pts, _ = z_what.shape
-    # Get the center of the inverse affine grid
-    z_where_mtrx = get_affine_matrix_from_param(thetas=z_where, 
-                                                z_where_type=z_where_type, 
-                                                center=None)
-    inv_z_where_mtrx = invert_affine_transform(z_where_mtrx)
-    ag = F.affine_grid(inv_z_where_mtrx, [bs, 1, res, res], align_corners=True)
+    bs, n_strk, n_pts, _ = z_what.shape
+    z_where_mtrx = get_affine_matrix_from_param(
+                                    thetas=z_where.view(bs*n_strk, -1), 
+                                    z_where_type=z_where_type
+                                    ).view(bs, n_strk, 2, 3)
+    z_what = (z_what - .5) * 2
 
-    l_coord, r_coord = int(np.ceil((res/2) - 1)),  int(np.floor(res/2))
-    center = ((ag[:, l_coord, l_coord].cuda() + 
-               ag[:, r_coord, r_coord].cuda()) / 2) + 0.5
-    
-    # Get the adjusted z_where_mtrx, apply to z_what
-    adj_z_where_mtrx = get_affine_matrix_from_param(thetas=z_where, 
-                                                z_where_type=z_where_type, 
-                                                center=center)
-    homo_coord = torch.cat([z_what, torch.ones(bs, n_pts, 1).to(z_what.device)], 
-                                                                        dim=2)
-    transformed_z_what = ((adj_z_where_mtrx @ homo_coord.transpose(1,2)
-                                                            ).transpose(1,2))
+    homo_coord = torch.cat([z_what, torch.ones_like(z_what)[..., :1]], dim=3)
+    transformed_z_what = ((z_where_mtrx @ homo_coord.transpose(2,3)
+                                                    ).transpose(2,3))
+    transformed_z_what = transformed_z_what * .5 +.5
+
     return transformed_z_what
 
 

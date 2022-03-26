@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH --job-name=ev10
+#SBATCH --job-name=omBRT
 #SBATCH --partition=tenenbaum
 #SBATCH --qos=tenenbaum
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=15G
+#SBATCH --mem=10G
 #SBATCH --gres=gpu:1
 #SBATCH --time=3-00:00
 #SBATCH --mail-type=begin

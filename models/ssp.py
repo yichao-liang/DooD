@@ -249,6 +249,7 @@ class GenerativeModel(nn.Module):
         self.transform_z_what = transform_z_what
 
 
+
     def get_intr_ll_geo_p(self):
         return util.constrain_parameter(self.intr_ll_geo_p, min=.5, 
                                                             max=1.-1e-6)
@@ -266,7 +267,8 @@ class GenerativeModel(nn.Module):
         
     def presence_dist(self, h_l=None, bs=[1, 3], pri_wt=None, t=0, 
                       sample=False):
-        '''(z_pres Prior) Batched presence distribution 
+        '''
+        (z_pres Prior) Batched presence distribution 
         It can be | sequential where it has to have h_l, or
                   | independent | with fixed prior, or
                                 | with learned prior
@@ -301,7 +303,8 @@ class GenerativeModel(nn.Module):
                 z_pres_p = z_pres_p.squeeze(-1)
                 if sample: 
                     print(f"z_pres param at {t}", z_pres_p)
-                    z_pres_p[z_pres_p < .9] = 0.
+                    print("cons pres")
+                    z_pres_p[z_pres_p < .4] = 0.
         elif self.prior_dist == "Independent":
             z_pres_p = self.z_pres_prob.expand(*bs)
             if not self.fixed_prior:
@@ -366,11 +369,10 @@ class GenerativeModel(nn.Module):
                 if sample or self.constrain_var:
                     print("cons where")
                     cov = tril @ tril.transpose(-1,-2)
-                    print("where cov", cov)
+                    # print("where cov", cov)
                     cov[:,:,:2] = cov[:,:,:2] * 0.01 # shift
                     cov[:,:,2] = cov[:,:,2] * 0.7 # scale
                     cov[:,:,3] = cov[:,:,3] * 0.7 # rot
-                    # cov[:, :, :, 1]
                     tril = torch.linalg.cholesky(cov, upper=False)
 
                 comp = MultivariateNormal(loc=loc, scale_tril=tril)
@@ -425,15 +427,21 @@ class GenerativeModel(nn.Module):
             loc = loc.view([*bs, pts_per_strk, n_comp, 2])
 
             if self.correlated_latent:
-                cor = cor.view([*bs, pts_per_strk, n_comp])
+                cor = cor.view([prod(bs), pts_per_strk, n_comp])
                 tril = torch.diag_embed(std)
-                tril[:, :, :, 1, 0] = cor
+                try:
+                    tril[:, :, :, 1, 0] = cor
+                except:
+                    breakpoint()
                 tril = tril.view([*bs, pts_per_strk, n_comp, 2, 2])
                 
                 if sample or self.constrain_var:
                     print("cons what")
                     cov = tril @ tril.transpose(-1,-2)
-                    cov = cov * .01
+                    # cov = cov * .01
+                    cov[:, 2] = cov[:, 2] * .01
+                    cov[:, :2] = cov[:, :2] * .01
+                    cov[:, 3:] = cov[:, 3:] * .01
                     # print("what cov", cov)
                     tril = torch.linalg.cholesky(cov, upper=False)
 
@@ -570,24 +578,35 @@ class GenerativeModel(nn.Module):
         else:
             sigma = self.get_sigma()
 
-        if self.spline_decoder:
-            # imgs [ptcs*bs, n_strk, 1, res, res]
-            imgs = self.decoder(z_what.view(prod(shp), n_strks, 
-                                                pts_per_strk, 2), 
-                        sigma=sigma.view(prod(shp), -1), keep_strk_dim=True)  
+        if self.transform_z_what:
+            trans_what = util.transform_z_what(
+                                z_what.view(prod(shp), n_strks,pts_per_strk, 2),
+                                z_where.view(prod(shp), n_strks, -1),
+                                z_where_type=self.z_where_type)
+            imgs = self.decoder(trans_what, sigma.view(prod(shp), n_strks, -1),
+                                keep_strk_dim=True)
+
+            imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
+            # reshape image for further processing
+            imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
         else:
-            imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))
+            if self.spline_decoder:
+                # imgs [ptcs*bs, n_strk, 1, res, res]
+                imgs = self.decoder(z_what.view(prod(shp), n_strks, 
+                                                    pts_per_strk, 2), 
+                            sigma=sigma.view(prod(shp), -1), keep_strk_dim=True)  
+            else:
+                imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))
 
-        imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
+            imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
+            # reshape image for further processing
+            imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
 
-        # reshape image for further processing
-        imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
-
-        # Get affine matrix: [ptcs*bs*n_strk, 2, 3]
-        z_where_mtrx = util.get_affine_matrix_from_param(
-                                z_where.view(ptcs*bs*n_strks, -1), 
-                                self.z_where_type)
-        imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
+            # Get affine matrix: [ptcs*bs*n_strk, 2, 3]
+            z_where_mtrx = util.get_affine_matrix_from_param(
+                                    z_where.view(ptcs*bs*n_strks, -1), 
+                                    self.z_where_type)
+            imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
         # max normalized so each image has pixel values [0, 1]
         # size: [ptcs*bs*n_strk, n_channel (1), H, W]
@@ -1337,6 +1356,20 @@ class Guide(template.Guide):
                                   constrain_param=constrain_param,
                                   dataset=dataset,
                                   )
+        self.init_h_wt = torch.nn.Parameter(torch.zeros(self.wt_rnn_hid_dim), 
+                                                        requires_grad=True)
+        if self.sep_where_pres_net:
+            self.init_h_pr = torch.nn.Parameter(torch.zeros(
+                                    self.pr_wr_rnn_hid_dim), requires_grad=True)
+            self.init_h_wr = torch.nn.Parameter(torch.zeros(
+                                    self.pr_wr_rnn_hid_dim), requires_grad=True)
+        else:
+            self.init_h_prwr = torch.nn.Parameter(torch.zeros(
+                                    self.pr_wr_rnn_hid_dim), requires_grad=True)
+        # self.init_h_wt = torch.zeros(self.wt_rnn_hid_dim).cuda()
+        # self.init_h_pr = torch.zeros(self.pr_wr_rnn_hid_dim).cuda()
+        # self.init_h_wr = torch.zeros(self.pr_wr_rnn_hid_dim).cuda()
+
 
     def forward(self, imgs, num_particles=1):#, writer=None):
         '''
@@ -1382,7 +1415,6 @@ class Guide(template.Guide):
          z_pres_prir, z_where_prir, z_what_prir,
          sigmas, h_ls, h_cs, sgl_strk_tanh_slope, add_strk_tanh_slope, 
          canvas, residual, strk_img) = self.initialize_state(imgs, ptcs)
-
         for t in range(self.max_strks):
             # following the online example
             # state.z_pres: [ptcs, bs, 1]
@@ -1534,7 +1566,7 @@ class Guide(template.Guide):
                                             state.z_what.unsqueeze(2)
                                             ).view(prod(shp), *img_dim)
                             glmps_em = self.img_feature_extractor(glmps
-                                                    ).view(*shp, -1).detach()
+                                                    ).view(*shp, -1)#.detach()
                             pri_wt = torch.cat([pri_wt, glmps_em], -1)
 
                     elif self.prior_dependency == 'wt|wr':
@@ -1550,7 +1582,7 @@ class Guide(template.Guide):
                                     z_where_type=self.z_where_type))
                             glmps_em = self.img_feature_extractor(glmps
                                                     ).view(*shp, -1)#.detach()
-                            pri_wr = torch.cat([pri_wr, glmps_em], -1)#.detach()
+                            pri_wr = torch.cat([pri_wr, glmps_em], -1).detach()
                     else:
                         raise NotImplementedError
                     
@@ -1828,16 +1860,21 @@ class Guide(template.Guide):
 
         # Init model state for performing inference
         if self.sep_where_pres_net:
-            h_l = (torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
-                               device=imgs.device),
-                   torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
-                               device=imgs.device))
+            # h_l = (torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
+            #                    device=imgs.device),
+            #        torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
+            #                    device=imgs.device))
+            h_l = (self.init_h_pr.expand(ptcs, bs, self.pr_wr_rnn_hid_dim),
+                   self.init_h_wr.expand(ptcs, bs, self.pr_wr_rnn_hid_dim))
         else:
-            h_l = torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
-                               device=imgs.device)
+            # h_l = torch.zeros(ptcs, bs, self.pr_wr_rnn_hid_dim, 
+            #                    device=imgs.device)
+            h_l = self.init_h_prwr.expand(ptcs, bs, self.pr_wr_rnn_hid_dim)
+
         state = GuideState(
             h_l=h_l,
-            h_c=torch.zeros(ptcs, bs, self.wt_rnn_hid_dim, device=imgs.device),
+            # h_c=torch.zeros(ptcs, bs, self.wt_rnn_hid_dim, device=imgs.device),
+            h_c=self.init_h_wt.expand(ptcs, bs, self.wt_rnn_hid_dim),
             bl_h=torch.zeros(ptcs, bs, self.bl_hid_dim, device=imgs.device),
             z_pres=torch.ones(ptcs, bs, 1, device=imgs.device),
             z_where=torch.zeros(ptcs, bs, self.z_where_dim, device=imgs.device),

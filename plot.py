@@ -1,3 +1,6 @@
+from os.path import join
+from random import shuffle
+
 import argparse
 from einops import rearrange
 import matplotlib.pyplot as plt
@@ -14,6 +17,8 @@ from torchvision import transforms
 from torch.utils.tensorboard import SummaryWriter
 from skimage.draw import line_aa, line
 from kornia.geometry.transform import invert_affine_transform
+from PIL import Image
+
 
 import util
 from models.template import ZSample
@@ -78,7 +83,9 @@ def plot_reconstructions(imgs:torch.Tensor,
                          max_display=32,
                          fix_img:torch.Tensor=None,
                          recons_per_img:int=1,
-                         has_fixed_img=False):
+                         has_fixed_img=False,
+                         target:torch.Tensor=None,
+                         dataset=None):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
     2) control points
@@ -99,6 +106,7 @@ def plot_reconstructions(imgs:torch.Tensor,
         n = min(bs, max_display)
         # in eval
         imgs = imgs[:n]
+        target = target[:n]
 
     if args.model_type == 'Base':
         if args.inference_net_architecture == "STN":
@@ -122,16 +130,17 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         # Get the info for make plots
         guide_out = guide(imgs, num_particles=recons_per_img)#, writer=writer)
-        print("z_where_loc:", guide.internal_decoder.z_where_loc[:, 0])
-        print("z_where_std:", guide.internal_decoder.z_where_std[:, 0])
-        print("z_where_cor:", guide.internal_decoder.z_where_cor[:, 0])
-        print("z_what_loc:", guide.internal_decoder.z_what_loc[:, 0])
-        print("z_what_std:", guide.internal_decoder.z_what_std[:, 0])
-        print("z_what_cor:", guide.internal_decoder.z_what_cor[:, 0])
+        # print("z_where_loc:", guide.internal_decoder.z_where_loc[:, 0])
+        # print("z_where_std:", guide.internal_decoder.z_where_std[:, 0])
+        # print("z_where_cor:", guide.internal_decoder.z_where_cor[:, 0])
+        # print("z_what_loc:", guide.internal_decoder.z_what_loc[:, 0])
+        # print("z_what_std:", guide.internal_decoder.z_what_std[:, 0])
+        # print("z_what_cor:", guide.internal_decoder.z_what_cor[:, 0])
         if recons_per_img > 1:
             # when plotting multiple recons, stepwise progression is not shown
             plot_multi_recon(imgs, guide_out, args, generative_model, 
-                             dataset_name, writer, writer_tag)
+                             dataset_name, writer, writer_tag, epoch, 
+                             target, dataset)
             return
         latent = guide_out.z_smpl
         z_where_dim = latent.z_where.shape[-1]
@@ -301,22 +310,21 @@ def plot_reconstructions(imgs:torch.Tensor,
             # todo 2: add transform to z_what for plotting
         # Get affine matrix: [bs * n_strk, 2, 3]
         pts_per_strk = latent.z_what.shape[3]
-        z_what = latent.z_what.view(n * n_strks, pts_per_strk, 2)
-        z_where = latent.z_where.view(n * n_strks, -1)
-        pts = transformed_z_what = util.transform_z_what(
+        z_what = latent.z_what.view(n, n_strks, pts_per_strk, 2)
+        z_where = latent.z_where.view(n, n_strks, -1)
+        transformed_z_what = util.transform_z_what(
                                     z_what=z_what, 
                                     z_where=z_where,
                                     z_where_type=args.z_where_type,
-                                    res=res).view(n, n_strks, pts_per_strk, 2)
+                                    )
     # removed to test spline z_what with neural decoder
-    # if args.model_type in ['Sequential', 'Base']:
-    #     add_control_points_plot(gen=generative_model, 
-    #                             latents=pts, 
-    #                             writer=writer, 
-    #                             epoch=epoch,
-    #                             writer_tag=writer_tag, 
-    #                             dataset_name=dataset_name,
-    #                             
+    if args.model_type in ['Sequential', 'Base']:
+        add_control_points_plot(gen=generative_model, 
+                                latents=transformed_z_what, 
+                                writer=writer, 
+                                epoch=epoch,
+                                writer_tag=writer_tag, 
+                                dataset_name=dataset_name)
 
 def plot_cum_recon(imgs, gen, latent, z_where_type, writer, 
                    dataset_name, epoch, tag2, tag1='Cummulative Reconstruction'):
@@ -366,16 +374,25 @@ def plot_cum_recon(imgs, gen, latent, z_where_type, writer,
 
     
 def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer, 
-                     writer_tag):
+                     writer_tag, epoch, targets, dataset):
     '''plot multiple recons for one input
     Args:
         out: return value of Guide.forward()
+        targets: image classes (labels)
     '''
 
     res = gen.res
     latent = guide_out.z_smpl
     canvas = guide_out.canvas
-    add_motor_noise, add_render_noise, add_affine_noise = True, True, True
+    add_motor_noise, add_render_noise, add_affine_noise = False, False, False
+
+    _, log_likelihood = gen.log_prob(latents=latent, 
+                                    imgs=imgs,
+                                    z_pres_mask=guide_out.mask_prev,
+                                    canvas=canvas,
+                                    z_prior=guide_out.z_prior)
+    print("lld", log_likelihood)
+    breakpoint()
 
     # adding motor noise
     if add_motor_noise:
@@ -390,7 +407,6 @@ def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer,
                         z_where=z_where)
 
     ps, bs = shp = latent.z_pres.shape[:2]
-
 
     if args.model_type == 'Sequential' and gen.input_dependent_param:
         gen.sigma = guide_out.decoder_param.sigma
@@ -440,7 +456,51 @@ def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer,
         tag = f'{dataset_name}/Multi-reconstruction/{writer_tag}/'
     else:
         tag = f'Multi-reconstruction/{writer_tag}'
-    writer.add_image(tag, img_grid)
+    writer.add_image(tag, img_grid, epoch)
+
+    all_ref_img = []
+    targets = targets[:bs]
+    for y in targets:
+        # loop through all char in the batch
+        if dataset_name == 'Omniglot':
+            # get all images labels in such class
+            index_of_label = [i for i, (n, l) in 
+                              enumerate(dataset._flat_character_images) if 
+                              l==y]
+            ref_img = []
+            num_tokens = len(index_of_label)
+            for i in index_of_label:
+                # getting all imgs in this class
+                image_name, character_class = dataset._flat_character_images[i]
+                image_path = join(dataset.target_folder, 
+                                  dataset._characters[character_class], 
+                                  image_name)
+                image = Image.open(image_path, mode="r").convert("L")
+
+                if dataset.transform:
+                    image = dataset.transform(image)
+                ref_img.append(image)    
+
+            # get random ps + 1 samples
+            shuffle(ref_img)
+            ref_img = torch.stack(ref_img)[:ps+1]
+            if num_tokens < ps+1:
+                ref_img = torch.cat([ref_img,
+                        torch.zeros(ps+1-num_tokens, 1, res, res)], dim=0)
+            all_ref_img.append(ref_img)
+    all_ref_img = torch.stack(all_ref_img, dim=1).view((ps+1)*bs, 1, res, res)
+    all_ref_img = display_transform(all_ref_img)# (ps+1)*bs, 1, rres, rres
+    all_ref_img = all_ref_img.view(ps+1, bs, 1, resize_res, resize_res)
+    all_ref_img = all_ref_img.expand(ps+1, bs, 3, resize_res, resize_res)
+    all_ref_img = all_ref_img.transpose(0,1).transpose(1,2).reshape(
+                                        bs, 3, (ps+1) * resize_res, resize_res)
+    all_ref_img = make_grid(all_ref_img, nrow=nrow)
+    if dataset_name is not None:
+        tag = f'{dataset_name}/Multi-reconstruction-ref/{writer_tag}/'
+    else:
+        tag = f'Multi-reconstruction-ref/{writer_tag}'
+    writer.add_image(tag, all_ref_img, epoch)
+
 
 
 def color_img_edge(imgs, z_pres, color):

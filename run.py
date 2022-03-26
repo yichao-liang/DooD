@@ -196,10 +196,7 @@ def get_args_parser():
     )
     parser.add_argument(
         "--transform_z_what",
-        default=False,
-        # default=True,
-        type=bool,
-        help=" "
+        action='store_true',
     )
     parser.add_argument(
         "--feature_extractor_sharing",

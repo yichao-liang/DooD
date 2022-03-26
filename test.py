@@ -40,7 +40,7 @@ def marginal_likelihoods(model, stats, test_loader, args,
         test_loader (DataLoader): testset dataloader
         dataset_name: used in logging; in normal training this is None.
         only_marginal_likelihood_evaluation::bool: if True not recon ploting
-        only_reconstruction::bool: if True only see one batch of data
+        only_reconstruction::bool: if >0, recon such number of batches of img
     '''
     ite_so_far = len(stats.trn_losses)
     # Fining tunning
@@ -164,19 +164,22 @@ def marginal_likelihoods(model, stats, test_loader, args,
         else:
             util.logging.info(f"Epoch {epoch} Test loss | Loss = {loss_tuple.overall_loss:.3f}")
 
+        breakpoint()
         if not only_marginal_likelihood_evaluation:
             plot.plot_reconstructions(
-                                    imgs=imgs, 
-                                    guide=guide, 
-                                    generative_model=generative_model, 
-                                    args=args, 
-                                    writer=writer, 
-                                    epoch=ite_so_far,
-                                    writer_tag=f'Test_{args.save_model_name}',
-                                    dataset_name=dataset_name,
-                                    recons_per_img=recons_per_img,
-                                    has_fixed_img=False,
-                                    )
+                    imgs=imgs, 
+                    guide=guide, 
+                    generative_model=generative_model, 
+                    args=args, 
+                    writer=writer, 
+                    epoch=ite_so_far,
+                    writer_tag=f'Test_{args.save_model_name}',
+                    dataset_name=dataset_name,
+                    recons_per_img=recons_per_img,
+                    has_fixed_img=False,
+                    target=target,
+                    dataset=test_loader.dataset,
+                )
 
         if log_to_file:
             log_file_name = "eval_mll.csv"
@@ -408,7 +411,7 @@ def classification_evaluation(guide, args, writer, dataset, stats,
         eval_df.to_csv(log_file_name)
 
 
-def unconditioned_generation(model, args, writer, in_img):
+def unconditioned_generation(model, args, writer, in_img, stats):
     '''draw samples conditioned on nothing from the generative model
     Args:
         n::int: number of samples to draw
@@ -416,9 +419,11 @@ def unconditioned_generation(model, args, writer, in_img):
             normalization slope prediction.
     '''
     # Display the in_img
+    ite_so_far = len(stats.trn_losses)
     imgs_disp = display_transform(in_img)
     in_img_grid = make_grid(imgs_disp, nrow=NROW)
-    writer.add_image(f'Unconditioned Generation/in_img', in_img_grid)
+    writer.add_image(f'Unconditioned Generation/in_img', in_img_grid,
+                     ite_so_far)
 
     if args.model_type == 'MWS':
         generative_model, guide, memory = model
@@ -468,12 +473,13 @@ def unconditioned_generation(model, args, writer, in_img):
             gen_imgs = gen.renders_imgs(gen_out.z_smpl)
         gen_imgs = display_transform(gen_imgs.squeeze(0))
         gen_img_grid = make_grid(gen_imgs, nrow=NROW)
-        writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid)
+        writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid, 
+                         ite_so_far)
         # cummulative rendering
         plot.plot_cum_recon(imgs=None, gen=gen, latent=gen_out.z_smpl, 
                             z_where_type=gen.z_where_type, writer=writer,
                             dataset_name=None, 
-                            epoch=None, tag2='out_cum', 
+                            epoch=ite_so_far, tag2='out_cum', 
                             tag1='Unconditioned Generation')
 
 def character_conditioned_generation(model, args, writer, imgs):
@@ -549,10 +555,10 @@ if __name__ == "__main__":
     uncon_eval = True
     marginal_likelihood_test_datasets = [
                      "Omniglot", 
-                     "Quickdraw",
-                     "MNIST",
-                     "KMNIST", 
-                     "EMNIST", 
+                    #  "Quickdraw",
+                    #  "MNIST",
+                    #  "KMNIST", 
+                    #  "EMNIST", 
                      ]
 
     clf_test_datasets = [
@@ -607,7 +613,8 @@ if __name__ == "__main__":
         
         if recon_eval:
             train_loader, test_loader, _, _ = util.init_dataloader(res, dataset, 
-                                                            batch_size=64)
+                                                            batch_size=64, 
+                                                            rot=False)
             # print(f"===> Begin Reconstruction testing on {dataset}")
             # trn_args.save_model_name = args.save_model_name
             # marginal_likelihoods(model=model, stats=stats, 
@@ -629,7 +636,7 @@ if __name__ == "__main__":
                                 dataset_name=dataset, 
                                 only_marginal_likelihood_evaluation=False,
                                 only_reconstruction=True,
-                                recons_per_img=10)
+                                recons_per_img=19)
             print(f'===> Done generating multiple parse for a data')
 
     # Evaluate classification
@@ -668,7 +675,8 @@ if __name__ == "__main__":
         unconditioned_generation(model=model, 
                                 args=trn_args,
                                 writer=writer, 
-                                in_img=in_img[:num_to_sample])
+                                in_img=in_img[:num_to_sample],
+                                stats=stats)
         print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
 
     # print(f"===> Begin Character-conditioned generation on with {args.save_model_name}")

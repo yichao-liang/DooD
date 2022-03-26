@@ -61,10 +61,11 @@ def constrain_z_what(z_what_loc, clamp=False, more_range=False):
     else:
         # safe
         if more_range:
-            z_what_loc = util.constrain_parameter(z_what_loc, min=-.5, max=1.5)
+            z_what_loc = util.constrain_parameter(z_what_loc, min=-.2, max=1.2)
+            # z_what_loc = util.constrain_parameter(z_what_loc, min=-.5, max=1.5)
         else:
-            # z_what_loc = util.constrain_parameter(z_what_loc, min=-.2, max=1.2)
-            z_what_loc = util.constrain_parameter(z_what_loc, min=-.5, max=1.5)
+            z_what_loc = util.constrain_parameter(z_what_loc, min=-.2, max=1.2)
+            # z_what_loc = util.constrain_parameter(z_what_loc, min=-.5, max=1.5)
             # z_what_loc = util.constrain_parameter(z_what_loc, min=0., max=1.)
     return z_what_loc
 
@@ -88,7 +89,7 @@ class RendererParamMLP(nn.Module):
                     'Omniglot', 
                     'Quickdraw'
                     ]:
-            init_b1, init_b2 = -15, 15
+            init_b1, init_b2 = -10, 10
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                         # works well with no canvas
@@ -140,7 +141,8 @@ class PresMLP(nn.Module):
         # if dataset in ['Quickdraw']:
         #     init_bias = 10
         if dataset in ['Omniglot']:
-            init_bias = 15
+            # init_bias = 15
+            init_bias = 10
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
             [init_bias], dtype=torch.float)) # works for stable models
     
@@ -424,7 +426,7 @@ class PresWherePriorMLP(nn.Module):
 
         # z_pres
         z_pres_p = z[:, :1]
-        z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, max=1-(1e-12))
+        z_pres_p = util.constrain_parameter(z_pres_p, min=1e-9, max=1-(1e-9))
         
         # z_where
         logits = z[:, 1: 1 + self.n_comp]
@@ -457,7 +459,7 @@ class WhatPriorMLP(nn.Module):
         super().__init__()
         self.n_comp = n_comp
         self.pts_per_strk = pts_per_strk
-        self.more_range = True
+        self.more_range = False
         self.seq = util.init_mlp(in_dim=in_dim, 
                                 out_dim=
                         # mix_weight + pts loc, std + pts cor
@@ -498,7 +500,7 @@ class WhatPriorMLP(nn.Module):
         logits = z[:, :tot_comp].view(bs, pps, nc)
         all_loc = constrain_z_what(z[:, tot_comp: tot_comp + tot_comp * 2
                                     ].reshape(bs * self.n_comp, -1),
-                                    more_range=True
+                                    more_range=self.more_range
                                 ).view(bs, pps, nc, 2)
 
         all_std = torch.sigmoid(z[:, tot_comp + tot_comp * 2: -tot_comp 
@@ -530,15 +532,18 @@ class ControlPointPriorRNN(nn.Module):
                  correlated_latent=True):
         super().__init__()
         self.hid_dim = hid_dim
-        self.rnn = torch.nn.GRUCell(in_dim, hid_dim)
         self.pts_per_strk = pts_per_strk
         self.n_comp = n_comp
         self.correlated_latent = correlated_latent
+        self.rnn = torch.nn.GRUCell(in_dim, hid_dim)
         self.mlp = WhatPriorMLP(in_dim=hid_dim,
                                  pts_per_strk=1,
                                  hid_dim=hid_dim,
-                                 num_layers=1,
+                                 num_layers=2,
                                  n_comp=n_comp)
+        self.init_h = torch.nn.Parameter(torch.zeros(self.hid_dim),
+                                         requires_grad=True)
+        # self.init_h = torch.zeros(self.hid_dim).cuda()
     
     def forward(self, x):
         '''
@@ -554,7 +559,7 @@ class ControlPointPriorRNN(nn.Module):
         device = x.device
         state = PtRnnState(
                     z_what = torch.zeros(bs, 2).to(device),
-                    h = torch.zeros(bs, self.hid_dim).to(device)
+                    h = self.init_h.expand(bs, self.hid_dim)
                 )
         pis, locs, stds, cors = [], [], [], []
 
