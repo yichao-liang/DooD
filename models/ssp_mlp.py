@@ -73,23 +73,31 @@ class RendererParamMLP(nn.Module):
     """Predict the render parameters
     """
     def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, sgl_strk_tanh,
-                 spline_decoder=True, dataset=None):
+                 trans_z_what, spline_decoder=True, dataset=None, ):
+        '''
+        Args:
+            trans_z_what: if trans_z_what then sigma needs more range
+        '''
         super().__init__()
         self.maxnorm = maxnorm
         self.sgl_strk_tanh = sgl_strk_tanh
         self.spline_decoder=spline_decoder
+        self.trans_z_what=trans_z_what
         self.seq = util.init_mlp(in_dim=in_dim, 
                                  out_dim=3,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)        
         self.seq.linear_modules[-1].weight.data.zero_()
 
-        init_b1, init_b2 = -6, 6
-        if dataset in [
-                    'Omniglot', 
-                    'Quickdraw'
-                    ]:
-            init_b1, init_b2 = -10, 10
+        # init_b1, init_b2 = -6, 6
+        # if dataset in [
+        #             'Omniglot', 
+        #             'Quickdraw'
+        #             ]:
+        # if trans_z_what:
+        init_b1, init_b2 = -1, 6
+        # else:
+        #     init_b1, init_b2 = -1, 10
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                         # works well with no canvas
@@ -110,7 +118,11 @@ class RendererParamMLP(nn.Module):
     def forward(self, h):
         z = self.seq(h)
         # renderer sigma
-        sigma = util.constrain_parameter(z[:, 0:1], min=.02, max=.04)
+        if self.trans_z_what:
+            sigma = util.constrain_parameter(z[:, 0:1], min=.005, max=.04)
+        else:
+            sigma = util.constrain_parameter(z[:, 0:1], min=.01, max=.04)
+            # sigma = util.constrain_parameter(z[:, 0:1], min=.02, max=.04)
 
         # stroke slope
         if self.maxnorm:
@@ -129,7 +141,8 @@ class RendererParamMLP(nn.Module):
 
 
 class PresMLP(nn.Module):
-    def __init__(self, in_dim, hidden_dim, num_layers, dataset=None):
+    def __init__(self, in_dim, hidden_dim, num_layers, dataset=None, 
+                 bzRnn=False, trans_what=False):
         super().__init__()
         self.seq = util.init_mlp(in_dim=in_dim,
                                  out_dim=1,
@@ -138,11 +151,23 @@ class PresMLP(nn.Module):
         self.seq.linear_modules[-1].weight.data.zero_()
         # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
         init_bias = 6
-        # if dataset in ['Quickdraw']:
-        #     init_bias = 10
-        if dataset in ['Omniglot']:
+        if dataset in ['KMNIST']:
+            init_bias = 4
+        if dataset in [
+                'Omniglot',
+                'Quickdraw'
+            ]:
             # init_bias = 15
-            init_bias = 10
+            # init_bias = 8 # this works well with [.02]+4 comp+rend 1
+            # if bzRnn:
+            #     init_bias = 7 # works well with [.01]+4 comp+rend1
+            #                 # [.01]+20 comp+rend1+bzRnn
+            # else:
+            # if trans_what:
+                init_bias = 7 # ok for [.01]+20comp+[bzrnn,mlp]
+            # else:
+            #     init_bias = 6.5 # ok for [.01]+20comp+[bzrnn,mlp]
+                
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
             [init_bias], dtype=torch.float)) # works for stable models
     
@@ -167,11 +192,12 @@ class WhereMLP(nn.Module):
         self.more_range = False        
         # init_b = 0
         init_b = 6
-        if dataset == [
-            'Omniglot', 
-            # 'Quickdraw'
-            ]:
-            init_b = 15
+        # if dataset == [
+        #     'Omniglot', 
+        #     # 'Quickdraw'
+        #     ]:
+            # init_b = 15
+            # init_b = 15
         # has minimal constrain
         self.seq.linear_modules[-1].weight.data.zero_()
         if z_where_type == '4_rotate':
@@ -196,13 +222,13 @@ class WhereMLP(nn.Module):
         # todo make capacible with other z_where_types
         z = self.seq(h)
         z_where_std = z[:, self.z_where_dim:] 
+        z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
         z_where_loc = z[:, :self.z_where_dim] 
         # has minimal constrain
         if self.constrain_param:
             z_where_loc = constrain_z_where(z_where_type=self.type,
                                         z_where_loc=z_where_loc, 
                                         more_range=self.more_range)
-        z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
         return z_where_loc, z_where_std
 
 class PresWhereMLP(nn.Module):
@@ -376,7 +402,7 @@ class PresWherePriorMLP(nn.Module):
         self.z_where_dim = z_where_dim
         self.type = z_where_type
         self.n_comp = n_comp
-        self.more_range = False        
+        self.more_range = False
 
         self.seq = util.init_mlp(in_dim=in_dim,
                     # 1 pres + n_comp * (mix_weight + 2 * z_where) + corr
@@ -388,7 +414,7 @@ class PresWherePriorMLP(nn.Module):
             self.seq.linear_modules[-1].weight.data.zero_()
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 # pres: 1 after sigmoid + mix_weight
-                [4] + [.1]*n_comp + 
+                [6] + [.1]*n_comp + 
                 # all means: at 0, 0, 1, 0 after sigmoid
                 (torch.tensor([0,0,4,0]*n_comp)+torch.randn(4*n_comp)*.01
                  ).tolist()+
@@ -473,9 +499,10 @@ class WhatPriorMLP(nn.Module):
                     # mix_weight
                     [.1] * n_comp * pts_per_strk +
                     # loc: init at .5 + randn noise after the sigmoid
-                    (torch.randn(n_comp*pts_per_strk*2) * .01).tolist() +
+                    (torch.randn(n_comp*pts_per_strk*2) * .2).tolist() +
                     # std: init at .2 after the sigmoid
-                    [-1.386] * n_comp* pts_per_strk * 2 +
+                    [-1.386] * n_comp * pts_per_strk * 2 +
+                    # (torch.randn(n_comp*pts_per_strk*2) * .01).tolist() +
                     # cor
                     [0] * n_comp * pts_per_strk, dtype=torch.float)) # sigmoid
                     # [-1.50777] * pts_per_strk * 2, dtype=torch.float)) # softplus

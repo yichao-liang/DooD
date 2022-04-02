@@ -179,7 +179,7 @@ def plot_reconstructions(imgs:torch.Tensor,
         # breakpoint()
         
         cum_stroke_plot = True
-        if cum_stroke_plot:
+        if cum_stroke_plot and args.model_type == 'Sequential':
             plot_cum_recon(imgs, generative_model, latent, args.z_where_type, 
                            writer, dataset_name, epoch, tag2=writer_tag)
 
@@ -318,13 +318,13 @@ def plot_reconstructions(imgs:torch.Tensor,
                                     z_where_type=args.z_where_type,
                                     )
     # removed to test spline z_what with neural decoder
-    if args.model_type in ['Sequential', 'Base']:
-        add_control_points_plot(gen=generative_model, 
-                                latents=transformed_z_what, 
-                                writer=writer, 
-                                epoch=epoch,
-                                writer_tag=writer_tag, 
-                                dataset_name=dataset_name)
+    # if args.model_type in ['Sequential', 'Base']:
+    #     add_control_points_plot(gen=generative_model, 
+    #                             latents=transformed_z_what, 
+    #                             writer=writer, 
+    #                             epoch=epoch,
+    #                             writer_tag=writer_tag, 
+    #                             dataset_name=dataset_name)
 
 def plot_cum_recon(imgs, gen, latent, z_where_type, writer, 
                    dataset_name, epoch, tag2, tag1='Cummulative Reconstruction'):
@@ -392,7 +392,6 @@ def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer,
                                     canvas=canvas,
                                     z_prior=guide_out.z_prior)
     print("lld", log_likelihood)
-    breakpoint()
 
     # adding motor noise
     if add_motor_noise:
@@ -458,48 +457,48 @@ def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer,
         tag = f'Multi-reconstruction/{writer_tag}'
     writer.add_image(tag, img_grid, epoch)
 
-    all_ref_img = []
-    targets = targets[:bs]
-    for y in targets:
-        # loop through all char in the batch
-        if dataset_name == 'Omniglot':
-            # get all images labels in such class
-            index_of_label = [i for i, (n, l) in 
-                              enumerate(dataset._flat_character_images) if 
-                              l==y]
-            ref_img = []
-            num_tokens = len(index_of_label)
-            for i in index_of_label:
-                # getting all imgs in this class
-                image_name, character_class = dataset._flat_character_images[i]
-                image_path = join(dataset.target_folder, 
-                                  dataset._characters[character_class], 
-                                  image_name)
-                image = Image.open(image_path, mode="r").convert("L")
+    # all_ref_img = []
+    # targets = targets[:bs]
+    # for y in targets:
+    #     # loop through all char in the batch
+    #     if dataset_name == 'Omniglot':
+    #         # get all images labels in such class
+    #         index_of_label = [i for i, (n, l) in 
+    #                           enumerate(dataset._flat_character_images) if 
+    #                           l==y]
+    #         ref_img = []
+    #         num_tokens = len(index_of_label)
+    #         for i in index_of_label:
+    #             # getting all imgs in this class
+    #             image_name, character_class = dataset._flat_character_images[i]
+    #             image_path = join(dataset.target_folder, 
+    #                               dataset._characters[character_class], 
+    #                               image_name)
+    #             image = Image.open(image_path, mode="r").convert("L")
 
-                if dataset.transform:
-                    image = dataset.transform(image)
-                ref_img.append(image)    
+    #             if dataset.transform:
+    #                 image = dataset.transform(image)
+    #             ref_img.append(image)    
 
-            # get random ps + 1 samples
-            shuffle(ref_img)
-            ref_img = torch.stack(ref_img)[:ps+1]
-            if num_tokens < ps+1:
-                ref_img = torch.cat([ref_img,
-                        torch.zeros(ps+1-num_tokens, 1, res, res)], dim=0)
-            all_ref_img.append(ref_img)
-    all_ref_img = torch.stack(all_ref_img, dim=1).view((ps+1)*bs, 1, res, res)
-    all_ref_img = display_transform(all_ref_img)# (ps+1)*bs, 1, rres, rres
-    all_ref_img = all_ref_img.view(ps+1, bs, 1, resize_res, resize_res)
-    all_ref_img = all_ref_img.expand(ps+1, bs, 3, resize_res, resize_res)
-    all_ref_img = all_ref_img.transpose(0,1).transpose(1,2).reshape(
-                                        bs, 3, (ps+1) * resize_res, resize_res)
-    all_ref_img = make_grid(all_ref_img, nrow=nrow)
-    if dataset_name is not None:
-        tag = f'{dataset_name}/Multi-reconstruction-ref/{writer_tag}/'
-    else:
-        tag = f'Multi-reconstruction-ref/{writer_tag}'
-    writer.add_image(tag, all_ref_img, epoch)
+    #         # get random ps + 1 samples
+    #         shuffle(ref_img)
+    #         ref_img = torch.stack(ref_img)[:ps+1]
+    #         if num_tokens < ps+1:
+    #             ref_img = torch.cat([ref_img,
+    #                     torch.zeros(ps+1-num_tokens, 1, res, res)], dim=0)
+    #         all_ref_img.append(ref_img)
+    # all_ref_img = torch.stack(all_ref_img, dim=1).view((ps+1)*bs, 1, res, res)
+    # all_ref_img = display_transform(all_ref_img)# (ps+1)*bs, 1, rres, rres
+    # all_ref_img = all_ref_img.view(ps+1, bs, 1, resize_res, resize_res)
+    # all_ref_img = all_ref_img.expand(ps+1, bs, 3, resize_res, resize_res)
+    # all_ref_img = all_ref_img.transpose(0,1).transpose(1,2).reshape(
+    #                                     bs, 3, (ps+1) * resize_res, resize_res)
+    # all_ref_img = make_grid(all_ref_img, nrow=nrow)
+    # if dataset_name is not None:
+    #     tag = f'{dataset_name}/Multi-reconstruction-ref/{writer_tag}/'
+    # else:
+    #     tag = f'Multi-reconstruction-ref/{writer_tag}'
+    # writer.add_image(tag, all_ref_img, epoch)
 
 
 

@@ -8,18 +8,21 @@ import numpy as np
 from numpy import prod
 import torch
 
+
 class LatentVariableDataset(torch.utils.data.Dataset):
     '''latent variables dataset based on the infered latent variables'''
-    def __init__(self, data_dict, train=True):
+    def __init__(self, data_dict, only_z_what=False):
+        
         self.model_name = data_dict['model_name']
         self.source_dataset_name = data_dict['source_dataset_name']
-        size = data_dict['labels'].shape[0]
-        trn_size = int(size * 0.8)
-        if train:
-            data_dict = {k: v[:trn_size] for k, v in data_dict.items()}
-        else:
-            data_dict = {k: v[trn_size:] for k, v in data_dict.items()}
+        # size = data_dict['labels'].shape[0]
+        # trn_size = int(size * 0.8)
+        # if train:
+        #     data_dict = {k: v[:trn_size] for k, v in data_dict.items()}
+        # else:
+        #     data_dict = {k: v[trn_size:] for k, v in data_dict.items()}
         self.dataset_size = data_dict['labels'].shape[0]
+        self.only_z_what = only_z_what
         
         self.z_whats = data_dict['z_what']
         self.labels = data_dict['labels']
@@ -31,7 +34,7 @@ class LatentVariableDataset(torch.utils.data.Dataset):
         print(f'{self.source_dataset_name} has {self.num_classes} classes.')
 
     def __getitem__(self, index):
-        if self.model_name not in ['MWS', 'VAE']:
+        if self.model_name not in ['MWS', 'VAE'] and not self.only_z_what:
             wt, wr = (self.z_whats[index], self.z_wheres[index])
             x = torch.cat([wt.flatten(), wr.flatten()], dim=-1)
         else:
@@ -67,50 +70,62 @@ class ClusteredDataset(torch.utils.data.Dataset):
 
 
 def get_lv_data_loader(model_name, guide, dataloaders, dataset_name, 
-                       remake_data=False):
-    lv_path = (f"./data/latent_dataset/{dataset_name}-by-{model_name}.pt")
+                       remake_data=False, args=None, only_z_what=False, 
+                       trned_ite=0):
     batch_size = dataloaders[0].batch_size
+    latent_data_loaders = []
 
-    if remake_data:
-        make_lv_dataset(lv_path, guide, dataloaders, model_name, dataset_name)
-    try:
-        data_dict = torch.load(lv_path)
-    except FileNotFoundError:
-        make_lv_dataset(lv_path, guide, dataloaders, model_name, dataset_name)
-        data_dict = torch.load(lv_path)
+    for i, split in enumerate(['train', 'test']):
+
+        trans_z_what = only_z_what
+        if trans_z_what:
+            lv_path = (f"./data/latent_dataset/{dataset_name}-by-{model_name}"+\
+                    f"-transWhat-it{trned_ite}-{split}.pt")
+        else:
+            lv_path = (f"./data/latent_dataset/{dataset_name}-by-{model_name}"+\
+                    f"-NoTransWhat-it{trned_ite}-{split}.pt")
+
+        try:
+            if remake_data: raise FileNotFoundError # remake dataset
+            data_dict = torch.load(lv_path)
+        except FileNotFoundError:
+            make_lv_dataset(lv_path, guide, dataloaders[i], model_name, 
+                            dataset_name, args, trans_z_what)
+            data_dict = torch.load(lv_path)
     
-    trn_dataset = LatentVariableDataset(data_dict, train=True)
-    val_dataset = LatentVariableDataset(data_dict, train=False)
+        dataset = LatentVariableDataset(data_dict, only_z_what=only_z_what)
+        dataloader = torch.utils.data.DataLoader(dataset, 
+                                                batch_size=batch_size,
+                                                shuffle=True,)
+        latent_data_loaders.append(dataloader)
 
-    trn_dataloader = torch.utils.data.DataLoader(trn_dataset, 
-                                                 batch_size=batch_size,
-                                                 shuffle=True,)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, 
-                                                 batch_size=batch_size,
-                                                 shuffle=False,)
-    return trn_dataloader, val_dataloader
+    return latent_data_loaders
 
-def make_lv_dataset(lv_path, guide, dataloaders, 
-                    model_name='ssp', dataset_name=None):
+def make_lv_dataset(lv_path, guide, dataloader, 
+                    model_name='ssp', dataset_name=None, args=None, 
+                    trans_z_what=False):
+    from util import transform_z_what
     z_press = []
     z_whats = []
     z_wheres = []
     labels = []
-    joint_loader = itertools.chain(*dataloaders)
-    if model_name not in ['MWS', 'VAE']:
+    model_type = args.model_type
+    if model_type not in ['MWS', 'VAE']:
         max_strks = guide.max_strks
+        if trans_z_what:
+            pts_per_strk = guide.pts_per_strk
     
     print("===> Generating the latent variables")
-    for imgs, ys in joint_loader:
+    for imgs, ys in dataloader:
         # preprocessing
-        if model_name == 'MWS':
+        if model_type == 'MWS':
             imgs = imgs.squeeze(1)
             obs_id = ys
         bs = imgs.shape[0]
         imgs = imgs.cuda()
 
         # getting the LVs
-        if model_name == 'MWS':
+        if model_type == 'MWS':
             latent_dist = guide.get_latent_dist(imgs.round())
             # [ptcs, bs, 10, 2]
             zs = guide.sample_from_latent_dist(latent_dist, 1)
@@ -119,13 +134,19 @@ def make_lv_dataset(lv_path, guide, dataloaders,
             labels.append(ys.detach().cpu())
         else:
             zs = guide(imgs).z_smpl
-            if model_name != 'VAE':
+            if model_type != 'VAE':
                 z_pres, z_what, z_where = zs
-                z_what = (z_what.view(bs, max_strks, -1) * 
+
+                if trans_z_what:
+                    z_what = transform_z_what(
+                                z_what.view(bs, max_strks, pts_per_strk, 2),
+                                z_where.view(bs, max_strks, -1),
+                                z_where_type=args.z_where_type)
+
+                z_what = (z_what.reshape(bs, max_strks, -1) * 
                         z_pres.view(bs, max_strks, -1))
                 z_where = (z_where.view(bs, max_strks, -1) *
                         z_pres.view(bs, max_strks, -1))
-                
                 z_press.append(z_pres.squeeze(0).detach().cpu())
                 z_whats.append(z_what.detach().cpu())
                 z_wheres.append(z_where.detach().cpu())

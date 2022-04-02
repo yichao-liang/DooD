@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from torchvision import datasets, transforms
+from torchvision.transforms.functional import adjust_sharpness
 from torchvision.utils import save_image
 from einops import rearrange
 from kornia.geometry.transform import invert_affine_transform, get_affine_matrix2d
@@ -35,6 +36,11 @@ ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
     # Dataloader
     # Train dataset
+    if dataset in [
+        'Omniglot',
+        'Quickdraw',
+        ]: 
+        rot = False
     if rot:
         trn_transform_lst = [
                             transforms.Resize([120, 120], antialias=True),
@@ -44,7 +50,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
                             ]
     else:
         trn_transform_lst = [
-                            transforms.Resize([120, 120], antialias=True),
+                            # transforms.Resize([120, 120], antialias=True),
                             transforms.Resize([res, res], antialias=True),
                             transforms.ToTensor(),
                             ]
@@ -101,11 +107,17 @@ def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
         from data.QuickDraw_pytorch.DataUtils.load_data import QD_Dataset
         trn_dataset = QD_Dataset(mtype="train", 
                         transform=transforms.Compose([
-                        transforms.ToPILImage(mode=None)] + trn_transform_lst),
+                        transforms.ToPILImage(mode=None)] + trn_transform_lst +[
+                        transforms.GaussianBlur(kernel_size=3),
+                        transforms.Lambda(lambda x: adjust_sharpness(x, 5))
+                        ]),
                             root="./data/QuickDraw_pytorch/Dataset")
         tst_dataset = QD_Dataset(mtype="test", 
                         transform=transforms.Compose([
-                        transforms.ToPILImage(mode=None)] + tst_transform_lst),
+                        transforms.ToPILImage(mode=None)] + tst_transform_lst +[
+                        transforms.GaussianBlur(kernel_size=3),
+                        transforms.Lambda(lambda x: adjust_sharpness(x, 5))
+                        ]),
                             root="./data/QuickDraw_pytorch/Dataset")
     elif dataset == 'Omniglot': # trn 19,280; tst 13,180
         trn_dataset = datasets.Omniglot(root='./data', background=True,
@@ -140,27 +152,35 @@ def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
     
     return train_loader, test_loader, trn_dataset, tst_dataset
 
-def init_classification_nets(guide, args, dataset, batch_size):
+def init_classification_nets(guide, args, dataset, batch_size, trned_ite):
     # Dataset
     res = guide.res if args.save_model_name == 'MWS' else guide.img_dim[-1]
     # source dataset
     train_loader, test_loader, _,_ = init_dataloader(res, dataset, 
                                                 batch_size=batch_size)
+
+    # only_z_what = True if args.model_type == 'Sequential' else False
+    only_z_what = False
     # latent variable dataset
     train_loader, test_loader = cluster.get_lv_data_loader(
                                                 args.save_model_name,
                                                 guide, 
                                                 (train_loader, test_loader),
-                                                dataset_name=dataset)
+                                                dataset_name=dataset,
+                                                args=args,
+                                                only_z_what=only_z_what,
+                                                trned_ite=trned_ite)
     # Model
     if args.save_model_name == 'VAE':
         classifier_in_dim = guide.z_dim
     elif args.save_model_name == 'MWS':
         classifier_in_dim = guide.num_arcs * 2
-    else:
-        classifier_in_dim = guide.max_strks * (guide.z_where_dim + 
-                                                     guide.z_what_dim)
-        # lv_classifier_in_dim = guide.z_where_dim + guide.z_what_dim
+    elif args.model_type in ['AIR', 'Sequential']:
+        if only_z_what:
+            classifier_in_dim = guide.max_strks * guide.z_what_dim
+        else:
+            classifier_in_dim = guide.max_strks * (
+                                    guide.z_where_dim + guide.z_what_dim)
     classifier_out_dim = test_loader.dataset.num_classes
 
     lv_classifier = init_mlp(in_dim=classifier_in_dim, 
@@ -558,6 +578,7 @@ def init(run_args, device):
       
     if run_args.model_type == 'Base':
         # Generative model
+        # removing stand alone gen
         generative_model = base.GenerativeModel(
                                 ctrl_pts_per_strk=run_args.points_per_stroke,
                                 prior_dist=run_args.prior_dist,
@@ -780,9 +801,11 @@ def init_optimizer(run_args, model):
              'weight_decay': run_args.weight_decay,}
             ])
             patience, threshold = 5000, 30
-            if run_args.dataset in ['EMNIST', 'Omniglot', 'KMNIST', 
+            if run_args.dataset in ['EMNIST', 
+                                    'Omniglot', 
+                                    'KMNIST', 
                                     'Quickdraw']:
-                patience, threshold = 1, 100
+                patience, threshold = 0, 100
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                         optimizer, mode='max',factor=0.1, patience=patience, 
                         threshold=threshold, threshold_mode='abs', min_lr=[
@@ -1174,11 +1197,14 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         angle = thetas[:, 3]
         angle_cos, angle_sin = (torch.cos(angle),\
                                 torch.sin(angle))
-        affine_matrix = torch.stack([angle_cos, -angle_sin, torch.empty_like(angle), 
-                                     angle_sin, angle_cos, torch.empty_like(angle)], 
-                                     dim=0).T.view(-1,2,3)
+        affine_matrix = torch.stack([angle_cos, -angle_sin, 
+                                    torch.ones_like(angle), 
+                                     angle_sin, angle_cos, 
+                                     torch.ones_like(angle)], 
+                                     dim=1)
+        affine_matrix = affine_matrix.view(-1,2,3)
         # 2 scale
-        affine_matrix *= thetas[:, 2].unsqueeze(-1).unsqueeze(-1)  
+        affine_matrix = affine_matrix * thetas[:, 2].unsqueeze(-1).unsqueeze(-1)  
         # 3 translate
         affine_matrix[:, :, 2] = thetas[:, 0:2] 
         return affine_matrix

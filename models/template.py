@@ -556,8 +556,8 @@ class Guide(nn.Module):
         # If previous z_pres is 0, force z_pres to 0
         z_pres_p = z_pres_p * p_state.z_pres
         # Numerical stability
-        eps = 1e-9
-        z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
+        # eps = 1e-12
+        # z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
 
         # Sample z_pres
         assert z_pres_p.shape == torch.Size([*shp, 1])

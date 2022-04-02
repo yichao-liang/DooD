@@ -13,6 +13,7 @@ import test
 from models import base, air
 from models.mws.handwritten_characters.losses import get_mws_loss
 
+# @profile
 def train(model, 
           optimizer, 
           scheduler, 
@@ -78,6 +79,7 @@ def train(model,
             # test.stroke_mll_plot(model, val_loader, args, writer, epoch)
 
         # train_loader = itertools.chain(train_loader, val_loader)
+        # torch.autograd.set_detect_anomaly(True)
         for imgs, target in train_loader:
             # Special data pre-processing for MWS
             obs_id = None
@@ -113,20 +115,22 @@ def train(model,
                               iteration)
 
             # Check for nans gradients, parameters
+            # nan_grad = False
             # named_params = get_model_named_params(args, guide, generative_model)
-            # for name, parameter in named_params:
+            # for name, p in named_params:
             #     try:
-            #         if torch.isnan(parameter).any() or\
-            #             torch.isnan(parameter.grad).any():
-            #             print(f"{name}.grad has {parameter.grad.isnan().sum()}"
-            #                     f"/{np.prod(parameter.shape)} nan parameters")
-            #             breakpoint()
-            #         if args.log_grad:
-            #             writer.add_scalar(f"Grad_norm/{name}", 
-            #                         parameter.grad.norm(2), iteration)
+            #         if torch.isnan(p).any() or torch.isnan(p.grad).any():
+            #             print(f"{name}.grad has {p.grad.isnan().sum()}"
+            #                     f"/{np.prod(p.shape)} nan parameters")
+            #             nan_grad = True
+            #         # if args.log_grad:
+            #         #     writer.add_scalar(f"Grad_norm/{name}", 
+            #         #                 p.grad.norm(2), iteration)
             #     except Exception as e:
             #         print(e)
             #         breakpoint()
+            # if nan_grad:
+            #     breakpoint()
 
                     ## if (name == 'style_mlp.seq.linear_modules.2.weight' and
                     ##     (parameter.grad.norm(2) > 6e4)):
@@ -160,7 +164,7 @@ def train(model,
                 break
             # plot every 1k ite if an epoch takes too long
             ite_since_last_plot += 1
-            if ite_since_last_plot > 500:
+            if ite_since_last_plot > 1000:
                 ite_since_last_plot = 0
                 with torch.no_grad():
                     plot.plot_reconstructions(imgs=imgs, guide=guide, 
@@ -255,12 +259,11 @@ def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer,
                                 beta=float(args.beta),
                                 args=args)
     elif args.model_type == 'AIR':
-        air.schedule_model_parameters(generative_model, guide,
-                                      iteration, args)
         loss_tuple = losses.get_loss_air(
                                 generative_model=generative_model, 
                                 guide=guide,
                                 imgs=imgs, 
+                                k=1,
                                 iteration=iteration,
                                 writer=writer,
                                 beta=float(args.beta),

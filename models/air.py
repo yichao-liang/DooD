@@ -32,13 +32,6 @@ GuideReturn = namedtuple('GuideReturn', ['z_smpl',
 GenReturn = namedtuple('GenReturn', ['z_smpl',
                                      'canvas'])
 
-def schedule_model_parameters(gen, guide, iteration, args):
-    # schdule the success prob of z_pres distribution
-    p = util.anneal_weight(init_val=0.99, final_val=args.final_bern,
-                           cur_ite=iteration, anneal_step=1e5)
-    gen.z_pres_prob = torch.zeros(args.strokes_per_img).cuda() + p
-        
-    
 class GenerativeModel(nn.Module):
     def __init__(self, max_strks=2, res=28, z_where_type='3',
                                                     use_canvas=False, 

@@ -25,6 +25,8 @@ def get_args_parser():
                         means latest''')
     parser.add_argument("-m", default='mn',
                         type=str, help='model code')
+    parser.add_argument("-ds", default='mn',
+                        type=str, help='dataset name')
     return parser
 
 if __name__ == '__main__':
@@ -45,6 +47,15 @@ if __name__ == '__main__':
             'Full-seperated_z',
         ]
 
+    ds_dict = {
+        'mn': 'MNIST',
+        'om': 'Omniglot',
+        'em': 'EMNIST',
+        'km': 'KMNIST',
+        'qm': 'QMNIST',
+        'qd': 'Quickdraw',
+    }
+    ds_name = ds_dict[run_args.ds]
     # ---
     # v3.1 bernoulli: β8, 9 works well
     # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk'
@@ -69,32 +80,12 @@ if __name__ == '__main__':
     # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em'
     # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd'
     code_dict = {
-        'mn': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-mn',
-        'mnv3': 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-noTgt-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
-        'om': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        # 'omv1': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        # 'om5': 'Full-spDec-sqPrior-dp-5wr-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        # 'omv2': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTgt-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        # 'omv3': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-noTgt-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni',
-        'km': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
-        'em': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
-        'qd': 'Full-spDec-sqPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
-        # # 'mnCor': 'Full-spDec-sq4MCorPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
-        # 'mnIm': 'Full-spDec-sq4MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
-        'mnIm': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
-        'mnImT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-45strk-mn',
-        'mnBzR': 'Full-spDec-sq20MCorImcPrior-bzRnn-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
-        # 'mn4': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-45strk-mn',
-        # 'mnM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-mn',
-        'omIm': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-om',
-        'omBzR': 'Full-spDec-sq20MCorImcPrior-bzRnn-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-om',
-        'omBRT': 'Full-spDec-sq20MCorImcPrior-bzRnn-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-om',
-        'kmM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km',
-        'emM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em',
-        'qdM': 'Full-spDec-sqMPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd',
+        'M': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        # 'MT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MT': 'Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'AIR': 'AIR',
     }
     exp_name = code_dict[run_args.m]
-    # # beta 4; 3/4 var 1full
     # exp_name = 'Full' 
     # β4->4/4 collapse; β1->4/4 steps; β3->3collapse 1full; β2->1var; 3full
     # exp_name = ablation_exp_name[0] 
@@ -108,21 +99,23 @@ if __name__ == '__main__':
     # exp_name = 'AIR'
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
-    train_not_test = True
+    train_not_test = False
     if train_not_test:
         train, evaluate = True, False
     else:
         train, evaluate = False, True
 
     for n, args in all_exp_args.items():
-        model_name = n + f'-β{run_args.beta}-{run_args.seed}'
+        model_name = n + f'-{run_args.ds}-β{run_args.beta}-{run_args.seed}'
+        tb_name = f'{run_args.m}-{run_args.ds}-β{run_args.beta}-{run_args.seed}'
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'/om/user/ycliang/log/debug1/{model_name}',
+                        '--tb_dir', f'/om/user/ycliang/log/debug1/{tb_name}',
                         # '--tb_dir', f'/om/user/ycliang/log/full-{run_args.m}/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',
+                        '--dataset', ds_name,
 
                         '--seed', f'{run_args.seed}',
                         # '--dataset', 'Omniglot',
@@ -145,5 +138,6 @@ if __name__ == '__main__':
                             # for old models
                             # '--save_model_name', n])
                             # for new models
+                            '--tb_name', tb_name,
                             '--save_model_name', model_name])
             print(f"==> Done evaluating the '{n}' model\n\n")

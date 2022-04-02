@@ -193,4 +193,16 @@
 191,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-β2.5-2,2.0,MNIST,500001.0,KMNIST,0.52271426,391.0
 192,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km-β2.5-2,2.0,KMNIST,500001.0,Quickdraw,0.6688,510.0
 193,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-3,3.0,Omniglot,500001.0,Quickdraw,0.65309995,619.0
-194,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-β2.5-2,2,MNIST,500001.0,Quickdraw,0.675,567.0
+194,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-β2.5-2,2.0,MNIST,500001.0,Quickdraw,0.675,567.0
+195,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,KMNIST,0.56189996,350.0
+196,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,EMNIST,0.52760637,226.0
+197,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,MNIST,0.76489997,424.0
+198,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,Quickdraw,0.7012,538.0
+199,AIR-km-β2.5-2,2.0,KMNIST,100001.0,KMNIST,0.5999,427.0
+200,AIR-km-β2.5-2,2.0,KMNIST,100001.0,EMNIST,0.5667021,194.0
+201,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,KMNIST,0.6034,421.0
+202,AIR-km-β2.5-2,2.0,KMNIST,100001.0,MNIST,0.81299996,293.0
+203,AIR-km-β2.5-2,2.0,KMNIST,100001.0,Quickdraw,0.6965,634.0
+204,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,EMNIST,0.57957447,223.0
+205,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0.0,KMNIST,100001.0,MNIST,0.8147,426.0
+206,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0,KMNIST,100001.0,Quickdraw,0.73429996,617.0

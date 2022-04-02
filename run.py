@@ -5,6 +5,7 @@ import train
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 from models import base, ssp, air, vae# , mws
+from torch import autograd
 
 def main(args):
     # Cuda
@@ -63,8 +64,10 @@ def main(args):
                                 mws_args.log_interval
                                 )
 
-    train.train(model, optimizer, scheduler, stats, data_loader, args, writer,
-                dataset_name=args.dataset)
+
+    # with autograd.detect_anomaly():
+    train.train(model, optimizer, scheduler, stats, data_loader, args, 
+                    writer, dataset_name=args.dataset)
 
 def get_args_parser():
     import argparse
@@ -396,9 +399,9 @@ def get_args_parser():
                             'Quickdraw', 'generative_model', 
                             'multimnist'],
                     type=str, help=" ")
-    parser.add_argument("--data-dir", 
-                        default="./omniglot_dataset/omniglot/",
-                        type=str, help=" ")
+    # parser.add_argument("--data-dir", 
+    #                     default="./omniglot_dataset/omniglot/",
+    #                     type=str, help=" ")
     # 32 worked for all losses, but for elbo sometimes it miss the "-" in "7"s
     # 64 works well for elbos and most others loss (in "1, 7" dataset).
     # 128, the model stops learning anything quite often (in "1, 7").
@@ -406,8 +409,8 @@ def get_args_parser():
     parser.add_argument("--img_res", default=50, type=int, help=" ")
     parser.add_argument("--beta", default=1, type=float, 
                         help="beta term as in beta-VAE")
-    parser.add_argument("--final_bern", default=.5, type=float, 
-                        help="Minimal value for the z_pres Bern param")
+    # parser.add_argument("--final_bern", default=.5, type=float, 
+    #                     help="Minimal value for the z_pres Bern param")
     parser.add_argument("--anneal_lr", action='store_true',
         help='if not specified then False')
     parser.add_argument("--increase_beta", action='store_true',

@@ -18,7 +18,29 @@ class PresMLP(nn.Module):
                 nn.ReLU(),
                 nn.Linear(256, 1),
             )
-    
+        self.seq.linear_modules[-1].weight.data.zero_()
+        # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+        init_bias = 6
+        if dataset in ['KMNIST']:
+            init_bias = 4
+        if dataset in [
+                'Omniglot',
+                'Quickdraw'
+            ]:
+            # init_bias = 15
+            # init_bias = 8 # this works well with [.02]+4 comp+rend 1
+            # if bzRnn:
+            #     init_bias = 7 # works well with [.01]+4 comp+rend1
+            #                 # [.01]+20 comp+rend1+bzRnn
+            # else:
+            # if trans_what:
+                init_bias = 7 # ok for [.01]+20comp+[bzrnn,mlp]
+            # else:
+            #     init_bias = 6.5 # ok for [.01]+20comp+[bzrnn,mlp]
+                
+        self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+            [init_bias], dtype=torch.float)) # works for stable models
+ 
     def forward(self, h):
         # todo make capacible with other z_where_types
         z = self.seq(h)
@@ -57,19 +79,27 @@ class PresWhereMLP(nn.Module):
         nn.Module.__init__(self)
         self.z_where_dim = z_where_dim
         self.type = z_where_type
-        self.seq = nn.Sequential(
-                nn.Linear(in_dim, 256),
-                nn.ReLU(),
-                nn.Linear(256, 1 + z_where_dim * 2),
-            )
-    
+        self.seq = util.init_mlp(in_dim=in_dim,
+                                 out_dim=1 + z_where_dim * 2,
+                                 hidden_dim=256,
+                                 num_layers=2)
+        # self.seq.linear_modules[-1].weight.data.zero_()
+        # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
+        # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
+        #     [4,.5,.5,1., 0,0,0], dtype=torch.float)) # works for stable models
+
     def forward(self, h):
         # todo make capacible with other z_where_types
         z = self.seq(h)
         z_pres_p = torch.sigmoid(z[:, :1])
         # z_pres_p = util.constrain_parameter(z[:, :1], min=0, max=1.) + 1e-6
         if self.type == '3':
-            z_where_loc = z[:, 1:4]
+            z_where_shift_loc = z[:, 1:3]
+            z_where_scale_loc = F.softplus(z[:, 3:4]) + 1e-12
+            z_where_loc = torch.cat([z_where_shift_loc, z_where_scale_loc], 
+                                    dim=-1)
+            
+            # to avoid 0 in scale
             z_where_scale = F.softplus(z[:, 4:])
         else: 
             raise NotImplementedError

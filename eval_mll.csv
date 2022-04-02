@@ -265,3 +265,6 @@
 263,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni-β2.5-4,4,Omniglot,EMNIST,200,636.967,500001.0
 264,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd-β2.5-9,9,Quickdraw,EMNIST,200,502.7934,500001.0
 265,Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd-β2.5-7,7,Quickdraw,EMNIST,200,488.64355,500001.0
+266,AIR-km-β2.5-2,2,KMNIST,Omniglot,200,1325.1283,100001.0
+267,AIR-km-β2.5-2,2,KMNIST,Quickdraw,200,1590.0563,100001.0
+268,Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk-km-β2.5-0,0,KMNIST,Omniglot,200,551.90076,100001.0

@@ -22,6 +22,7 @@ SequentialLoss = namedtuple('SequentialLoss', ['overall_loss',
                                                 'neg_log_prior', 
                                                 'log_posterior'])
 
+# @profile
 def get_loss_sequential(generative_model, 
                         guide, 
                         imgs, 
@@ -460,7 +461,8 @@ def get_loss_air(generative_model, guide, imgs, k=1,
                                                     iteration=0, 
                                                     writer=None,
                                                     writer_tag='',
-                                                    beta=1, args=None):
+                                                    beta=1, args=None, 
+                                                    alpha=0.8):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -520,15 +522,39 @@ def get_loss_air(generative_model, guide, imgs, k=1,
             ).unsqueeze(-1) for prob in log_post], dim=-1).sum(-1)
     bl_target -= torch.cat([prob.flip(-1).cumsum(-1).flip(-1
             ).unsqueeze(-1) for prob in log_prior], dim=-1).sum(-1)
-        # this is like -ELBO
-    bl_target = bl_target - log_likelihood[:, :, None] / beta
+    
+    reinforce_ll = log_likelihood.detach()
+    reinforce_ll = reinforce_ll / beta
+    # this is like -ELBO
+    bl_target = bl_target - reinforce_ll[:, :, None]
+
     bl_target = (bl_target * mask_prev)
+
+    # this is still updated reinforce_sgnl; purely created for later convenience
+    reinforce_sgnl = bl_target - bl_value
+
+    if True:
+        reinforce_sgnl = reinforce_sgnl.detach()
+        num_nonzero = mask_prev.sum()
+        signal_mean = (reinforce_sgnl * mask_prev).sum() / num_nonzero
+        signal_var = ( ( (reinforce_sgnl - signal_mean) * mask_prev) ** 2
+                        ).sum() / num_nonzero
+        if iteration == 0: 
+            guide.c, guide.v = signal_mean, signal_var
+        guide.c = alpha * guide.c + (1 - alpha) * signal_mean
+        guide.v = alpha * guide.v + (1 - alpha) * signal_var
+        # Q: should this be for each time step or for all elements?
+        # A: For all elements, as the gradient for the param is the sum of the
+        # gradients for each step.
+        # Q: should this be for unmasked elements or including the masked?
+        reinforce_sgnl = (reinforce_sgnl - guide.c) / max(
+                                                        1, torch.sqrt(guide.v))
 
     # The "REINFORCE"  term in the gradient is: [bs,]; 
     # bl)target is the negative elbo
     # bl_value: [bs, max_strks]; z_pres [bs, max_strks]; 
     # (bl_target - bl_value) * gradient[z_pres_likelihood]
-    neg_reinforce_term = (bl_target - bl_value).detach() * log_post.z_pres
+    neg_reinforce_term = reinforce_sgnl.detach() * log_post.z_pres
     neg_reinforce_term = neg_reinforce_term * mask_prev
     neg_reinforce_term = neg_reinforce_term.sum(2) # [bs, ]
 
@@ -548,24 +574,26 @@ def get_loss_air(generative_model, guide, imgs, k=1,
     loss = model_loss + baseline_loss # [bs, ]
     
     z_pres_smpls = guide_out.z_smpl.z_pres.detach()
-    writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
-        z_pres_smpls.sum(),
-        iteration)
 
-    if args.log_param:
-        if writer is not None:
-            with torch.no_grad():
-                if writer_tag is None:
-                    writer_tag = ''
-                # loss
-                for n, log_prob in zip(log_post._fields, log_post):
-                    writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
-                                        log_prob.detach().sum(-1).mean(), 
-                                        iteration)
-                for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
-                    writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
-                                        log_prob.detach().sum(-1).mean(), 
-                                        iteration)
+    if writer != None:
+        with torch.no_grad():
+            if writer_tag is None:
+                writer_tag = ''
+
+            writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
+                z_pres_smpls.sum(),
+                iteration)
+
+            # loss
+            for n, log_prob in zip(log_post._fields, log_post):
+                writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
+                                    log_prob.detach().sum(-1).mean(), 
+                                    iteration)
+            for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
+                writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
+                                    log_prob.detach().sum(-1).mean(), 
+                                    iteration)
+            if args.log_param:
                 # z prior parameters
                 if generative_model.prior_dist == 'Sequential':
                     writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",

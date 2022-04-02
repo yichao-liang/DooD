@@ -100,7 +100,8 @@ def marginal_likelihoods(model, stats, test_loader, args,
                                                 generative_model, 
                                                 guide,
                                                 imgs, 
-                                                k=k)
+                                                k=k,
+                                                args=args)
             elif args.model_type == 'VAE':
                 loss_tuple = losses.get_loss_vae(
                                                 generative_model,
@@ -164,7 +165,6 @@ def marginal_likelihoods(model, stats, test_loader, args,
         else:
             util.logging.info(f"Epoch {epoch} Test loss | Loss = {loss_tuple.overall_loss:.3f}")
 
-        breakpoint()
         if not only_marginal_likelihood_evaluation:
             plot.plot_reconstructions(
                     imgs=imgs, 
@@ -283,7 +283,8 @@ def classification_evaluation(guide, args, writer, dataset, stats,
     ite_so_far = len(stats.trn_losses)
     guide_classifier, dataloaders, optimizer, clf_stats = \
                             util.init_classification_nets(guide, args, dataset, 
-                                                         batch_size)
+                                                            batch_size, 
+                                                        trned_ite=ite_so_far)
     train_loader, test_loader = dataloaders
     log_interval = 100
     num_iterations = clf_trn_interations
@@ -439,26 +440,34 @@ def unconditioned_generation(model, args, writer, in_img, stats):
         if guide.sep_where_pres_net:
             generative_model.wr_rnn = guide.wr_rnn
             generative_model.pr_rnn = guide.pr_rnn
+            # init_h_pr = guide.init_h_pr
+            # init_h_wr = guide.init_h_wr
+            # init_h_prwr = (init_h_pr, init_h_wr)
         else:
             generative_model.pr_wr_rnn = guide.pr_wr_rnn
+            # init_h_prwr = guide.init_h_prwr
         generative_model.wt_rnn = guide.wt_rnn
+        # init_h_wt = guide.init_h_wt
         # generative_model.renderer_param_mlp = guide.renderer_param_mlp
         # generative_model.target_in_pos = guide.target_in_pos
         max_step = guide.max_strks
 
         from models.ssp import DecoderParam
+        bs = in_img.shape[0]
         decoder_param = DecoderParam(
-            sigma=decoder_param.sigma[:,:,0:1].repeat(1,1,max_step),
+            sigma=decoder_param.sigma[:,:,0:1].median().repeat(1,bs,max_step),
             slope=[
-                decoder_param.slope[0][:,:,0:1].repeat(1,1,max_step),
-                decoder_param.slope[1]
+                decoder_param.slope[0][:,:,0:1].median().repeat(1,bs,max_step),
+                decoder_param.slope[1][:,:,0:1].median().repeat(1,bs,max_step)
             ]
         )
         # sample
-        gen_out = generative_model.sample(bs=[in_img.shape[0]], 
+        gen_out = generative_model.sample(bs=[bs], 
                                           decoder_param=decoder_param,
                                           char_cond_gen=False,
-                                          linear_sum=guide.linear_sum)
+                                          linear_sum=guide.linear_sum,
+                                        #   init_h=(init_h_prwr, init_h_wt),
+                                          )
 
         gen.sigma = decoder_param.sigma
         gen.sgl_strk_tanh_slope = decoder_param.slope[0]
@@ -540,6 +549,8 @@ def get_args_parser():
     
     parser.add_argument("--save_model_name", default=None, type=str, 
                         help='name for ckpt dir')
+    parser.add_argument("--tb_name", default=None, type=str, 
+                        help='name for tensorboard log')
     parser.add_argument("--clf_trn_interations", default=400000, type=int, help=" ")
     # parser.add_argument("--clf_trn_interations", default=20, type=int, help=" ")
     return parser
@@ -549,22 +560,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Choose the dataset to test on
-    mll_eval = False
-    recon_eval = False
+    mll_eval = True
+    recon_eval = True
     clf_eval = False
-    uncon_eval = True
+    uncon_eval = False
     marginal_likelihood_test_datasets = [
                      "Omniglot", 
-                    #  "Quickdraw",
-                    #  "MNIST",
-                    #  "KMNIST", 
-                    #  "EMNIST", 
+                     "Quickdraw",
+                     "MNIST",
+                     "KMNIST", 
+                     "EMNIST", 
                      ]
 
     clf_test_datasets = [
+                     "KMNIST", 
                      "EMNIST", 
                      "MNIST",
-                     "KMNIST", 
                      "Quickdraw",
                     ]
     
@@ -584,7 +595,12 @@ if __name__ == "__main__":
     else:
         gen, guide = model
     res = gen.res
-    writer = SummaryWriter(log_dir=f"/om/user/ycliang/log/debug1/{args.save_model_name}",)
+    
+    if args.tb_name == None:
+        tb_dir = f"/om/user/ycliang/log/debug1/{args.save_model_name}"
+    else:
+        tb_dir = f"/om/user/ycliang/log/debug1/{args.tb_name}"
+    writer = SummaryWriter(log_dir=tb_dir)
 
     for dataset in marginal_likelihood_test_datasets:
 
@@ -659,7 +675,7 @@ if __name__ == "__main__":
         num_to_sample = 64
         trn_loader, _, _, _ = util.init_dataloader(res, trn_args.dataset, 
                                                     batch_size=num_to_sample,
-                                                    rot=False)
+                                                    rot=True)
         in_img, _ = next(iter(trn_loader))
         in_img = in_img.to(device)
         # in_img, n = [], 0
