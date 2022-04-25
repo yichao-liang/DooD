@@ -17,13 +17,15 @@ from torch.distributions.categorical import Categorical
 from torch.distributions.mixture_same_family import MixtureSameFamily
 from torch.distributions.multivariate_normal import MultivariateNormal
 from einops import rearrange
-from kornia.morphology import dilation, erosion
+# from kornia.morphology import dilation, erosion
+from tqdm import tqdm
 
 import util
 from splinesketch.code.bezier import Bezier
 from models.ssp_mlp import *
 from models import air_mlp, template
 from models.template import ZSample, ZLogProb, GuideState,GenState
+from plot import save_img_debug as sid
 
 # latent variable tuple
 DecoderParam = namedtuple("DecoderParam", "sigma slope")
@@ -73,6 +75,7 @@ class GenerativeModel(nn.Module):
                                                 use_bezier_rnn=False,
                                                 condition_by_img=False,
                                                 constrain_var=False,
+                                                dataset='MNIST',
                                                     ):
         super().__init__()
         self.max_strks = max_strks
@@ -143,59 +146,62 @@ class GenerativeModel(nn.Module):
                                 z_where_std, requires_grad=True)
         elif prior_dist == 'Sequential':
             self.h_dim = hidden_dim
+            feature_extractor_out_dim = hidden_dim
             self.z_where_dim = util.init_z_where(self.z_where_type).dim
 
             # exp finds that sharing the pr_wr_mlp when sep_where_pres_net
             # leads to better results
             # if self.sep_where_pres_net:
-            #     self.pr_mlp_in_dim = self.h_dim
-            #     self.wr_mlp_in_dim = self.h_dim
-            # else:
+            if self.no_pres_rnn:
+                self.pr_mlp_in_dim = feature_extractor_out_dim
+
             self.pr_wr_mlp_in_dim = self.h_dim
             self.wt_mlp_in_dim = self.h_dim
 
             if self.dependent_prior: 
                 if condition_by_img:
-                    feature_extractor_out_dim = hidden_dim
                     self.wt_mlp_in_dim += feature_extractor_out_dim
 
                 if self.prior_dependency == 'wr|wt':
-                    # if self.sep_where_pres_net:
-                    #     self.wr_mlp_in_dim += 10
-                    # else:
                     self.pr_wr_mlp_in_dim += pts_per_strk * 2
                 elif self.prior_dependency == 'wt|wr':
                     self.wt_mlp_in_dim += self.z_where_dim
                 else: raise NotImplementedError
 
-            if self.no_pres_rnn or self.no_rnn:
-                self.z_pres_prob = torch.nn.Parameter(
-                                torch.zeros(self.max_strks)+.99, 
-                                requires_grad=True)
-
-            # if self.sep_where_pres_net:
-            #     self.gen_pr_mlp = PresPriorMLP(
-            #                         in_dim=self.pr_mlp_in_dim,
-            #                         hidden_dim=hidden_dim,
-            #                         num_layers=1)
-            #     self.gen_wr_mlp = WherePriorMLP(
-            #                         in_dim=self.wr_mlp_in_dim, 
-            #                         z_where_type=self.z_where_type,
-            #                         z_where_dim=self.z_where_dim,
-            #                         hidden_dim=hidden_dim,
-            #                         num_layers=num_mlp_layers)
-            # else:
             pri_mlp_hid_dim = 256
-            self.gen_pr_wr_mlp = PresWherePriorMLP(
+            if self.no_pres_rnn or self.no_rnn:
+                self.gen_pr_mlp = PresPriorMLP(
+                                    in_dim=self.pr_mlp_in_dim,
+                                    hidden_dim=hidden_dim,
+                                    num_layers=num_mlp_layers,
+                                    dataset=dataset,
+                                    )
+                self.gen_wr_mlp = WherePriorMLP(
+                                    in_dim=self.pr_wr_mlp_in_dim,
+                                    z_where_type=z_where_type,
+                                    z_where_dim=self.z_where_dim,
+                                    hidden_dim=pri_mlp_hid_dim,
+                                    num_layers=num_mlp_layers,
+                                    # constrain_param=constrain_param,
+                                    n_comp=n_comp)
+            else:
+                self.gen_pr_wr_mlp = PresWherePriorMLP(
                                                 in_dim=self.pr_wr_mlp_in_dim,
                                                 z_where_type=z_where_type,
                                                 z_where_dim=self.z_where_dim,
                                                 hidden_dim=pri_mlp_hid_dim,
                                                 num_layers=num_mlp_layers,
                                                 # constrain_param=constrain_param,
-                                                n_comp=n_comp
+                                                n_comp=n_comp,
+                                                dataset=dataset,
                                             )
-            # self.renderer_param_mlp = RendererParamMLP(in_dim=self.h_dim,)
+
+            global_z_pres = False
+            if global_z_pres:
+                self.z_pres_prob = torch.nn.Parameter(
+                                torch.zeros(self.max_strks)+.99, 
+                                requires_grad=True)
+
             if use_bezier_rnn:
                 self.bezier_rnn = ControlPointPriorRNN(
                                         # + 2 for prev point sample
@@ -215,7 +221,7 @@ class GenerativeModel(nn.Module):
                                                 )
         else:
             raise NotImplementedError
-        self.imgs_dist_std = torch.nn.Parameter(torch.ones(1, res, res), 
+        self.imgs_dist_std = torch.nn.Parameter(torch.zeros(1, res, res), 
                                                             requires_grad=True)
 
         
@@ -281,17 +287,14 @@ class GenerativeModel(nn.Module):
         Return:
             dist: batch_shape=[ptcs, bs]; event_shape=[]
         '''
-        if self.sep_where_pres_net and self.prior_dist == 'Sequential':
+        if self.no_pres_rnn and self.prior_dist == 'Sequential':
+            # in this case h_l[0] canvas_so_far embedding
             h_l = h_l[0]
 
         if self.prior_dist == "Sequential":
             assert h_l != None, "need hidden states!"
             
             if self.no_pres_rnn or self.no_rnn:
-                z_pres_p = self.z_pres_prob[t].expand(*bs)
-                z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, 
-                                                              max=1-(1e-12))
-            else:
                 mlp_in = h_l.view(prod(bs), -1).clone()
                 if pri_wt is not None and self.prior_dependency == 'wr|wt':
                     mlp_in = torch.cat([h_l.view(prod(bs), -1),
@@ -299,11 +302,23 @@ class GenerativeModel(nn.Module):
                 # if self.sep_where_pres_net:
                 #     z_pres_p = self.gen_pr_mlp(mlp_in)
                 # else:
+                z_pres_p = self.gen_pr_mlp(mlp_in)
+                z_pres_p = z_pres_p.squeeze(-1)
+
+            # elif global_pres:
+                # z_pres_p = self.z_pres_prob[t].expand(*bs)
+                # z_pres_p = util.constrain_parameter(z_pres_p, min=1e-12, 
+                #                                               max=1-(1e-12))
+            else:
+                mlp_in = h_l.view(prod(bs), -1).clone()
+                if pri_wt is not None and self.prior_dependency == 'wr|wt':
+                    mlp_in = torch.cat([h_l.view(prod(bs), -1),
+                                        pri_wt.view(prod(bs), -1)], dim=-1)
                 z_pres_p, _, _, _, _ = self.gen_pr_wr_mlp(mlp_in)
                 z_pres_p = z_pres_p.squeeze(-1)
                 if sample: 
+                    print(f"z_pres param at {t}", z_pres_p)
                     pass
-                    # print(f"z_pres param at {t}", z_pres_p)
                     # print("cons pres")
                     # z_pres_p[z_pres_p < .5] = 0.
         elif self.prior_dist == "Independent":
@@ -345,10 +360,10 @@ class GenerativeModel(nn.Module):
             if pri_wt is not None and self.prior_dependency == 'wr|wt':
                 mlp_in = torch.cat([h_l.view(prod(bs), -1),
                                        pri_wt.view(prod(bs), -1)], dim=-1)
-            # if self.sep_where_pres_net:
-            #     loc, std = self.gen_wr_mlp(mlp_in)
-            # else:
-            _, pi, loc, std, cor = self.gen_pr_wr_mlp(mlp_in)
+            if self.no_pres_rnn:
+                pi, loc, std, cor = self.gen_wr_mlp(mlp_in)
+            else:
+                _, pi, loc, std, cor = self.gen_pr_wr_mlp(mlp_in)
             n_comp = pi.shape[1]
             wr_dim = self.z_where_dim
             loc = loc.view(*bs, n_comp, -1)
@@ -364,7 +379,7 @@ class GenerativeModel(nn.Module):
                 cor = cor.view(prod(bs), n_comp)
                 tril = torch.diag_embed(std.view(prod(bs)*n_comp, -1)).view(
                                             prod(bs), n_comp, wr_dim, wr_dim)
-                tril[:, :, 1, 0] = cor
+                tril[..., 1, 0] = cor
                 tril = tril.view(*bs, n_comp, wr_dim, wr_dim)
 
                 if sample or self.constrain_var:
@@ -405,7 +420,6 @@ class GenerativeModel(nn.Module):
         return dist
     
     def control_points_dist(self, h_c=None, bs=[1, 3], pri_wr=None, 
-                            
                             sample=False):
         '''(z_what Prior) Batched control points distribution
         It can be | sequential where it has to have h_l, or
@@ -531,11 +545,12 @@ class GenerativeModel(nn.Module):
         parameters`.
         Args:
             latents: 
-                z_pres: [bs, n_strks] 
-                z_what: [bs, n_strks, pts_per_strk, 2 (x, y)]
-                z_where:[bs, n_strks, z_where_dim]
+                z_pres: [ptcs, bs, n_strks] 
+                z_what: [ptcs, bs, n_strks, pts_per_strk, 2 (x, y)]
+                z_where:[ptcs, bs, n_strks, z_where_dim]
+            canvas [ptcs, bs, 1, res, res]
         Return:
-            Dist over images: [bs, 1 (channel), H, W]
+            Dist over images: [ptcs, bs, 1 (channel), H, W]
         '''
         assert latents is not None or canvas is not None
         if canvas is None:
@@ -545,11 +560,10 @@ class GenerativeModel(nn.Module):
                 imgs_dist_loc = canvas
             else:
                 # if intermediate likelihood, use all the canvas steps
-                # From 1 to 5
                 imgs_dist_loc = canvas[:, :, 1:]
 
         ptcs, bs = shp = imgs_dist_loc.shape[:2]
-        # imgs_dist_std = torch.ones_like(imgs_dist_loc) 
+
         if canvas is None or self.intr_ll is None:
             imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1)
         else:
@@ -802,9 +816,9 @@ class GenerativeModel(nn.Module):
                 z_where:[ptcs, bs, max_strks, z_where_dim]
             imgs: [bs, 1, res, res]
             z_pres_mask: [bs, max_strks]
-            canvas: [bs, 1, res, res] the renders from guide's internal decoder
+            canvas: [ptcs, bs, 1, res, res] the renders from guide's internal decoder
             decoder_param:
-                sigma, slope: [bs, max_strks]
+                sigma, slope: [ptcs, bs, max_strks]
         Return:
             Joint log probability
             log_likelihood [ptcs, bs]
@@ -885,7 +899,8 @@ class GenerativeModel(nn.Module):
                     decoder_param=None,
                     char_cond_gen=False,
                     linear_sum=True,
-                    init_h=None):
+                    init_h=None,
+                    pseudo_completion=False):
         '''
         Args:
             bs::list: representing the shape of generated image, e.g. [bs]
@@ -917,73 +932,18 @@ class GenerativeModel(nn.Module):
                     strk_img = torch.zeros(*bs, self.max_strks, 1, self.res, 
                                                 self.res, device=self.device)
 
-            if z_pms is not None:
-                char_cond_gen = True
-            if self.sep_where_pres_net:
-                if init_h != None:
-                    h_l = (init_h[0][0].expand(*bs, self.h_dim),
-                           init_h[0][1].expand(*bs, self.h_dim))
-                else:
-                    h_l = (torch.zeros(*bs, self.h_dim, device=self.device),
-                       torch.zeros(*bs, self.h_dim, device=self.device))
-            else:
-                if init_h != None:
-                    h_l = (init_h[0].expand(*bs, self.h_dim))
-                else:
-                    h_l = torch.zeros(*bs, self.h_dim, device=self.device)
-
-            if init_h != None:
-                h_c = init_h[1].expand(*bs, self.h_dim)
-            else:
-                h_c = torch.zeros(*bs, self.h_dim, device=self.device)
-
-            # if latents is not None:
-            #     z_pres, z_what, z_where = latents
-            # else:
-            # todo: the initial states are hard to control
-            z_pres = torch.ones(*bs, 1, device=self.device)
-            # z_where = util.init_z_where(self.z_where_type)[0].unsqueeze(0
-            #             ).expand(bs[0], self.z_where_dim).to(self.device)
-            z_where = torch.zeros(*bs, self.z_where_dim, device=self.device)
-            z_what = torch.zeros(*bs, self.pts_per_strk, 2, 
-                                                        device=self.device)
-
-            state = GenState(h_l=h_l,
-                             h_c=h_c,
-                             z_pres=z_pres,
-                             z_where=z_where,
-                             z_what=z_what)
+            # including h_l, h_c, prev_z
+            state = self.init_gen_state(init_h, bs)
 
             for t in range(self.max_strks):
                 print(f"sampling time {t}")
-                if char_cond_gen:#and t==0:
-                    result = self.generation_step(state, canvas, in_img, 
-                        z_pms=ZLogProb(
-                            z_pres=z_pms.z_pres[:, :, t: t+1].squeeze(0),
-                            z_where=z_pms.z_where[:, :, t].squeeze(0),
-                            z_what=z_pms.z_what[:, :, t].squeeze(0)),
-                        # decoder_param=DecoderParam(
-                        #     sigma=decoder_param[0][:, :, t: t+1].squeeze(0),
-                        #     slope=(decoder_param[1][0][:, :, t: t+1].squeeze(0),
-                        #            decoder_param[1][1][:, :, t: t+1].squeeze(0)))
-                               )
-                else:
-                    result = self.generation_step(state, canvas, 
-                                                  t=t)
+                if pseudo_completion and t == 2:
+                    print("Pseudo Autocompletion set state to init")
+                    state = self.init_gen_state(init_h, bs)
+
+                result = self.generation_step(state, canvas, t=t)
+
                 state = result['state']
-
-                # if char_cond_gen:
-                #     state = GenState(
-                #                 h_l=hs[0][:, :, t].squeeze(0),
-                #                 h_c=hs[1][:, :, t].squeeze(0),
-                #                 z_pres=state.z_pres,
-                #                 z_where=state.z_where,
-                #                 z_what=state.z_what
-                # #                 # z_pres=smpl_latents.z_pres[:, :, t: t+1].squeeze(0),
-                # #                 # z_where=smpl_latents.z_where[:, :, t].squeeze(0),
-                # #                 # z_what=smpl_latents.z_what[:, :, t].squeeze(0)
-                #                     )
-
                 # z_pres: [bs, 1]
                 z_pres_smpl[:, t] = state.z_pres.squeeze(-1)
                 # z_what: [bs, pts_per_strk, 2];
@@ -1002,6 +962,12 @@ class GenerativeModel(nn.Module):
                             z_where_smpl[:, t:t+1].unsqueeze(0))
                 canvas_step = self.renders_imgs(latents).squeeze(0)
                 
+                # if t==2:
+                #     sid(canvas[0], 'gen_updated_canvas')
+                #     breakpoint()
+                # if t==1:
+                #     sid(canvas_step[0], 'gen_canvas_step')
+                #     sid(canvas[0], 'gen_canvas_so_far')
                 if linear_sum:
                     # breakpoint()
                     strk_img[:, t] = canvas_step
@@ -1062,11 +1028,14 @@ class GenerativeModel(nn.Module):
         
         # z_where, z_pres hidden states
         if self.sep_where_pres_net:
-            pr_rnn_in = torch.cat([
-                                p_state.z_pres.view(bs, -1),
-                                canvas_embed,
-                            ], dim=1)
-            h_pr = self.pr_rnn(pr_rnn_in, p_state.h_l[0])
+            if self.no_pres_rnn:
+               h_pr = canvas_embed
+            else:
+                pr_rnn_in = torch.cat([
+                                    p_state.z_pres.view(bs, -1),
+                                    canvas_embed,
+                                ], dim=1)
+                h_pr = self.pr_rnn(pr_rnn_in, p_state.h_l[0])
 
             wr_rnn_in = torch.cat([
                                 p_state.z_where.view(bs, -1),
@@ -1089,7 +1058,7 @@ class GenerativeModel(nn.Module):
                                                 sample=True).sample()
                 # [bs, where_dim]
                 z_where = self.transformation_dist(h_l, [bs], pri_wt=None,
-                                                sample=False).sample()
+                                                sample=True).sample()
                 pri_wr = z_where
                 if self.condition_by_img:
                     glmps = util.spatial_transform(
@@ -1097,12 +1066,14 @@ class GenerativeModel(nn.Module):
                         util.get_affine_matrix_from_param(
                             z_where.view(bs, -1),
                             z_where_type=self.z_where_type))
+                    # if t==1:
+                    #     sid(glmps[0], 'gen_glimpse')
                     glmps_em = self.img_feature_extractor(glmps
-                                            ).view(bs, -1).detach()
+                                            ).view(bs, -1)#.detach()
                     pri_wr = torch.cat([pri_wr, glmps_em], -1)
                 # [bs, num_pts, 2]
                 z_what = self.control_points_dist(h_c, [bs], pri_wr=pri_wr,
-                                                sample=False).sample()
+                                                sample=True).sample()
             elif self.prior_dependency == 'wr|wt':
                 z_what = self.control_points_dist(h_c, [bs], pri_wr=None,
                                                 sample=True).sample()
@@ -1190,8 +1161,103 @@ class GenerativeModel(nn.Module):
                 # 'sigma': sigma,
                 # 'slope': (strk_slope, add_slope)
                 }
+    def init_gen_state(self, init_h, bs):
+        if self.sep_where_pres_net:
+            if init_h != None:
+                h_l = (init_h[0][0].expand(*bs, self.h_dim),
+                        init_h[0][1].expand(*bs, self.h_dim))
+            else:
+                h_l = (torch.zeros(*bs, self.h_dim, device=self.device),
+                    torch.zeros(*bs, self.h_dim, device=self.device))
+        else:
+            if init_h != None:
+                h_l = (init_h[0].expand(*bs, self.h_dim))
+            else:
+                h_l = torch.zeros(*bs, self.h_dim, device=self.device)
 
-    
+        if init_h != None:
+            h_c = init_h[1].expand(*bs, self.h_dim)
+        else:
+            h_c = torch.zeros(*bs, self.h_dim, device=self.device)
+
+        # if latents is not None:
+        #     z_pres, z_what, z_where = latents
+        # else:
+        # todo: the initial states are hard to control
+        z_pres = torch.ones(*bs, 1, device=self.device)
+        # z_where = util.init_z_where(self.z_where_type)[0].unsqueeze(0
+        #             ).expand(bs[0], self.z_where_dim).to(self.device)
+        z_where = torch.zeros(*bs, self.z_where_dim, device=self.device)
+        z_what = torch.zeros(*bs, self.pts_per_strk, 2, 
+                                                    device=self.device)
+
+        state = GenState(h_l=h_l,
+                            h_c=h_c,
+                            z_pres=z_pres,
+                            z_where=z_where,
+                            z_what=z_what)
+        return state
+
+    def get_sample_curve(self, latents, uni_out_dim:bool=False, sample_res=50):
+        '''Get the sample curves for the latents with bezier curve renderer
+        Args:
+            latents: 
+                z_pres: [ptcs, bs, n_strks] 
+                z_what: [ptcs, bs, n_strks, pts_per_strk, 2 (x, y)]
+                z_where:[ptcs, bs, n_strks, z_where_dim]
+            n_points::int: Each sample is represented by n_points
+        Return:
+            if uni_out_dim i.e. uniform output shape across batch shape:
+                sample_curves::tensor [ptcs, bs, n_points, 2]
+            else:
+                sample_curves::list of len ptcs*bs, each elem is a tensor with
+                    [the number of unique points, 2].
+        '''
+        z_pres, z_what, z_where = latents
+        ptcs, bs, n_strks, pts_per_strk, _ = z_what.shape
+        smpl_res = sample_res
+        shp = z_pres.shape[:2]
+        
+        # [prod(shp), n_strks, pts_per_strk, 2]
+        trans_what = util.transform_z_what(
+                                z_what.view(prod(shp), n_strks,pts_per_strk, 2),
+                                z_where.view(prod(shp), n_strks, -1),
+                                z_where_type=self.z_where_type)
+        z_pres = z_pres.view(prod(shp), -1)
+
+        # [prod(shp), n_strks, 2 (xy), steps]
+        n_steps = sample_res * 2
+        sample_curves = self.decoder.get_sample_curve(trans_what, 
+                                                      n_steps=n_steps)
+        sample_curves = rearrange(sample_curves,
+                                        'shp strk xy pts -> shp strk pts xy')
+        sample_curves = (sample_curves * smpl_res).round()
+
+        pts_per_obs, sample_curves_ = [], []
+        for i, smpl in enumerate(sample_curves):
+            # smpl [n_strks, steps, 2(xy)]
+            # uni_pts [n_uni_pts, 2(xy)]
+            keep_strks = int(z_pres[i].sum())
+            uni_pts = torch.unique(smpl[:keep_strks].reshape(
+                                keep_strks*n_steps,2),  dim=0)/smpl_res
+            sample_curves_.append(uni_pts)
+            pts_per_obs.append(uni_pts.shape[0])
+
+        if uni_out_dim:
+            min_pts = min(pts_per_obs)
+            if min_pts < 50: 
+                util.logging.info(f"number of point={min_pts}, less than 50")
+
+            point_list = []
+            for pts in sample_curves_: 
+                n_pts = pts.shape[0]
+                idx = torch.randperm(n_pts)
+                point_list.append(pts[idx[:min_pts]])
+            sample_curves_ = torch.stack(point_list, dim=0).view(*shp,min_pts,2)
+
+        return sample_curves_
+
+        
     def no_img_dist_named_params(self):
         for n, p in self.named_parameters():
             if n in ['imgs_dist_std', 'decoder.c', 'decoder.d']:
@@ -1213,6 +1279,186 @@ class GenerativeModel(nn.Module):
             else:
                 yield n, p
 
+class SampleCurveDist(torch.distributions.Distribution):
+    def __init__(self, cond_sample_curve, norm_std=.1):
+        '''Assume equal dimension per sample, returns a batch of 2D mixture 
+        distribution composed of a normal on each point
+        Args:
+            cond_sample_curve: [ptcs, bs, n_points, 2]
+        Return:
+            sample_point_dist: batch_shape [ptcs, bs], event_shape [1, 2]
+        '''
+        # n_pts = cond_sample_curve.shape[-2]
+        # bs: [ptcs, bs,]; es []
+        mix = Categorical(logits=torch.ones_like(cond_sample_curve[...,0]))
+
+        # bs: [ptcs, bs, ptns]; es [2]
+        comp = Independent(Normal(loc=cond_sample_curve, 
+                            scale=torch.ones_like(cond_sample_curve)*norm_std),
+                         reinterpreted_batch_ndims=1)
+        # bs: [ptcs, bs]; es [2]
+        self.dist = MixtureSameFamily(mix, comp)
+
+    def log_prob(self, sample_curve):
+        '''Assuming equal dimension across sample_cruve tensor
+        returns average log_prob of the points on sample curve, i.e.
+        mean( sum( log_prob( each_point )))
+        Args: 
+            sample_curves: [ptcs, bs, n_points, 2]
+        Return:[]
+        '''
+        ptcs, bs = self.dist.batch_shape
+        n_pts = sample_curve.shape[-2]
+
+        dist = self.dist.expand([n_pts, ptcs, bs])
+        sample_curve = rearrange(sample_curve,
+                                      'ptcs b ptns c -> ptns ptcs b c')
+
+        log_prob = dist.log_prob(sample_curve)
+        
+        return log_prob.sum(dim=0)
+    
+    def sample(self, bs=torch.Size()):
+        return self.dist.sample(bs)
+
+class SampleCurveDistWithAffine(torch.distributions.Distribution):
+    def __init__(self, cond_sample_curve, norm_std=.1):
+        '''Different from AffineSampleCurveDist, this performs transforms at
+        log_prob eval time. And apply the transforms to the variables being 
+        evaled, which is equivalent to transforming the vars being conditioned 
+        on. Doing this save computation.
+        Args:
+            conda_sample_curve: [ptcs, bs, n_points, 2]
+            norm_std::float: std for the base sample point
+            num_affines::int: number of affines to average across with uni 
+                weights
+        '''
+        # [n_affine, 7] currently [2187, 7]
+        cond_sample_curve = cond_sample_curve
+        self.affines = util.get_sample_affine(cond_sample_curve.device)
+
+        # bs: [ptcs, bs,]; es []
+        self.mix = Categorical(logits=torch.ones_like(cond_sample_curve[...,0]))
+
+        # bs: [ptcs, bs, ptns]; es [2]
+        self.c_ptcs, self.c_bs, self.c_n_pts, _ = cond_sample_curve.shape
+        self.cond_loc = cond_sample_curve.view(self.c_ptcs*self.c_bs, 1, 
+                                               self.c_n_pts, 2)
+        self.cond_std = torch.ones_like(cond_sample_curve)*norm_std
+
+    def log_prob(self, sample_curve):
+        '''Assuming equal dimension across sample_cruve tensor
+        returns average log_prob of the points on sample curve, i.e.
+        mean( sum( log_prob( each_point )))
+        Args: 
+            sample_curves: [ptcs, bs, n_points, 2]
+        Return:[bs, d_bs]? should have ptcs?
+        '''
+        log_probs = []
+
+        # ptcs, bs = self.dist.batch_shape
+        # d_ptcs, d_bs = self.dist.batch_shape
+        ptcs, bs, n_pts, _ = sample_curve.shape
+        # dist = self.dist.expand([n_pts, d_ptcs, d_bs])
+
+        sample_curve = rearrange(sample_curve,
+                                      'ptcs b ptns c -> ptns ptcs b c')
+        for z_where in self.affines:
+
+            trans_cond = util.transform_z_what(
+                    self.cond_loc,
+                    z_where[None, None, :].repeat(self.c_ptcs*self.c_bs, 1, 1),
+                    z_where_type='7'
+                    ).view(self.c_ptcs, self.c_bs, self.c_n_pts, 2)
+
+            comp = Independent(Normal(loc=trans_cond, scale=self.cond_std),
+                                reinterpreted_batch_ndims=1)
+
+            # bs: [ptcs, bs]; es [2]
+            dist = MixtureSameFamily(self.mix, comp)                                                     
+            dist = dist.expand([n_pts, self.c_ptcs, self.c_bs])
+
+            # log_prob = dist.log_prob(sample_curve)
+            log_prob = dist.log_prob(sample_curve)
+            log_prob = log_prob.sum(dim=0)
+            log_probs.append(log_prob)
+
+        log_prob = torch.stack(log_probs, dim=0).max(0)[0]
+        return log_prob
+    
+    def sample(self, bs=torch.Size()):
+        return self.dist.sample(bs)
+    
+class AffineSampleCurveDist(torch.distributions.Distribution):
+    def __init__(self, cond_sample_curve, norm_std=.1):
+        '''
+        Args:
+            conda_sample_curve: [ptcs, bs, n_points, 2]
+            norm_std::float: std for the base sample point
+            num_affines::int: number of affines to average across with uni 
+                weights
+        '''
+        # [n_affine, 7] currently [2187, 7]
+        cond_sample_curve = cond_sample_curve.cpu()
+        affines = util.get_sample_affine(cond_sample_curve.device)
+        n_afn = affines.shape[0]
+        ptcs, bs, ptns = cond_sample_curve.shape[:3]
+
+        # reshapes
+        # to [ptcs*bs, n_affine, ptns, 2]
+        cond_sample_curve = cond_sample_curve.view(ptcs*bs, 1, ptns, 2
+                                                ).repeat(1,n_afn,1,1)
+        # to [ptcs*bs, n_affine, 7 (where_dim)]
+        affines = affines.unsqueeze(0).repeat(ptcs*bs, 1, 1)
+
+        # [ptcs*bs, n_affine, ptns, 2]
+        cond_sample_curve = util.transform_z_what(z_what=cond_sample_curve,
+                                                  z_where=affines,
+                                                  z_where_type='7')
+        affines = affines.view(ptcs, bs, n_afn, 7)
+        cond_sample_curve = cond_sample_curve.view(ptcs, bs, n_afn, ptns, 2)
+
+        # mixture over points
+        # bs: [ptcs, bs, afn]; es []
+        mix_crv = Categorical(logits=torch.ones_like(cond_sample_curve[...,0]))
+        # bs: [ptcs, bs, afn, ptns]; es [2]
+        comp = Independent(Normal(loc=cond_sample_curve, 
+                            scale=torch.ones_like(cond_sample_curve)*norm_std),
+                         reinterpreted_batch_ndims=1)
+        # bs: [ptcs, bs, afn], es [2]
+        crv_dist = MixtureSameFamily(mix_crv, comp)
+        self.dist=crv_dist
+
+        # mixture over affines
+        # bs [ptcs, bs]; es []
+        # mix_aff = Categorical(logits=torch.ones_like(affines[...,0]))
+        # bs [ptcs, bs]; es [2]
+        # self.dist = MixtureSameFamily(mix_aff, crv_dist)
+                                                     
+    def log_prob(self, sample_curve):
+        '''Assuming equal dimension across sample_cruve tensor
+        returns average log_prob of the points on sample curve, i.e.
+        mean( sum( log_prob( each_point )))
+        Args: 
+            sample_curves: [ptcs, bs, n_points, 2]
+        Return:[]
+        '''
+        sample_curve = sample_curve.cpu()
+        # ptcs, bs = self.dist.batch_shape
+        ptcs, bs, n_af = self.dist.batch_shape
+        n_pts = sample_curve.shape[-2]
+
+        # dist = self.dist.expand([n_pts, ptcs, bs])
+        dist = self.dist.expand([n_pts, ptcs, bs, n_af])
+        sample_curve = rearrange(sample_curve,'ptcs b ptns c -> ptns ptcs b c')
+        # log_prob = dist.log_prob(sample_curve)
+        log_prob = dist.log_prob(sample_curve.unsqueeze(-2))
+        
+        return log_prob.sum(dim=0).max(2)[0].cuda()
+    
+    def sample(self, bs=torch.Size()):
+        return self.dist.sample(bs)
+    
 class Guide(template.Guide):
     def __init__(self, 
                         max_strks:int=2, 
@@ -1264,6 +1510,7 @@ class Guide(template.Guide):
                         correlated_latent=False,
                         use_bezier_rnn=False,
                         condition_by_img=True,
+                        residual_no_target_pres=True,
                 ):
         '''
         Args:
@@ -1273,6 +1520,7 @@ class Guide(template.Guide):
         self.pts_per_strk = pts_per_strk
         self.z_what_dim = self.pts_per_strk * 2
         self.linear_sum = linear_sum
+        self.residual_no_target_pres = residual_no_target_pres
         super().__init__(
                 max_strks=max_strks, 
                 img_dim=img_dim,
@@ -1315,6 +1563,7 @@ class Guide(template.Guide):
         self.render_at_the_end = render_at_the_end
         self.prior_dependency = prior_dependency
         self.condition_by_img = condition_by_img
+        self.correlated_latent = correlated_latent
 
         # Internal renderer
         if self.use_canvas or self.prior_dist == 'Sequential':
@@ -1469,13 +1718,15 @@ class Guide(template.Guide):
             else: self.constrain_z_pres_param_this_step = False
 
             # Do one inference step and save results
+
             if self.intr_ll is None:
                 result = self.inference_step(p_state=state, imgs=imgs, 
-                                             canvas=canvas, residual=residual)
+                                             canvas=canvas, residual=residual, 
+                                             t=t)
             else:
                 # only pass in the most updated canvas
                 result = self.inference_step(state, imgs, canvas[:, :, t], 
-                                                                  residual)
+                                            residual,t=t)
 
             state = result['state']
             assert (state.z_pres.shape == torch.Size([ptcs, bs, 1]) and
@@ -1524,6 +1775,10 @@ class Guide(template.Guide):
                                         z_what_smpl[:, :, t:t+1],
                                         z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
+
+                # if t == 3:
+                #     sid(canvas_step[0,-8], 'transformed_single_strk')
+                #     breakpoint()
                 
                 
                 if self.intr_ll is None:
@@ -1580,6 +1835,12 @@ class Guide(template.Guide):
                     residual = torch.clamp(imgs - canvas, min=0.)
                     if self.detach_rsd:
                         residual = residual.detach()
+                    
+                    # if t == 1:
+                    #     sid(canvas[0,-8], 'canvas_so_far')
+                    #     sid(residual[0,-8], 'residual_img')
+
+                    
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
@@ -1597,7 +1858,7 @@ class Guide(template.Guide):
                     #                                                 -1).detach()
                     # else:
                     if self.prior_dependency == 'wr|wt':
-                        pri_wt = state.z_what.view(*shp, -1).detach()
+                        pri_wt = state.z_what.view(*shp, -1)#.detach()
                         pri_wr = None
                         if self.condition_by_img:
                             self.internal_decoder.sigma = sigmas[:, :, t:t+1
@@ -1607,8 +1868,12 @@ class Guide(template.Guide):
                             glmps = self.internal_decoder.renders_glimpses(
                                             state.z_what.unsqueeze(2)
                                             ).view(prod(shp), *img_dim)
-                            glmps_em = self.img_feature_extractor(glmps
+                            if self.feature_extractor_sharing:
+                                glmps_em = self.img_feature_extractor(glmps
                                                     ).view(*shp, -1)#.detach()
+                            else:
+                                glmps_em = self.trans_img_feature_extractor(
+                                                    glmps).view(*shp, -1)#.detach()
                             pri_wt = torch.cat([pri_wt, glmps_em], -1)
 
                     elif self.prior_dependency == 'wt|wr':
@@ -1622,9 +1887,13 @@ class Guide(template.Guide):
                                 util.get_affine_matrix_from_param(
                                     state.z_where.view(prod(shp), -1),
                                     z_where_type=self.z_where_type))
-                            glmps_em = self.img_feature_extractor(glmps
-                                                    ).view(*shp, -1)#.detach()
-                            pri_wr = torch.cat([pri_wr, glmps_em], -1).detach()
+                            if self.feature_extractor_sharing:
+                                glmps_em = self.img_feature_extractor(
+                                                    glmps).view(*shp, -1)#.detach()
+                            else:
+                                glmps_em = self.trans_img_feature_extractor(
+                                                    glmps).view(*shp, -1)#.detach()
+                            pri_wr = torch.cat([pri_wr, glmps_em], -1)#.detach()
                     else:
                         raise NotImplementedError
                     
@@ -1638,11 +1907,15 @@ class Guide(template.Guide):
                 else:
                     h_ls[:, :, t], h_cs[:, :, t] = h_l, h_c
                 
-                if self.no_rnn:
-                    # use feature as hidden states
-                    h_l = h_c = self.img_feature_extractor(
+                # if self.no_rnn:
+                #     # use feature as hidden states
+                #     h_l = h_c = self.img_feature_extractor(
+                #             prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
+                #     h_l = [h_l, h_l]
+                if self.no_pres_rnn:
+                    h_l0 = self.img_feature_extractor(
                             prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
-                    h_l = [h_l, h_l]
+                    h_l = [h_l0, h_l[1]]
 
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(
                                         h_l, [*shp], pri_wt, t=t
@@ -1656,6 +1929,10 @@ class Guide(template.Guide):
                                         h_c.clone(), [*shp], pri_wr,
                                         ).log_prob(z_what_smpl[:, :, t].clone()
                                         ) * z_pres_smpl[:, :, t].clone()
+            # if state.z_pres.sum() == 0:
+            #     print(f"break at time {t}")
+            #     z_pres_smpl[:, :, t:] = 0
+            #     break
 
         # todo 1: init the distributions which can be returned; can be useful
         if self.detach_canvas_so_far and not self.linear_sum:
@@ -1688,7 +1965,7 @@ class Guide(template.Guide):
         return data
         
     # @profile
-    def inference_step(self, p_state, imgs, canvas, residual):
+    def inference_step(self, p_state, imgs, canvas, residual, t):
 
         '''Given previous (initial) state and input image, predict the current
         step latent distribution.
@@ -1720,12 +1997,14 @@ class Guide(template.Guide):
         # Get spatial transformed "crop" from input image
         # imgs [bs, *img_dim]
         # trans_imgs [ptcs * bs, *img_dim]
-        trans_imgs = util.spatial_transform(
+        if not self.residual_no_target:
+            trans_imgs = util.spatial_transform(
                             imgs.view(prod(shp), *img_dim), 
                             util.get_affine_matrix_from_param(
                             z_where.view(prod(shp), -1), 
                             z_where_type=self.z_where_type)
                         ).view(*shp, *img_dim)
+        else: trans_imgs = None
 
         if self.use_residual:
             trans_rsd = util.spatial_transform(
@@ -1734,6 +2013,9 @@ class Guide(template.Guide):
                             z_where.view(prod(shp), -1), 
                             z_where_type=self.z_where_type)
                         ).view(*shp, *img_dim)
+
+            # if t == 3:
+            #     sid(trans_rsd[0,-8], 'post_glimpse')
         else: trans_rsd = None
         
         wt_mlp_in, h_c = self.get_wt_mlp_in(trans_imgs, 
@@ -1816,10 +2098,10 @@ class Guide(template.Guide):
         # z_pres [prod(shp), 1]
         if self.sep_where_pres_net:
             z_pres_p = self.pres_mlp(pr_mlp_in.view(prod(shp), -1))
-            z_where_loc, z_where_scale = self.where_mlp(
+            z_where_loc, z_where_scale, z_where_cor = self.where_mlp(
                                      wr_mlp_in.view(prod(shp), -1))
         else:
-            z_pres_p, z_where_loc, z_where_scale = self.pr_wr_mlp(
+            z_pres_p, z_where_loc, z_where_scale, z_where_cor = self.pr_wr_mlp(
                                             pr_wr_mlp_in.view(prod(shp), -1))
         if self.simple_pres:
             # in this case the predictions above are ignored
@@ -1830,6 +2112,7 @@ class Guide(template.Guide):
         z_pres_p = z_pres_p.view(*shp, -1)
         z_where_loc = z_where_loc.view(*shp, -1)
         z_where_scale = z_where_scale.view(*shp, -1)
+        z_where_cor = z_where_cor.view(*shp, -1)
 
 
         if self.sep_where_pres_net:
@@ -1843,7 +2126,7 @@ class Guide(template.Guide):
         add_slope = add_slope.view(*shp, -1)
 
         z_pres, z_where, z_pres_lprb, z_where_lprb = self.sample_pr_wr(p_state,
-                                          z_pres_p, z_where_loc, z_where_scale)
+                            z_pres_p, z_where_loc, z_where_scale, z_where_cor)
 
         return (z_pres, z_where, z_pres_lprb, z_where_lprb, z_pres_p, 
                 (z_where_loc, z_where_scale), sigma, strk_slope, add_slope)
@@ -1863,13 +2146,16 @@ class Guide(template.Guide):
         '''
         # bs here is actually ptcs * bs
         ptcs, bs = shp = zwhat_mlp_in.shape[:2]
-        z_what_loc, z_what_std = self.wt_mlp(zwhat_mlp_in.view(prod(shp), -1))
+        z_what_loc, z_what_std, z_what_cor = self.wt_mlp(zwhat_mlp_in.view(
+                                                                prod(shp), -1))
 
         # [bs, pts_per_strk, 2]
-        z_what_loc = z_what_loc.view([*(shp), self.pts_per_strk, 2])
-        z_what_std = z_what_std.view([*(shp), self.pts_per_strk, 2])
+        z_what_loc = z_what_loc.view([*shp, self.pts_per_strk, 2])
+        z_what_std = z_what_std.view([*shp, self.pts_per_strk, 2])
+        z_what_cor = z_what_cor.view([*shp, self.pts_per_strk])
         
-        z_what, z_what_lprb = self.sample_wt(z_what_loc, z_what_std, z_pres) 
+        z_what, z_what_lprb = self.sample_wt(z_what_loc, z_what_std, z_what_cor,
+                                             z_pres) 
         
         return z_what, z_what_lprb, (z_what_loc, z_what_std)
 

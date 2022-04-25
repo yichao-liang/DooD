@@ -99,10 +99,20 @@ class PresWhereMLP(nn.Module):
             z_where_loc = torch.cat([z_where_shift_loc, z_where_scale_loc], 
                                     dim=-1)
             
-            # to avoid 0 in scale
-            z_where_scale = F.softplus(z[:, 4:])
+        elif self.type == '4_rotate':
+            z_where_shift_loc = util.constrain_parameter(
+                                                    z[:, 1:3], min=-.8, max=.8)
+            z_where_scale_loc = F.softplus(z[:, 3:4]) + 1e-6
+            z_where_rot_loc = z[:, 4:5]
+            z_where_loc = torch.cat([
+                                        z_where_shift_loc, 
+                                        z_where_scale_loc,
+                                        z_where_rot_loc
+                                    ], dim=-1)
         else: 
             raise NotImplementedError
+        # to avoid 0 in scale
+        z_where_scale = F.softplus(z[:, self.z_where_dim+1:])
         return z_pres_p, z_where_loc, z_where_scale
 
 class WhatMLP(nn.Module):

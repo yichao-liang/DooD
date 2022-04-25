@@ -2,6 +2,7 @@
 likelihood
 """
 import os
+from pathlib import Path
 from sched import scheduler
 import numpy as np
 import itertools
@@ -14,11 +15,18 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from scipy.spatial.distance import cdist
+import seaborn as sns
+
 
 
 import util, plot, losses, train
 from plot import display_transform
+from plot import save_img_debug as sid
 from models.mws.handwritten_characters.train import get_log_p_and_kl
+from models.template import ZSample, ZLogProb
+from models.ssp import SampleCurveDist, AffineSampleCurveDist, \
+            SampleCurveDistWithAffine
 
 mws_transform = transforms.Resize([50, 50], antialias=True)
 NROW = 16
@@ -32,7 +40,8 @@ def marginal_likelihoods(model, stats, test_loader, args,
                         only_reconstruction=False,
                         dataset_derived_std=False,
                         log_to_file=False,
-                        recons_per_img=1):
+                        recons_per_img=1,
+                        test_run=False):
     '''Compute the marginal likelihood through IWAE's k samples and log the 
     reconstruction through `writer` and `save_imgs_dir`.
         If `train_loader` and `optimizer` is not None, do some finetuning
@@ -62,7 +71,7 @@ def marginal_likelihoods(model, stats, test_loader, args,
         generative_model, guide, memory = model
     else:
         generative_model, guide = model
-        
+
     # todo: make it condition on trn set
     if dataset_derived_std:
         # use dataset derived std for evaluating marginal likelihood
@@ -76,7 +85,12 @@ def marginal_likelihoods(model, stats, test_loader, args,
 
     val_ite = 0
     with torch.no_grad():
+        if only_reconstruction:
+            args.log_param = True
+        else:
+            args.log_param = False
         for imgs, target in test_loader:
+            # sid(imgs[-8], 'target')
             if args.model_type == 'MWS':
                     # for mll evaluation
                     imgs = mws_transform(imgs).squeeze(1)
@@ -94,14 +108,20 @@ def marginal_likelihoods(model, stats, test_loader, args,
                 loss_tuple = losses.get_loss_sequential(
                                                 generative_model, guide, imgs, 
                                                 k=k, iteration=ite_so_far,
-                                                args=args)
+                                                args=args,
+                                                writer_tag=f'{dataset_name}/',
+                                                train=False,
+                                                writer=writer,
+                                                )
             elif args.model_type == 'AIR':
                 loss_tuple = losses.get_loss_air(
                                                 generative_model, 
                                                 guide,
                                                 imgs, 
                                                 k=k,
-                                                args=args)
+                                                args=args,
+                                                writer_tag=f'{dataset_name}/',
+                                                )
             elif args.model_type == 'VAE':
                 loss_tuple = losses.get_loss_vae(
                                                 generative_model,
@@ -127,7 +147,9 @@ def marginal_likelihoods(model, stats, test_loader, args,
 
             if only_reconstruction:
                 break
-        
+            
+            if val_ite == 2 and test_run:
+                break
         # Logging
         data_size = len(test_loader.dataset)
         for i in range(len(cum_losses)):
@@ -155,7 +177,7 @@ def marginal_likelihoods(model, stats, test_loader, args,
                     # writer.add_scalar(f"{test_loader.dataset.__name__}/Test curves/"+n, 
                     if dataset_name is not None:
                         writer.add_scalar(f"{dataset_name}/Test curves/"+n, 
-                                        l, epoch)
+                                        l, ite_so_far)
                     else:
                         writer.add_scalar("Test curves/"+n, l, epoch)
         # writer.add_scalars("Test curves", {n:l for n, l in 
@@ -179,6 +201,8 @@ def marginal_likelihoods(model, stats, test_loader, args,
                     has_fixed_img=False,
                     target=target,
                     dataset=test_loader.dataset,
+                    invert_color=True,
+                    save_as_individual_img=only_reconstruction,
                 )
 
         if log_to_file:
@@ -438,8 +462,11 @@ def unconditioned_generation(model, args, writer, in_img, stats):
         decoder_param = guide(in_img).decoder_param
         generative_model.img_feature_extractor = guide.img_feature_extractor
         if guide.sep_where_pres_net:
-            generative_model.wr_rnn = guide.wr_rnn
-            generative_model.pr_rnn = guide.pr_rnn
+            if guide.no_pres_rnn:
+                generative_model.wr_rnn = guide.wr_rnn
+            else:    
+                generative_model.wr_rnn = guide.wr_rnn
+                generative_model.pr_rnn = guide.pr_rnn
             # init_h_pr = guide.init_h_pr
             # init_h_wr = guide.init_h_wr
             # init_h_prwr = (init_h_pr, init_h_wr)
@@ -466,6 +493,7 @@ def unconditioned_generation(model, args, writer, in_img, stats):
                                           decoder_param=decoder_param,
                                           char_cond_gen=False,
                                           linear_sum=guide.linear_sum,
+                                          pseudo_completion=False,
                                         #   init_h=(init_h_prwr, init_h_wt),
                                           )
 
@@ -485,59 +513,247 @@ def unconditioned_generation(model, args, writer, in_img, stats):
         writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid, 
                          ite_so_far)
         # cummulative rendering
-        plot.plot_cum_recon(imgs=None, gen=gen, latent=gen_out.z_smpl, 
+        plot.plot_cum_recon(args=args, imgs=None, gen=gen, latent=gen_out.z_smpl, 
                             z_where_type=gen.z_where_type, writer=writer,
                             dataset_name=None, 
                             epoch=ite_so_far, tag2='out_cum', 
                             tag1='Unconditioned Generation')
 
-def character_conditioned_generation(model, args, writer, imgs):
-    '''Get the first (or more) hidden_states and pass it to the generative model
-    to get samples.
-    Args:
-        imgs [bs, 1, res, res]: character imgs to be conditioned on
+def one_shot_classification(model, args, writer, its_so_far):
+    '''Perform one shot clf as in Omniglot challenge
     '''
-    if args.model_type == 'MWS':
-        generative_model, guide, memory = model
-    else:
-        generative_model, guide = model
-
-    # todo: check for AIR, FULL, Full-seq_prir
-    n_samples = 1
-    bs = imgs.shape[0]
-    # res = generative_model.res
-    # out = guide(imgs)
-
-    # # [n_samples, bs, 1, res, res]
-    # gen_imgs = util.character_conditioned_sampling(n_samples, 
-    #                                                 out, 
-    #                                                 generative_model)
-    out = guide(imgs)
-
-    # Load the generative states
-    generative_model.img_feature_extractor = guide.img_feature_extractor
-    generative_model.style_rnn = guide.style_rnn
-    generative_model.z_what_rnn = guide.z_what_rnn
-    generative_model.renderer_param_mlp = guide.renderer_param_mlp
-    generative_model.target_in_pos = guide.target_in_pos
-
-    gen_out = generative_model.sample(bs=[imgs.shape[0]], 
-                                      in_img=imgs,
-                                    #   hs=out.hidden_states,
-                                      z_pms=out.z_pms,
-                                      decoder_param=out.decoder_param,
-                                    )
     
-    gen_imgs = gen_out.canvas
-    gen_imgs = display_transform(gen_imgs).unsqueeze(0)
+    gen, guide = model
+    tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res)
 
-    disp_imgs = torch.cat([display_transform(imgs).unsqueeze(0), gen_imgs],
-                                                                        dim=0)                                       
-    disp_imgs = disp_imgs.transpose(0, 1).reshape(2*bs, 1, 64, 64)
-    gen_img_grid = make_grid(disp_imgs, nrow=n_samples+1)
-    writer.add_image(f'Character-conditioned Generation', gen_img_grid) 
-    return
+    # train
+    # check if it has been finetuned
+    # checkpoint_path = util.get_checkpoint_path(args)
+    # if not Path(checkpoint_path).exists():
+    #     model, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
+    #                                                     path=ckpt_path,
+    #                                                     device=device,
+    #                                                     init_data_loader=False)
+    # else:
+    #     model, _, _, _, _ = util.load_checkpoint(path=ckpt_path,
+    #                                             device=device,
+    #                                             init_data_loader=False)
+    # ...
+     
+    # test
+    with torch.no_grad():
+        accuracys = []
+        for run, (sup_img, qry_img, label) in tqdm(enumerate(tst_loader)):
+            sup_img.squeeze_(0), qry_img.squeeze_(0), label.squeeze_(0)
+            sup_img = sup_img.to(args.device)
+            qry_img = qry_img.to(args.device) 
+            label = label.to(args.device)
+
+            # our model:
+            # get k choose j top latents
+            sup_latents = util.get_top_k_latents(guide, gen, sup_img, 
+                                                 ptcs=2, k=1)
+            sup_out = guide(sup_img)
+            sup_latents, mask_prev, canvas, z_prior = (
+                                                sup_out.z_smpl, sup_out.mask_prev,
+                                                sup_out.canvas,sup_out.z_prior)
+            # get support sample curve dist 
+            # sample_res = 200 # works well wo affine
+            sample_res = 200
+            # norm_std = 0.05
+            norm_std = 0.05
+            sup_crv = gen.get_sample_curve(sup_latents, uni_out_dim=True, 
+                                            sample_res=sample_res)
+            sup_crv_dist = SampleCurveDistWithAffine(sup_crv, norm_std)
+            
+            # get query sample curves
+            qry_out = guide(qry_img)
+            qry_latents = qry_out.z_smpl
+            qry_crv = gen.get_sample_curve(qry_latents, uni_out_dim=True, 
+                                            sample_res=sample_res)
+
+            # for each of n_class, repeat for n_test time, n_dim
+            # latents = ZSample(latents[0].repeat(20,1,1).transpose(0,1),
+            #                   latents[1].repeat(20,1,1,1,1).transpose(0,1),
+            #                   latents[2].repeat(20,1,1,1).transpose(0,1))
+            # mask_prev = mask_prev.repeat(20,1,1).transpose(0,1)
+            # canvas = canvas.repeat(20,1,1,1,1).transpose(0,1)
+            # z_prior = ZLogProb(z_prior[0].repeat(20,1,1).transpose(0,1),
+            #                     z_prior[1].repeat(20,1,1).transpose(0,1),
+            #                     z_prior[2].repeat(20,1,1).transpose(0,1))
+            # tar_img = tar_img.repeat(20,1,1,1,1)
+                            
+            batch_mode = False # faster if memory is not a issue
+            if batch_mode:
+                score_mtrx = sup_crv_dist.log_prob(qry_crv[:, :13])
+                raise NotImplementedError
+                preds = score_mtrx.argmax(dim=1)+1
+                trues = label[:,1]
+                n_correct = (preds==trues).sum().item()
+            else:
+                score_lst, preds, trues = [], [], []
+                n_correct = 0
+                for i, qry in tqdm(enumerate(qry_img)):
+
+                    # Our model
+                    # image_dist likelihood: for each src_img, score each tar_img
+                    # qry = qry.qry_img[i:i+1].repeat(20,1,1,1)
+                    # _, log_lld = guide.internal_decoder.log_prob(latents=latents,
+                    #                     imgs=qry,
+                    #                     z_pres_mask=mask_prev,
+                    #                     # canvas=canvas,
+                    #                     canvas=sup_img.unsqueeze(0),
+                    #                     z_prior=z_prior)
+                    # scores = log_lld # + log_lld_rv
+
+                    # sample curve likelihood
+                    scores = sup_crv_dist.log_prob(qry_crv[:,i:i+1])
+
+                    # pred
+                    pred_class = scores.argmax()+1
+                    score_lst.append(scores)
+
+                    # Lake baseline: hausdorff distance
+                    # scores = []
+                    # f_cost = ModHausdorffDistance
+                    # f_load = LoadImgAsPoints
+                    # qry_load = f_load(qry.detach().cpu())
+                    # for sup in sup_img:
+                    #     scores.append(f_cost(f_load(sup.detach().cpu()), qry_load))
+                    # scores = torch.tensor(scores)
+                    # score_lst.append(scores)
+                    # pred_class = scores.argmin()+1
+
+                    # compute the accuracy
+                    lbl_class = label[label[:,0]==i+1][0][1]
+                    preds.append(pred_class)
+                    trues.append(lbl_class)
+                    # get the label of the current test img
+                    if pred_class.item() == lbl_class.item():
+                        n_correct += 1
+                score_mtrx = torch.concat(score_lst)
+
+            # plot and log 
+            score_mtrx = score_mtrx.detach().cpu().numpy()
+            score_fig = plot.plot_clf_score_heatmap(score_mtrx, preds, trues)
+            writer.add_figure("One shot classification/score", score_fig, run+1)
+            writer.add_image("One shot classification/query img", make_grid(
+                                        display_transform(qry_img), nrow=10), run+1)
+            writer.add_image("One shot classification/support img", make_grid(
+                                        display_transform(sup_img), nrow=10), run+1)
+            
+            accuracys.append(n_correct/20)
+            print(f"##### Run {run} accuracy", n_correct/20)
+
+        # get pred
+        # pred = score.argmax(score, dim=1)
+        # accuracy = compute_accuracy(pred, label)
+        # accuracys.append(accuracy)
+
+    av_acc = np.mean(accuracys)
+    print("#### One shot classification accuracy per run:", accuracys)
+    print("#### One shot classification accuracy average:", av_acc)
+    writer.add_scalar("One shot classification/accuracy", av_acc, its_so_far)
+
+def LoadImgAsPoints(I):
+	# Load image file and return coordinates of 'inked' pixels in the binary image
+	# 
+	# Output:
+	#  D : [n x 2] rows are coordinates
+    I.squeeze_()
+    # I = I.flatten()
+    I = np.array(I,dtype=bool)
+    # I = np.logical_not(I)
+    (row,col) = I.nonzero()
+    D = np.array([row,col])
+    D = np.transpose(D)
+    D = D.astype(float)
+    n = D.shape[0]
+    mean = np.mean(D,axis=0)
+    for i in range(n):
+        D[i,:] = D[i,:] - mean
+    return D       
+
+def ModHausdorffDistance(itemA,itemB):
+	# Modified Hausdorff Distance
+	#
+	# Input
+	#  itemA : [n x 2] coordinates of "inked" pixels
+	#  itemB : [m x 2] coordinates of "inked" pixels
+	#
+	#  M.-P. Dubuisson, A. K. Jain (1994). A modified hausdorff distance for object matching.
+	#  International Conference on Pattern Recognition, pp. 566-568.
+	#
+	D = cdist(itemA,itemB)
+	mindist_A = D.min(axis=1)
+	mindist_B = D.min(axis=0)
+	mean_A = np.mean(mindist_A)
+	mean_B = np.mean(mindist_B)
+	return max(mean_A,mean_B)
+        
+def num_strokes_plot(model, stats, args, writer, max_strks=40):
+    '''Plot the distribution of number of stroke use in each dataset
+    '''
+    ds_counts = {} # {ds_name: {0: x0, 1: x1,..., n: xn}}
+    ite_so_far = len(stats.trn_losses)
+    gen, guide = model
+    guide.max_strks = max_strks
+    test_run = True
+    datasets = [
+                "MNIST",
+                "Omniglot", 
+                "Quickdraw",
+                "KMNIST", 
+                "EMNIST", 
+                ]
+    for ds in ['KMNIST', 'EMNIST']: datasets.remove(ds) # simplify dsets
+
+    # loop through all dataset
+    for ds_name in datasets:
+        _, test_loader, _, _ = util.init_dataloader(args.img_res, ds_name, 
+                                                    batch_size=args.batch_size)
+        all_counts = [] # stroke counts for each data point
+
+        for i, (imgs, _) in enumerate(tqdm(test_loader)):
+            imgs = imgs.to(args.device)
+            out = guide(imgs, num_particles=1,)
+            z_pres = out.z_smpl.z_pres
+            counts = z_pres.sum(-1).squeeze(0).detach().cpu().int()
+            all_counts.append(counts)
+
+            # make a cum plot
+            if i == 0:
+                gen.sigma = out.decoder_param.sigma[0]
+                gen.sgl_strk_tanh_slope = \
+                                    out.decoder_param.slope[0]
+                if guide.linear_sum:
+                    gen.add_strk_tanh_slope =\
+                                        out.decoder_param.slope[1][:, :, 0]
+                else: 
+                    gen.add_strk_tanh_slope =\
+                                        out.decoder_param.slope[1][:, :, -1]
+                plot.plot_cum_recon(args, imgs, gen, out.z_smpl, 
+                               args.z_where_type, writer, dataset_name=None, 
+                               epoch=ite_so_far, tag1='#Stroke Histgram',
+                               tag2=ds_name)
+            if test_run:
+                if i == 10: break
+            # i += 1
+
+        # count frequency and store to dict
+        all_counts = torch.cat(all_counts, dim=0)
+        # all_counts = torch.bincount(all_counts, minlength=max_strks+1)
+        ds_counts[ds_name] = all_counts
     
+    # plot
+    df = pd.concat([pd.DataFrame(
+                        {'name': name, 'n_strks': n_strks}) for name, n_strks 
+                                                        in ds_counts.items()
+                    ], ignore_index=True)   
+    ax = sns.histplot(df, x='n_strks', hue='name', stat='percent', kde=True)
+    fig = ax.get_figure()
+    fig.set_tight_layout(tight=True)
+    writer.add_figure('#Stroke Histgram', fig, ite_so_far)
 
 def get_args_parser():
     parser = argparse.ArgumentParser(formatter_class=
@@ -560,19 +776,32 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Choose the dataset to test on
-    mll_eval = True
+    mll_eval = False
     recon_eval = True
     clf_eval = False
-    uncon_eval = False
-    marginal_likelihood_test_datasets = [
+    uncon_sample = False
+    one_shot_clf_eval = False
+    num_strokes_eval = False # plot a distribution of number of strokes / dataset
+    plot_tsne = False
+
+    test_run = False
+    
+
+    if test_run:
+        marginal_likelihood_test_datasets = ["MNIST"]
+    else:
+        marginal_likelihood_test_datasets = [
                      "Omniglot", 
                      "Quickdraw",
-                     "MNIST",
                      "KMNIST", 
                      "EMNIST", 
+                     "MNIST",
                      ]
 
-    clf_test_datasets = [
+    if test_run:
+        clf_test_datasets = ["MNIST"]
+    else:
+        clf_test_datasets = [
                      "KMNIST", 
                      "EMNIST", 
                      "MNIST",
@@ -588,8 +817,9 @@ if __name__ == "__main__":
         ckpt_path = util.get_checkpoint_path_from_path_base(args.save_model_name
                                                             )
     model, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
-                                                            path=ckpt_path,
-                                                            device=device)
+                                                        path=ckpt_path,
+                                                        device=device,
+                                                        init_data_loader=False)
     if trn_args.model_type == 'MWS':
         gen, guide, memory = model
     else:
@@ -602,20 +832,64 @@ if __name__ == "__main__":
         tb_dir = f"/om/user/ycliang/log/debug1/{args.tb_name}"
     writer = SummaryWriter(log_dir=tb_dir)
 
+    if plot_tsne:
+        with torch.no_grad():
+            coloring = 'kmeans'
+            # coloring = 'dbscan'
+            n_clusters = [8, 10, 15, 5]
+            for n in n_clusters:
+                plot.plot_stroke_tsne(ckpt_path=ckpt_path,
+                                title=f'tsne',
+                                save_dir=f'plots/tsne_{args.save_model_name}'+
+                                        f'_{coloring}{n}',
+                                z_what_to_keep=5000,
+                                clustering=coloring,
+                                n_clusters=n)
+    if num_strokes_eval:
+        with torch.no_grad():
+            num_strokes_plot(model=model, stats=stats, args=trn_args, 
+                         writer=writer)
+
     for dataset in marginal_likelihood_test_datasets:
+        if recon_eval:
+            train_loader, test_loader, _, _ = util.init_dataloader(res, dataset, 
+                                                            batch_size=64, 
+                                                            rot=False)
+            print(f"===> Begin Reconstruction testing on {dataset}")
+            trn_args.save_model_name = args.save_model_name
+            marginal_likelihoods(model=model, stats=stats, 
+                                test_loader=test_loader, 
+                                args=trn_args, save_imgs_dir=None, epoch=None, 
+                                writer=writer, k=1,
+                                train_loader=None, optimizer=None,
+                                dataset_name=dataset, 
+                                only_marginal_likelihood_evaluation=False,
+                                only_reconstruction=True)
+            print(f"===> Done Reconstruction on {dataset}\n")
+
+            # print(f'===> Generating multiple parse for a data')
+            # trn_args.save_model_name = args.save_model_name
+            # marginal_likelihoods(model=model, stats=stats, test_loader=train_loader, 
+            #                     args=trn_args, save_imgs_dir=None, epoch=None, 
+            #                     writer=writer, k=1,
+            #                     train_loader=None, optimizer=None,
+            #                     dataset_name=dataset, 
+            #                     only_marginal_likelihood_evaluation=False,
+            #                     only_reconstruction=True,
+            #                     recons_per_img=19)
+            # print(f'===> Done generating multiple parse for a data')
 
         # Evaluate marginal likelihood
         if mll_eval:
             train_loader, test_loader, _,_ = util.init_dataloader(res, dataset, 
                                                             batch_size=2)
-        if mll_eval:
             print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
             model = marginal_likelihoods(model=model, stats=stats, 
                             test_loader=test_loader, 
                             args=trn_args, save_imgs_dir=None, epoch=None, 
                             writer=writer, 
                             # k=1, # used for debug why the signs are different
-                            k=200, # use for current results
+                            k=100, # use for current results
                             train_loader=train_loader, 
                             optimizer=None, scheduler=scheduler,
                             # train_loader=train_loader, optimizer=optimizer,
@@ -624,36 +898,10 @@ if __name__ == "__main__":
                             only_marginal_likelihood_evaluation=True,
                             only_reconstruction=False,
                             dataset_derived_std=True,
-                            log_to_file=True)
+                            log_to_file=True,
+                            test_run=test_run)
             print(f"===> Done elbo_evalution on {dataset}\n")
         
-        if recon_eval:
-            train_loader, test_loader, _, _ = util.init_dataloader(res, dataset, 
-                                                            batch_size=64, 
-                                                            rot=False)
-            # print(f"===> Begin Reconstruction testing on {dataset}")
-            # trn_args.save_model_name = args.save_model_name
-            # marginal_likelihoods(model=model, stats=stats, 
-            #                     test_loader=test_loader, 
-            #                     args=trn_args, save_imgs_dir=None, epoch=None, 
-            #                     writer=writer, k=1,
-            #                     train_loader=None, optimizer=None,
-            #                     dataset_name=dataset, 
-            #                     only_marginal_likelihood_evaluation=False,
-            #                     only_reconstruction=True)
-            # print(f"===> Done Reconstruction on {dataset}\n")
-
-            print(f'===> Generating multiple parse for a data')
-            trn_args.save_model_name = args.save_model_name
-            marginal_likelihoods(model=model, stats=stats, test_loader=train_loader, 
-                                args=trn_args, save_imgs_dir=None, epoch=None, 
-                                writer=writer, k=1,
-                                train_loader=None, optimizer=None,
-                                dataset_name=dataset, 
-                                only_marginal_likelihood_evaluation=False,
-                                only_reconstruction=True,
-                                recons_per_img=19)
-            print(f'===> Done generating multiple parse for a data')
 
     # Evaluate classification
     if clf_eval:
@@ -663,7 +911,8 @@ if __name__ == "__main__":
             print(f"===> Begin Classification evaluation on {dataset}")
             classification_evaluation(guide, trn_args, writer, dataset, stats=stats, 
                                         dataset_name=dataset, batch_size=64,
-                                clf_trn_interations=args.clf_trn_interations)    
+                                        clf_trn_interations=10 if test_run\
+                                            else args.clf_trn_interations)    
             print(f"===> Done clf_evaluation on {dataset}\n")
                 
             # Character-conditioned generation
@@ -671,7 +920,7 @@ if __name__ == "__main__":
             # print(f"===> Done testing on {dataset} dataset \n\n")
 
     # Unconditioned generation
-    if uncon_eval:
+    if uncon_sample:
         num_to_sample = 64
         trn_loader, _, _, _ = util.init_dataloader(res, trn_args.dataset, 
                                                     batch_size=num_to_sample,
@@ -695,6 +944,8 @@ if __name__ == "__main__":
                                 stats=stats)
         print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
 
+    if one_shot_clf_eval:
+        one_shot_classification(model, trn_args, writer, len(stats.trn_losses))
     # print(f"===> Begin Character-conditioned generation on with {args.save_model_name}")
     # character_conditioned_generation(model=model,
     #                                  args=trn_args,

@@ -162,10 +162,9 @@ def get_args_parser():
         # default='3',
         type=str, choices=['3', '4_rotate', '4_no_rotate', '5'],
         help='''
-        "3": (scale, shift x, y)
-        "4_rotate": (scale, shift x, y, rotate)
-        "4_no_rotate": (scale x, y, shift x, y)
-        "5": (scale x, y, shift x, y, rotate)'''
+        "3": (shift x, y, scale)
+        "4_rotate": (shift x, y, scale, rotate)
+        "5": (shift x, y, scale x, y, rotate)'''
     ) 
     parser.add_argument(
         "--input_dependent_render_param",
@@ -202,10 +201,9 @@ def get_args_parser():
         action='store_true',
     )
     parser.add_argument(
-        "--feature_extractor_sharing",
+        "--no_feature_extractor_sharing",
         # default=False,
-        default=True,
-        type=bool,
+        action='store_true',
         help='''Sharing the feature extractor for the target, canvas and glimpse
         The advantage of sharing is more training data but it may also result in
         is being less stable as the input can be quite differert.'''
@@ -277,6 +275,9 @@ def get_args_parser():
     parser.add_argument('--residual_no_target', action='store_true',
                         help='''if true then only residual is passed, not target
                         and residual''')
+    parser.add_argument('--residual_no_target_pres', action='store_true',
+                        help='''if true then only residual is passed, not target
+                        and residual for z_pres''')
     parser.add_argument('--canvas_only_to_zwhere', action='store_true',
                         help='''only pass canvas to z_where (z_pres) rnn, not
                         z_what rnn. Because for the model with spline decoder,
@@ -378,7 +379,7 @@ def get_args_parser():
     parser.add_argument("--bl_lr", default=1e-3, type=float, help='''
     1e-3 worked for Sequential though has collapse for vrnn; 
     1e-3 is suggested for AIR''')
-    parser.add_argument("--lr", default=1e-3, type=float, help='''
+    parser.add_argument("--lr", default=1e-4, type=float, help='''
     1e-3 worked for VAE, Base, Sequential
     1e-4 is suggested for AIR
     ''')

@@ -78,7 +78,7 @@ class GenerativeModel(nn.Module):
 
         
         # img
-        self.imgs_dist_std = torch.nn.Parameter(torch.ones(1, res, res), 
+        self.imgs_dist_std = torch.nn.Parameter(torch.zeros(1, res, res), 
                                                             requires_grad=True)        
         # Decoder
         self.decoder = Decoder(z_what_dim=z_what_dim, 
@@ -90,7 +90,7 @@ class GenerativeModel(nn.Module):
         self.res = res
 
     def get_imgs_dist_std(self):
-        return F.softplus(self.imgs_dist_std) + 1e-12
+        return util.constrain_parameter(self.imgs_dist_std, min=1e-2, max=1)
         # return util.constrain_parameter(self.imgs_dist_std, min=.01, max=1)
 
     def control_points_dist(self, h_c=None, bs=[1, 3]):
@@ -339,6 +339,8 @@ class Guide(template.Guide):
                     target_in_pos="RNN",
                     intermediate_likelihood=None,
                     sep_where_pres_net=False,
+                    residual_no_target=True,
+                    detach_rsd_embed=True,
                                             ):
         # Parameters
         self.z_what_dim = z_what_dim
@@ -355,10 +357,13 @@ class Guide(template.Guide):
                     intermediate_likelihood=intermediate_likelihood,
                     feature_extractor_type='CNN',
                     sep_where_pres_net=sep_where_pres_net,
+                    residual_no_target=residual_no_target,
+                    detach_rsd_embed=detach_rsd_embed,
                     )
 
         # Internal renderer
-        if self.use_canvas or self.prior_dist == 'Sequential':
+        if (self.use_canvas or self.use_residual or 
+            self.prior_dist == 'Sequential'):
             self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
                                             z_what_dim=self.z_what_dim,
@@ -460,16 +465,19 @@ class Guide(template.Guide):
             baseline_value[:, :, t] = result['baseline_value'].squeeze(-1)
 
             # Update the canvas
-            if self.use_canvas:
+            if self.use_canvas or self.use_residual:
                 canvas_step = self.internal_decoder.renders_imgs((
                                             z_pres_smpl[:, :, t:t+1].clone(),
                                             z_what_smpl[:, :, t:t+1],
-                                            z_where_smpl[:, :, t:t+1]))
+                                            z_where_smpl[:, :, t:t+1].clone()))
                 canvas_step = canvas_step.view(*shp, *img_dim)
                 canvas = canvas + canvas_step
-                if self.use_residual == "residual":
+                canvas = canvas.detach()
+                if self.use_residual:
                     # compute the residual
-                    residual = torch.clamp(imgs - canvas, min=0.)
+                    # residual = torch.clamp(imgs - canvas, min=0.)
+                    residual = imgs - canvas
+                    residual = residual.detach()
 
             # Calculate the prior with the hidden states.
             if self.prior_dist == 'Sequential':
@@ -504,7 +512,7 @@ class Guide(template.Guide):
                                 z_where=z_where_lprb),
                            baseline_value=baseline_value,
                            mask_prev=mask_prev,
-                           canvas=canvas,
+                           canvas=None,
                            residual=residual,
                            z_prior=ZLogProb(
                                z_pres=z_pres_prir,
@@ -544,13 +552,23 @@ class Guide(template.Guide):
         trans_imgs = util.spatial_transform(
                                     imgs.view(prod(shp), *img_dim), 
                                     util.get_affine_matrix_from_param(
-                                            z_where.view(prod(shp), -1), 
-                                            z_where_type=self.z_where_type))
+                                        z_where.view(prod(shp), -1), 
+                                    z_where_type=self.z_where_type)
+                        ).view(*shp, *img_dim)
+        if self.use_residual:
+            trans_rsd = util.spatial_transform(
+                                    residual.view(prod(shp), *img_dim), 
+                                    util.get_affine_matrix_from_param(
+                                        z_where.view(prod(shp), -1), 
+                                    z_where_type=self.z_where_type)
+                        ).view(*shp, *img_dim)
+        else: trans_rsd = None
+
         wt_mlp_in, h_c = self.get_wt_mlp_in(
-                    trans_imgs.view(*shp, *img_dim), 
-                    canvas_embed,
-                    residual_embed,
-                    p_state)
+                    trans_imgs=trans_imgs, 
+                    trans_rsd=trans_rsd,
+                    canvas_embed=canvas_embed,
+                    p_state=p_state)
         z_what, z_what_lprb, z_what_pms = self.get_z_c(wt_mlp_in, 
                                                             p_state, z_pres)
 
@@ -779,17 +797,16 @@ class Guide(template.Guide):
         '''
         mask_prev = torch.ones(ptcs, bs, self.max_strks, device=imgs.device)
 
-        if self.use_canvas:
+        if self.use_canvas or self.use_residual:
             # if use_residual == 'residual', canvas stores the difference
             # if use_residual == 'canvas-so-far', canvas stores the cummulative
             canvas = torch.zeros(ptcs, bs, *self.img_dim, device=imgs.device)
-            if self.use_residual:
-                residual = torch.zeros(ptcs, bs, *self.img_dim, 
-                                                            device=imgs.device)
-            else:
-                residual = None
         else:
-            canvas, residual = None, None
+            canvas = None
+        if self.use_residual:
+            residual = imgs.clone()
+        else:
+            residual = None
         
         return (state, baseline_value, mask_prev, 
                 z_pres_pms, z_where_pms, z_what_pms,

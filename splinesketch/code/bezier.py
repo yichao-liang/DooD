@@ -55,6 +55,13 @@ class Bezier(torch.nn.Module):
         curve = torch.einsum('bcki,kt->bcit', control_points, feat)
         return curve
     
+    def get_sample_curve(self, control_points, n_steps):
+        '''Get [b, strk, 2 (x, y), n_steps] sample curve coordinates
+        '''
+        steps = torch.linspace(0, 1, n_steps).to(control_points.device)
+
+        return self.sample_curve(control_points, steps)
+        
     def forward(self, control_points, sigma:float, keep_strk_dim:bool):
         '''
         Args:

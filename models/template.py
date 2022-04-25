@@ -1,4 +1,6 @@
 from collections import namedtuple
+
+from pyparsing import countedArray
 import util
 
 import numpy as np
@@ -87,8 +89,8 @@ class Guide(nn.Module):
                 "to get h for zpres prior and renderer_mlp_in"
 
         self.simple_pres = simple_pres
-        if use_residual:
-            assert use_canvas, "residual needs canvas to be computed"
+        # if use_residual:
+        #     assert use_canvas, "residual needs canvas to be computed"
         if simple_pres:
             assert use_residual,\
                     "simple_pres requires execution guide and residual"
@@ -144,7 +146,8 @@ class Guide(nn.Module):
         #                                 num_layers=num_layers,
         #                             )
         # else:
-        self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
+        # self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
+        self.cnn_out_dim = 1152 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
         # self.cnn_out_dim = 3872 if self.img_dim[-1] == 50 else 4608
         self.feature_extractor_out_dim = hidden_dim
         self.img_feature_extractor = util.init_cnn(
@@ -177,14 +180,26 @@ class Guide(nn.Module):
                                                 self.feature_extractor_out_dim,
                                                 mlp_hidden_dim=hidden_dim,
                                                 num_mlp_layers=1)
+            if not self.feature_extractor_sharing:
+                self.trans_rsd_feature_extractor = util.init_cnn(
+                                            n_in_channels=1,
+                                            n_mid_channels=16,#32, 
+                                            n_out_channels=32,#64,
+                                            cnn_out_dim=self.cnn_out_dim,
+                                            mlp_out_dim=
+                                                self.feature_extractor_out_dim,
+                                            mlp_hidden_dim=hidden_dim,
+                                            num_mlp_layers=1)
 
 
         self.sep_where_pres_net = sep_where_pres_net
         # 2.1 pres_where_rnn
         if sep_where_pres_net:
-            self.pr_rnn_in = ['z_pres']
+            self.pr_rnn_in = []
+            if not self.no_pres_rnn:
+                self.pr_rnn_in = ['z_pres']
+                self.pr_rnn_in_dim = self.z_pres_dim
             self.wr_rnn_in = ['z_where']
-            self.pr_rnn_in_dim = self.z_pres_dim
             self.wr_rnn_in_dim = self.z_where_dim
 
             if self.z_what_in_pos == 'z_where_rnn':
@@ -193,8 +208,9 @@ class Guide(nn.Module):
             # Canvas: only default in full; adding the target, residual would 
             # make the model not able to generate from prior
             if self.use_canvas:
-                self.pr_rnn_in.append('canvas')
-                self.pr_rnn_in_dim += self.feature_extractor_out_dim
+                if not self.no_pres_rnn:
+                    self.pr_rnn_in.append('canvas')
+                    self.pr_rnn_in_dim += self.feature_extractor_out_dim
                 self.wr_rnn_in.append('canvas')
                 self.wr_rnn_in_dim += self.feature_extractor_out_dim
 
@@ -212,7 +228,8 @@ class Guide(nn.Module):
                 self.wr_rnn_in_dim += self.feature_extractor_out_dim
                 
             self.pr_wr_rnn_hid_dim = hidden_dim
-            self.pr_rnn = torch.nn.GRUCell(self.pr_rnn_in_dim, 
+            if not self.no_pres_rnn:
+                self.pr_rnn = torch.nn.GRUCell(self.pr_rnn_in_dim, 
                                             self.pr_wr_rnn_hid_dim)
 
             self.wr_rnn = torch.nn.GRUCell(self.wr_rnn_in_dim, 
@@ -262,7 +279,8 @@ class Guide(nn.Module):
                 self.wr_mlp_in_dim += self.pr_wr_rnn_hid_dim
 
             if self.target_in_pos == 'MLP' and not self.residual_no_target:
-                if not self.only_rsd_ratio_pres:
+                if not self.only_rsd_ratio_pres and\
+                   not self.residual_no_target_pres:
                     self.pr_mlp_in.append('target')
                     self.pr_mlp_in_dim += self.feature_extractor_out_dim
                 self.wr_mlp_in.append('target')
@@ -316,12 +334,12 @@ class Guide(nn.Module):
 
         # the full model doesn't have target in at RNN
         if self.target_in_pos == "RNN" and not self.residual_no_target:
-            self.wt_rnn_in.append('target')
+            self.wt_rnn_in.append('trans_target')
             # assert False, "not recommanded unless in ablation"
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
         if self.target_in_pos == 'RNN' and self.use_residual:
             # assert False, "not recommanded unless in ablation"
-            self.wt_rnn_in.append('residual')
+            self.wt_rnn_in.append('trans_residual')
             self.wt_rnn_in_dim += self.feature_extractor_out_dim
 
         self.wt_rnn_hid_dim = hidden_dim
@@ -370,28 +388,29 @@ class Guide(nn.Module):
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
         
+        img_embed, canvas_embed, residual_embed, rsd_ratio = [None]*4
+
         # embed image
         img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim
                                                             )).view(*shp, -1)
-        canvas_embed, residual_embed, rsd_ratio = None, None, None
         if self.use_canvas:
             canvas_embed = self.img_feature_extractor(canvas.view(prod(shp), 
                                                     *img_dim)).view(*shp, -1)
 
             if self.detach_canvas_embed: canvas_embed = canvas_embed.detach()
 
-            if self.use_residual:
-                if self.detach_rsd_embed:
-                    residual_embed = self.img_feature_extractor(
-                            residual.view(prod(shp), *img_dim)).view(*shp, -1
-                                                                    ).detach()
-                else:
-                    residual_embed = self.residual_feature_extractor(
-                            residual.view(prod(shp), *img_dim)).view(*shp, -1)
-            if self.simple_pres or self.residual_pixel_count:
-                rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
+        if self.use_residual:
+            if self.detach_rsd_embed:
+                residual_embed = self.img_feature_extractor(
+                        residual.view(prod(shp), *img_dim)).view(*shp, -1
+                                                                ).detach()
+            else:
+                residual_embed = self.residual_feature_extractor(
+                        residual.view(prod(shp), *img_dim)).view(*shp, -1)
+        if self.simple_pres or self.residual_pixel_count:
+            rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
 
-                if self.detach_rsd_embed: rsd_ratio = rsd_ratio.detach()
+            if self.detach_rsd_embed: rsd_ratio = rsd_ratio.detach()
                
         return img_embed, canvas_embed, residual_embed, rsd_ratio
 
@@ -410,11 +429,15 @@ class Guide(nn.Module):
             h_l [ptcs, bs, h_dim]
             pr_wr_rnn_in [ptcs, bs, pr_wr_rnn_in_dim]
         '''
-        ptcs, bs = shp = img_embed.shape[:2]
+        if img_embed != None:
+            ptcs, bs = shp = img_embed.shape[:2]
+        else:
+            ptcs, bs = shp = residual_embed.shape[:2]
         # Style RNN input
 
         if self.sep_where_pres_net:
-            pr_rnn_in = [p_state.z_pres.view(prod(shp), -1)]
+            if not self.no_pres_rnn:
+                pr_rnn_in = [p_state.z_pres.view(prod(shp), -1)]
             wr_rnn_in = [p_state.z_where.view(prod(shp), -1)]
 
             if 'z_what' in self.pr_rnn_in:
@@ -433,9 +456,13 @@ class Guide(nn.Module):
                 pr_rnn_in.append(residual_embed.view(prod(shp), -1))
             if 'residual' in self.wr_rnn_in:
                 wr_rnn_in.append(residual_embed.view(prod(shp), -1))
-            pr_rnn_in = torch.cat(pr_rnn_in, dim=1)
+            if not self.no_pres_rnn:
+                pr_rnn_in = torch.cat(pr_rnn_in, dim=1)
+                h_pr = self.pr_rnn(pr_rnn_in, p_state.h_l[0].view(prod(shp), -1))
+            else:
+                h_pr = p_state.h_l[0]
+            
             wr_rnn_in = torch.cat(wr_rnn_in, dim=1)
-            h_pr = self.pr_rnn(pr_rnn_in, p_state.h_l[0].view(prod(shp), -1))
             h_wr = self.wr_rnn(wr_rnn_in, p_state.h_l[1].view(prod(shp), -1))
         else:
             rnn_in = [p_state.z_pres.view(prod(shp), -1), 
@@ -508,22 +535,35 @@ class Guide(nn.Module):
             h_c: [ptcs, bs, in_dim]
         '''
         # Sample z_what, get log_prob
-        shp, img_dim = trans_imgs.shape[:2], trans_imgs.shape[2:]
+        if trans_imgs != None:
+            shp, img_dim = trans_imgs.shape[:2], trans_imgs.shape[2:]
+        else:
+            shp, img_dim = trans_rsd.shape[:2], trans_rsd.shape[2:]
 
         # [bs, pts_per_strk, 2, 1]
-        if self.feature_extractor_sharing:
-            trans_tar_em = self.img_feature_extractor(trans_imgs.view(prod(shp), 
-                                                                    *img_dim))
-        else:
-            trans_tar_em = self.trans_img_feature_extractor(trans_imgs.view(prod(
-                                                                shp), *img_dim))
+        if not self.residual_no_target:
+            if self.feature_extractor_sharing:
+                trans_tar_em = self.img_feature_extractor(
+                                        trans_imgs.view(prod(shp), *img_dim))
+            else:
+                trans_tar_em = self.trans_img_feature_extractor(
+                                        trans_imgs.view(prod(shp), *img_dim))
+
         if self.use_residual:
             if self.detach_rsd_embed:
-                trans_rsd_em = self.img_feature_extractor(
+                if self.feature_extractor_sharing:
+                    trans_rsd_em = self.img_feature_extractor(
+                                trans_rsd.view(prod(shp), *img_dim)).detach()
+                else:
+                    trans_rsd_em = self.trans_img_feature_extractor(
                                 trans_rsd.view(prod(shp), *img_dim)).detach()
             else:
-                trans_rsd_em = self.residual_feature_extractor(
+                if self.feature_extractor_sharing:
+                    trans_rsd_em = self.residual_feature_extractor(
                                 trans_rsd.view(prod(shp), *img_dim))
+                else:
+                    trans_rsd_em = self.trans_rsd_feature_extractor(
+                                trans_rsd.view(prod(shp), *img_dim)).detach()
             
         # z_what RNN input
         wt_rnn_in = []
@@ -531,9 +571,9 @@ class Guide(nn.Module):
             wt_rnn_in.append(p_state.z_what.view(prod(shp), -1))
         if 'canvas' in self.wt_rnn_in:
             wt_rnn_in.append(canvas_embed.view(prod(shp), -1))
-        if 'target' in self.wt_rnn_in:
+        if 'trans_target' in self.wt_rnn_in:
             wt_rnn_in.append(trans_tar_em.view(prod(shp), -1))
-        if 'residual' in self.wt_rnn_in:
+        if 'trans_residual' in self.wt_rnn_in:
             wt_rnn_in.append(trans_rsd_em.view(prod(shp), -1))
         wt_rnn_in = torch.cat(wt_rnn_in, dim=1)
         h_c = self.wt_rnn(wt_rnn_in, p_state.h_c.view(prod(shp), -1))
@@ -550,14 +590,21 @@ class Guide(nn.Module):
 
         return mlp_in.view(*shp, -1), h_c.view(*shp, -1)
 
-    def sample_pr_wr(self, p_state, z_pres_p, z_where_loc, z_where_scale):
+    def sample_pr_wr(self, p_state, z_pres_p, z_where_loc, z_where_scale, 
+                     z_where_cor):
+        '''
+        z_pres_p [ptcs, bs, -1]
+        z_where_loc [ptcs, bs, z_where_dim]
+        z_where_scale [ptcs, bs, z_where_dim]
+        z_where_cor [ptcs, bs, 1]
+        '''
         shp = z_pres_p.shape[:2]
 
         # If previous z_pres is 0, force z_pres to 0
         z_pres_p = z_pres_p * p_state.z_pres
         # Numerical stability
-        # eps = 1e-12
-        # z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
+        eps = 1e-12
+        z_pres_p = z_pres_p.clamp(min=eps, max=1.0-eps)
 
         # Sample z_pres
         assert z_pres_p.shape == torch.Size([*shp, 1])
@@ -567,12 +614,6 @@ class Guide(nn.Module):
                 z_pres_post.batch_shape == torch.Size([*shp]))
         # z_pres: [ptcs, bs, 1]
         z_pres = z_pres_post.sample()
-
-        if self.constrain_z_pres_param_this_step:
-            # this should used be false, but set true occationally from the loss
-            # script to encourage samples of 0s.
-            z_pres = Independent(Bernoulli(torch.ones_like(z_pres_p)),
-                                           reinterpreted_batch_ndims=1).sample()
 
         # If previous z_pres is 0, then this z_pres should also be 0.
         # However, this is sampled from a Bernoulli whose probability is at
@@ -587,7 +628,16 @@ class Guide(nn.Module):
         
         # Sample z_where, get log_prob
         assert z_where_loc.shape == torch.Size([*shp, self.z_where_dim])
-        z_where_post = Independent(Normal(z_where_loc, z_where_scale),
+        
+        if self.correlated_latent:
+            # [*shp, z_where_dim, z_where_dim]
+            tril = torch.diag_embed(z_where_scale)
+            tril[..., 1, 0] = z_where_cor.squeeze(-1)
+            # cov[..., 0, 1] = z_where_cor
+            z_where_post = MultivariateNormal(loc=z_where_loc, 
+                                              scale_tril=tril)
+        else:
+            z_where_post = Independent(Normal(z_where_loc, z_where_scale),
                                                     reinterpreted_batch_ndims=1)
         assert (z_where_post.event_shape == torch.Size([self.z_where_dim]) and
                 z_where_post.batch_shape == torch.Size([*shp]))        
@@ -605,9 +655,21 @@ class Guide(nn.Module):
         # z_where_lprb = z_where_lprb.squeeze()
         return z_pres, z_where, z_pres_lprb, z_where_lprb
 
-    def sample_wt(self, z_what_loc, z_what_std, z_pres):
+    def sample_wt(self, z_what_loc, z_what_std, z_what_cor, z_pres):
+        '''
+            z_what_loc [ptcs, bs, pts_per_strk, 2]
+            z_what_std [ptcs, bs, pts_per_strk, 2]
+            z_what_cor [ptcs, bs, pts_per_strk, 2]
+        '''
         shp = z_what_loc.shape[:2]
-        z_what_post = Independent(Normal(z_what_loc, z_what_std), 
+        if self.correlated_latent:
+            # [ptcs, bs, pts_per_strk, 2, 2]
+            tril = torch.diag_embed(z_what_std)
+            tril[..., 1, 0] = z_what_cor
+            z_what_post = Independent(MultivariateNormal(loc=z_what_loc, 
+                                scale_tril=tril), reinterpreted_batch_ndims=1)
+        else:
+            z_what_post = Independent(Normal(z_what_loc, z_what_std), 
                                                     reinterpreted_batch_ndims=2)
         assert (z_what_post.event_shape == torch.Size([self.pts_per_strk, 2]) 
                 and z_what_post.batch_shape == torch.Size([*(shp)]))

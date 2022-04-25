@@ -95,13 +95,17 @@ class RendererParamMLP(nn.Module):
         #             'Quickdraw'
         #             ]:
         # if trans_z_what:
-        init_b1, init_b2 = -1, 6
+        # b2: [-2:.2, 0:.5, .5:.6, 1:.67, 6:.9]
+        # b3: [-1:.48, 1:1.1, 2:2.3]
+        # b1, b2, b3 = 0, 0, -1 # .25, , .48
+        # b1, b2, b3 = -2, 2, 2 # .25, .32, .48
+        b1, b2, b3 = -2, 2, -1 # .25, .32, .48
         # else:
         #     init_b1, init_b2 = -1, 10
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                         # works well with no canvas
-                        torch.tensor([init_b1,init_b2,init_b2], 
+                        torch.tensor([b1,b2,b3], 
                         dtype=torch.float))
                         # torch.tensor([2,2,2], dtype=torch.float))
 
@@ -150,23 +154,14 @@ class PresMLP(nn.Module):
                                  num_layers=num_layers)
         self.seq.linear_modules[-1].weight.data.zero_()
         # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
-        init_bias = 6
-        if dataset in ['KMNIST']:
-            init_bias = 4
+        # init_bias = 6
+        # if dataset in ['KMNIST']:
+        init_bias = 2
         if dataset in [
                 'Omniglot',
-                'Quickdraw'
+                # 'Quickdraw'
             ]:
-            # init_bias = 15
-            # init_bias = 8 # this works well with [.02]+4 comp+rend 1
-            # if bzRnn:
-            #     init_bias = 7 # works well with [.01]+4 comp+rend1
-            #                 # [.01]+20 comp+rend1+bzRnn
-            # else:
-            # if trans_what:
-                init_bias = 7 # ok for [.01]+20comp+[bzrnn,mlp]
-            # else:
-            #     init_bias = 6.5 # ok for [.01]+20comp+[bzrnn,mlp]
+            init_bias = 8 # ok for [.01]+20comp+[bzrnn,mlp]
                 
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
             [init_bias], dtype=torch.float)) # works for stable models
@@ -185,51 +180,50 @@ class WhereMLP(nn.Module):
         self.z_where_dim = z_where_dim
         self.type = z_where_type
         self.seq = util.init_mlp(in_dim=in_dim, 
-                                 out_dim=z_where_dim * 2,
+                                 out_dim=z_where_dim * 2 + 1,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)
         self.constrain_param = constrain_param
         self.more_range = False        
         # init_b = 0
         init_b = 6
-        # if dataset == [
-        #     'Omniglot', 
-        #     # 'Quickdraw'
-        #     ]:
-            # init_b = 15
-            # init_b = 15
         # has minimal constrain
         self.seq.linear_modules[-1].weight.data.zero_()
         if z_where_type == '4_rotate':
             # [loc:shift,scale,rot,  std:scale,shift,rot]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 # init at 0, 0, 1, 0 after the sigmoid
-                [0,0,init_b,0, 
-                 -4,-4,-4,-4], dtype=torch.float)) 
+                [0,0,init_b,0,           # loc
+                 -4,-4,-4,-4,            # std
+                 0], dtype=torch.float)) # cor
         elif z_where_type == '5':
             # [loc:shift,scale,rot,  std:scale,shift,rot]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 [0,0,init_b,init_b,0, 
-                 -4,-4,-4,-4,-4], dtype=torch.float)) 
+                 -4,-4,-4,-4,-4,
+                 0], dtype=torch.float)) 
         elif z_where_type == '3':
             # [loc:shift,scale, std:scale,shift]
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [0,0,init_b, -4,-4,-4], dtype=torch.float))
+                [0,0,init_b, -4,-4,-4, 0], dtype=torch.float))
         else:
             raise NotImplementedError
         
     def forward(self, h):
         # todo make capacible with other z_where_types
         z = self.seq(h)
-        z_where_std = z[:, self.z_where_dim:] 
+        z_where_std = z[:, self.z_where_dim:-1] 
         z_where_std = util.constrain_parameter(z_where_std, min=1e-9, max=1)
+
         z_where_loc = z[:, :self.z_where_dim] 
-        # has minimal constrain
         if self.constrain_param:
             z_where_loc = constrain_z_where(z_where_type=self.type,
                                         z_where_loc=z_where_loc, 
                                         more_range=self.more_range)
-        return z_where_loc, z_where_std
+        
+        z_where_cor = util.constrain_parameter(z[:, -1:], min=-1, max=1)
+
+        return z_where_loc, z_where_std, z_where_cor
 
 class PresWhereMLP(nn.Module):
     """Infer presence and location from RNN hidden state
@@ -300,7 +294,8 @@ class WhatMLP(nn.Module):
     def __init__(self, in_dim=256, pts_per_strk=5, hid_dim=256, num_layers=1,
         constrain_param=False, dataset=None):
         super().__init__()
-        self.out_dim = pts_per_strk * 2 * 2
+        self.npts = pts_per_strk
+        self.out_dim = pts_per_strk * 2 * 2 + pts_per_strk # (loc+std)*2 + cor
         self.constrain_param = constrain_param
         self.mlp = util.init_mlp(in_dim=in_dim, 
                                 out_dim=self.out_dim,
@@ -309,10 +304,15 @@ class WhatMLP(nn.Module):
         self.more_range = False
 
     def forward(self, x,):
-        # out = constrain_parameter(self.mlp(x), min=.3, max=.7)
+        '''
+        z_what_loc [bs, pts_per_strk * 2]
+        z_what_std [bs, pts_per_strk * 2]
+        z_what_cor [bs, pts_per_strk]
+        '''
         out = self.mlp(x)
-        z_what_loc = out[:, 0:(int(self.out_dim/2))]
-        z_what_std = out[:, (int(self.out_dim/2)):]
+        z_what_loc = out[:, 0:self.npts*2]
+        z_what_std = out[:, self.npts*2 : -self.npts]
+        z_what_cor = out[:, -self.npts:]
 
         if self.constrain_param:
             z_what_loc = constrain_z_what(z_what_loc, 
@@ -321,14 +321,23 @@ class WhatMLP(nn.Module):
         # has minimal constrain (no constrain previously)
         z_what_std = torch.sigmoid(z_what_std) + 1e-9
 
-        return z_what_loc, z_what_std
+        z_what_cor = util.constrain_parameter(out[:, -self.npts:], 
+                                              min=-1, max=1)
+        return z_what_loc, z_what_std, z_what_cor
 
 class PresPriorMLP(PresMLP):
-    def __init__(self, in_dim, hidden_dim, num_layers):
+    def __init__(self, in_dim, hidden_dim, num_layers, dataset):
         super().__init__(in_dim, hidden_dim, num_layers)
+        pres_b = 1
+        # if dataset in [
+        #                 'Omniglot',
+        #                 'EMNIST',
+        #                 'Quickdraw',
+        #                 ]:
+        #     pres_b = 13
         self.seq.linear_modules[-1].weight.data.zero_()
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-            [4], dtype=torch.float))
+            [pres_b], dtype=torch.float))
 
 class WherePriorMLP(nn.Module):
     def __init__(self, 
@@ -337,7 +346,7 @@ class WherePriorMLP(nn.Module):
                 z_where_dim, 
                 hidden_dim, 
                 num_layers, 
-                n_comp):
+                n_comp,):
         super().__init__()
         self.z_where_dim = z_where_dim
         self.type = z_where_type
@@ -345,29 +354,40 @@ class WherePriorMLP(nn.Module):
         self.more_range = False        
 
         self.seq = util.init_mlp(in_dim=in_dim,
-                                 out_dim=n_comp * (1 + z_where_dim*2),
+                                 out_dim=n_comp * (1 + z_where_dim*2 + 1),
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers,)
 
         if z_where_type == '4_rotate':
             self.seq.linear_modules[-1].weight.data.zero_()
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [.1]*n_comp + 
-                ([4] + (torch.rand(3)*.6-.3).tolist())*n_comp +
-                [0]*4*n_comp, 
+                # pres: 1 after sigmoid + mix_weight
+                # [6] + [1]*n_comp + 
+                [4.] + [-4.]*(n_comp-1) + 
+                # all means: at 0, 0, 1, 0 after sigmoid
+                [0,0,4,0] + 
+                (torch.tensor([0,0,4,0]*(n_comp-1))+torch.randn(4*(n_comp-1))*.001
+                 ).tolist()+
+                # std: at .018 after sigmoid + corr: at 0
+                [-4] * 4*n_comp + [0] * n_comp, 
                 dtype=torch.float)) 
         elif z_where_type == '5':
             self.seq.linear_modules[-1].weight.data.zero_()
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [.1]*n_comp + 
-                ([4,4] + (torch.rand(3)*.6-.3).tolist())*n_comp +
-                [0]*5*n_comp, 
+                [4] + [-4]*(n_comp-1) + 
+                [0,0,4,4,0] + 
+                (torch.tensor([0,0,4,4,0]*(n_comp-1))+torch.randn(5*(n_comp-1))*.001
+                # ([4,4] + (torch.rand(3)*.6-.3).tolist())*n_comp +
+                 ).tolist()+
+                [-4] * 5*n_comp + [0] * n_comp, 
                 dtype=torch.float)) 
         elif z_where_type == '3':
+            raise NotImplementedError
             self.seq.linear_modules[-1].weight.data.zero_()
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-                [.1]*n_comp + 
-                ([4] + (torch.rand(2)*.6-.3).tolist())*n_comp +
+                [4] + [.1]*n_comp + 
+                # (torch.rand(4*n_comp)*.6-.3).tolist() +
+                ([4] + (torch.rand(3*n_comp - 1)*.6-.3).tolist()) +
                 [0]*3*n_comp, 
                 dtype=torch.float))
         else: raise NotImplementedError
@@ -385,19 +405,25 @@ class WherePriorMLP(nn.Module):
                        self.n_comp + (self.z_where_dim * self.n_comp)]
         all_loc = constrain_z_where(
                             z_where_type=self.type,
-                            z_where_loc=all_loc.view(bs * self.n_comp, -1),
+                            z_where_loc=all_loc.reshape(bs * self.n_comp, -1),
                             more_range=self.more_range
                         ).view(bs, self.n_comp, -1)
 
-        all_std = z[:, self.n_comp + (self.z_where_dim * self.n_comp):]
+        all_std = z[:, self.n_comp + (self.z_where_dim * self.n_comp): 
+                       -self.n_comp]
         all_std = util.constrain_parameter(
-                            all_std.view(bs * self.n_comp, -1),
+                            all_std.reshape(bs * self.n_comp, -1),
                             min=1e-9, max=1
                         ).view(bs, self.n_comp, -1)
-        return logits, all_loc, all_std
+        # [bs, n_comp]
+        all_cor = util.constrain_parameter(
+                            z[:, -self.n_comp:],
+                            min=-1, max=1)
+        return logits, all_loc, all_std, all_cor
+
 class PresWherePriorMLP(nn.Module):
     def __init__(self, in_dim, z_where_type, z_where_dim, hidden_dim, 
-                                            num_layers, n_comp):
+                                            num_layers, n_comp, dataset):
         super().__init__()
         self.z_where_dim = z_where_dim
         self.type = z_where_type
@@ -409,14 +435,22 @@ class PresWherePriorMLP(nn.Module):
                                  out_dim=1 + n_comp * (1 + z_where_dim*2 + 1),
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers,)
-
+        # pres_b = # 6 # didn't work well for mnist
+        pres_b = 0
+        if dataset in [
+                        'Omniglot'
+                        ]:
+            pres_b = 14
         if z_where_type == '4_rotate':
             self.seq.linear_modules[-1].weight.data.zero_()
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                 # pres: 1 after sigmoid + mix_weight
-                [6] + [.1]*n_comp + 
+                # [6] + [1]*n_comp + 
+                [pres_b] + [4.] + [-4.]*(n_comp-1) + 
                 # all means: at 0, 0, 1, 0 after sigmoid
-                (torch.tensor([0,0,4,0]*n_comp)+torch.randn(4*n_comp)*.01
+                [0,0,4,0] + 
+                (torch.tensor([0,0,4,0]*(n_comp-1))+torch.randn(4*(n_comp-1))*.001
+                # (torch.tensor([0,0,4,0]*n_comp)+torch.randn(4*n_comp)*.1
                  ).tolist()+
                 # std: at .018 after sigmoid + corr: at 0
                 [-4] * 4*n_comp + [0] * n_comp, 
@@ -497,9 +531,12 @@ class WhatPriorMLP(nn.Module):
         self.seq.linear_modules[-1].weight.data.zero_()
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
                     # mix_weight
-                    [.1] * n_comp * pts_per_strk +
+                    # [1] * n_comp * pts_per_strk +
+                    [4.] * pts_per_strk + ([-4.] * (pts_per_strk*(n_comp-1))) +
                     # loc: init at .5 + randn noise after the sigmoid
-                    (torch.randn(n_comp*pts_per_strk*2) * .2).tolist() +
+                    # (torch.randn(n_comp*pts_per_strk*2) * .01).tolist() +
+                    [0.] * pts_per_strk * 2 + 
+                    (torch.randn((n_comp-1)*pts_per_strk*2) * .001).tolist() +
                     # std: init at .2 after the sigmoid
                     [-1.386] * n_comp * pts_per_strk * 2 +
                     # (torch.randn(n_comp*pts_per_strk*2) * .01).tolist() +

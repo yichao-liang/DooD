@@ -1,4 +1,6 @@
 import itertools
+import functools
+import math
 import random
 import collections
 import os
@@ -7,6 +9,7 @@ import subprocess
 import getpass
 import logging
 from pathlib import Path
+from collections import namedtuple
 
 import numpy as np
 import torch.nn as nn
@@ -22,7 +25,7 @@ from kornia.geometry.transform import invert_affine_transform, get_affine_matrix
 
 from models import base, ssp, air, vae#, mws
 # from data.omniglot_dataset.omniglot_dataset import TrainingDataset
-from data import synthetic, multimnist, cluster
+from data import synthetic, multimnist, cluster, oneshot_omniglot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,8 +35,70 @@ logging.basicConfig(
 )
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
+ZSample = namedtuple("ZSample", "z_pres z_what z_where")
 
-def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
+def get_top_k_latents(guide, gen, img, ptcs, k=1):
+    out = guide(img, ptcs)
+    latents, mask_prev, canvas, z_prior = (
+                                    out.z_smpl, out.mask_prev,
+                                    out.canvas,out.z_prior)
+    _, log_lld = gen.log_prob(latents=latents,
+                                                    imgs=img,
+                                                    z_pres_mask=mask_prev,
+                                                    canvas=canvas,
+                                                    z_prior=z_prior)
+    # [bs]
+    idx = log_lld.argmax(dim=0)
+    breakpoint()
+    latents = ZSample(
+                        latents.z_pres[idx].unsqueeze(0),
+                        latents.z_what[idx].unsqueeze(0),
+                        latents.z_where[idx].unsqueeze(0),
+                    )
+    return latents
+
+@functools.lru_cache(maxsize=None)
+def get_sample_affine(device):
+    '''Get sample affines, in the form of 7-dim z_where
+    Return:
+        [num_samples, 7]
+    '''
+    large_sample = False
+    if large_sample:
+        num_discretizations_l = 5
+        shear_horizontal_angles = torch.linspace(-0.2 * math.pi, 0.2 * math.pi, 
+                                                num_discretizations_l)
+        shear_vertical_angles = shear_horizontal_angles
+        rotate_angles = shear_horizontal_angles
+        scale_horizontal_squeezes = torch.linspace(0.8, 1.2, num_discretizations_l)
+        scale_vertical_squeezes = scale_horizontal_squeezes
+        translate_xs = torch.linspace(-0.2, 0.2, num_discretizations_l)
+        translate_ys = translate_xs
+    else:
+        num_discretizations = 3
+        shear_horizontal_angles = torch.linspace(-0.1 * math.pi, 0.1 * math.pi, 
+                                                num_discretizations)
+        shear_vertical_angles = shear_horizontal_angles
+        rotate_angles = shear_horizontal_angles
+        scale_horizontal_squeezes = torch.linspace(0.9, 1.1, num_discretizations)
+        scale_vertical_squeezes = scale_horizontal_squeezes
+        translate_xs = torch.linspace(-0.2, 0.2, num_discretizations)
+        translate_ys = translate_xs
+
+
+    # [shift; scale; rotate; shear]
+    transform_z_wheres = torch.cartesian_prod(
+                                            translate_xs,
+                                            translate_ys,
+                                            scale_horizontal_squeezes,
+                                            scale_vertical_squeezes,
+                                            rotate_angles,
+                                            shear_horizontal_angles,
+                                            shear_vertical_angles,
+                                        ).to(device)
+    return transform_z_wheres
+
+def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True):
     # Dataloader
     # Train dataset
     if dataset in [
@@ -107,17 +172,21 @@ def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
         from data.QuickDraw_pytorch.DataUtils.load_data import QD_Dataset
         trn_dataset = QD_Dataset(mtype="train", 
                         transform=transforms.Compose([
-                        transforms.ToPILImage(mode=None)] + trn_transform_lst +[
-                        transforms.GaussianBlur(kernel_size=3),
-                        transforms.Lambda(lambda x: adjust_sharpness(x, 5))
-                        ]),
+                        transforms.ToPILImage(mode=None)] + trn_transform_lst 
+                        # + [
+                        # transforms.GaussianBlur(kernel_size=3),
+                        # transforms.Lambda(lambda x: adjust_sharpness(x, 5))
+                        # ]
+                        ),
                             root="./data/QuickDraw_pytorch/Dataset")
         tst_dataset = QD_Dataset(mtype="test", 
                         transform=transforms.Compose([
-                        transforms.ToPILImage(mode=None)] + tst_transform_lst +[
-                        transforms.GaussianBlur(kernel_size=3),
-                        transforms.Lambda(lambda x: adjust_sharpness(x, 5))
-                        ]),
+                        transforms.ToPILImage(mode=None)] + tst_transform_lst 
+                        # + [
+                        # transforms.GaussianBlur(kernel_size=3),
+                        # transforms.Lambda(lambda x: adjust_sharpness(x, 5))
+                        # ]
+                        ),
                             root="./data/QuickDraw_pytorch/Dataset")
     elif dataset == 'Omniglot': # trn 19,280; tst 13,180
         trn_dataset = datasets.Omniglot(root='./data', background=True,
@@ -151,6 +220,21 @@ def init_dataloader(res, dataset, batch_size=64, rot=True, shuffle=True):
                                 worker_init_fn=seed_worker, generator=g,)
     
     return train_loader, test_loader, trn_dataset, tst_dataset
+
+def init_ontshot_clf_data_loader(res):
+    trn_transform_lst = [
+                            # transforms.Resize([120, 120], antialias=True),
+                            transforms.Resize([res, res], antialias=True),
+                            transforms.ToTensor(),
+                            ]
+
+    data_loader = oneshot_omniglot.get_dataloader(
+            transform=transforms.Compose([
+                        transforms.ToTensor(),
+                        transforms.Lambda(lambda x: 1-x),
+                        transforms.ToPILImage(mode=None)]+ trn_transform_lst),
+            batch_size=1)
+    return data_loader
 
 def init_classification_nets(guide, args, dataset, batch_size, trned_ite):
     # Dataset
@@ -506,9 +590,10 @@ def get_save_dir_from_path_base(path_base):
 def get_save_dir(args):
     return get_save_dir_from_path_base(get_path_base_from_args(args))
 
-def get_save_test_img_dir(args, iteration, suffix='tst'):
+def get_save_test_img_dir(args, epoch, prefix='reconstruction', 
+                                           suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
-    return f"{get_save_dir(args)}/images/reconstruction_ep{iteration}_{suffix}.pdf"
+    return f"{get_save_dir(args)}/images/{prefix}_ep{epoch}_{suffix}.pdf"
 
 def get_save_count_swarm_img_dir(args, iteration, suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
@@ -538,26 +623,28 @@ blur = transforms.Compose([
                        #transforms.Normalize((0.1307,), (0.3081,))
                    ])
 
-def init(run_args, device):  
+def init(run_args, device, init_data_loader=True):  
     # Data
     # res = run_args.img_res
-    train_loader, test_loader, trn_dataset, tst_dataset = init_dataloader(
+    if init_data_loader:
+        train_loader, test_loader, trn_dataset, tst_dataset = init_dataloader(
                                                         run_args.img_res, 
                                                         run_args.dataset,
                                                         run_args.batch_size)
-    data_loader = train_loader, test_loader
+        if run_args.model_type == 'MWS':
+            from models.mws import handwritten_characters as mws
+            train_loader = mws.data.get_data_loader(trn_dataset.data/255,
+                                                    run_args.batch_size,
+                                                    run_args.device, ids=True)
+            test_loader = mws.data.get_data_loader(tst_dataset.data/255,
+                                                    run_args.batch_size, 
+                                                    run_args.device, 
+                                                    id_offset=len(trn_dataset),
+                                                    ids=True)
+        data_loader = train_loader, test_loader
+    else:
+        data_loader = None
 
-    if run_args.model_type == 'MWS':
-        from models.mws import handwritten_characters as mws
-        train_loader = mws.data.get_data_loader(trn_dataset.data/255,
-                                                run_args.batch_size,
-                                                run_args.device, ids=True)
-        test_loader = mws.data.get_data_loader(tst_dataset.data/255,
-                                                run_args.batch_size, 
-                                                run_args.device, 
-                                                id_offset=len(trn_dataset),
-                                                ids=True)
-    data_loader = train_loader, test_loader
     # elif run_args.dataset == 'generative_model':
     #     # train and test dataloader
     #     data_loader = synthetic.get_data_loader(generative_model, 
@@ -629,6 +716,7 @@ def init(run_args, device):
                     correlated_latent=run_args.correlated_latent,
                     use_bezier_rnn=run_args.use_bezier_rnn,
                     condition_by_img=run_args.condition_by_img,
+                    dataset=run_args.dataset,
                                     ).to(device)
         guide = ssp.Guide(
                 max_strks=int(run_args.strokes_per_img),
@@ -641,7 +729,7 @@ def init(run_args, device):
                 use_residual=run_args.use_residual,
                 prior_dist=run_args.prior_dist,
                 target_in_pos=run_args.target_in_pos,
-                feature_extractor_sharing=run_args.feature_extractor_sharing,
+                feature_extractor_sharing=run_args.no_feature_extractor_sharing,
                 num_mlp_layers=run_args.num_mlp_layers,
                 num_bl_layers=run_args.num_baseline_layers,
                 bl_mlp_hid_dim=run_args.bl_mlp_hid_dim,
@@ -681,9 +769,9 @@ def init(run_args, device):
                 correlated_latent=run_args.correlated_latent,
                 use_bezier_rnn=run_args.use_bezier_rnn,
                 condition_by_img=run_args.condition_by_img,
+                residual_no_target_pres=run_args.residual_no_target_pres,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
-        run_args.z_where_type = '3'
         generative_model = air.GenerativeModel(
                                 max_strks=run_args.strokes_per_img,
                                 res=run_args.img_res,
@@ -699,12 +787,15 @@ def init(run_args, device):
                         use_canvas=run_args.use_canvas,
                         use_residual=run_args.use_residual,
                         feature_extractor_sharing=\
-                                            run_args.feature_extractor_sharing,
+                                            run_args.no_feature_extractor_sharing,
+                                            # True,
                         z_what_dim=run_args.z_dim,
                         z_what_in_pos=run_args.z_what_in_pos,
                         prior_dist=run_args.prior_dist,
                         target_in_pos=run_args.target_in_pos,
                         sep_where_pres_net=run_args.sep_where_pres_net,
+                        residual_no_target=run_args.residual_no_target,
+                        detach_rsd_embed=run_args.detach_rsd_embed,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(
@@ -772,6 +863,11 @@ def init_optimizer(run_args, model):
             }
         ])
     elif run_args.model_type == 'Sequential':
+        if run_args.dataset in ['EMNIST', 
+                                'Omniglot', 
+                                'KMNIST', 
+                                'Quickdraw']:
+            run_args.lr = 1e-4
         if run_args.use_canvas or run_args.prior_dist == 'Sequential':
             if run_args.anneal_non_pr_net_lr:
                 assert run_args.sep_where_pres_net != run_args.simple_pres,\
@@ -789,12 +885,13 @@ def init_optimizer(run_args, model):
             air_parameters = itertools.chain(guide.air_params(), 
                                                 generative_model.parameters())
         if run_args.anneal_non_pr_net_lr:
+            pres_lr = 1e-3
             optimizer = torch.optim.Adam([
             {'params': none_pr_air_param, 
              'lr': run_args.lr,
              'weight_decay': run_args.weight_decay},
             {'params': pr_net_param, 
-             'lr': run_args.lr,
+             'lr': pres_lr,
              'weight_decay': run_args.weight_decay},
             {'params': guide.baseline_params(),
              'lr': run_args.bl_lr,
@@ -810,7 +907,7 @@ def init_optimizer(run_args, model):
                         optimizer, mode='max',factor=0.1, patience=patience, 
                         threshold=threshold, threshold_mode='abs', min_lr=[
                             1e-4, 
-                            1e-3, 
+                            pres_lr, 
                             1e-3
                             ])
             # lambda1 = lambda epoch: 9*torch.heaviside(torch.tensor(epoch,dtype=int), torch.tensor(-1,dtype=int)) + 1
@@ -871,7 +968,8 @@ def save_checkpoint(path, model, optimizer, schedular, stats, run_args=None):
     logging.info(f"Saved checkpoint to {path}")
 
 
-def load_checkpoint(path, device, finetune_dataset_name=None):
+def load_checkpoint(path, device, finetune_dataset_name=None, 
+                    init_data_loader:bool=True):
     scheduler = None
     try:
         checkpoint = torch.load(path, map_location=device)
@@ -881,7 +979,8 @@ def load_checkpoint(path, device, finetune_dataset_name=None):
     run_args = checkpoint["run_args"]
     if finetune_dataset_name != None:
         run_args.dataset = finetune_dataset_name
-    model, optimizer, scheduler, stats, data_loader = init(run_args, device)
+    model, optimizer, scheduler, stats, data_loader = init(run_args, device, 
+                                                           init_data_loader)
 
     if run_args.model_type == 'MWS':
         generative_model, guide, memory = model
@@ -1046,28 +1145,55 @@ def init_mlp(in_dim, out_dim, hidden_dim, num_layers, non_linearity=None,):
 
     return MultilayerPerceptron(dims, non_linearity)
 
+def conv_block(in_channels, out_channels, dropout=0.):
+    block = nn.Sequential(
+        nn.Conv2d(in_channels,out_channels,kernel_size=3,stride=1,padding=1,
+                  bias=False),
+        nn.BatchNorm2d(out_channels),
+        nn.Tanh(),
+        nn.MaxPool2d(kernel_size=2, stride=2),
+        nn.Dropout(dropout)
+    )
+    return block
+
 class ConvolutionNetwork(nn.Module):
     def __init__(self, n_in_channels=1, n_mid_channels=32, n_out_channels=64,
-                                                                    mlp=None):
+                    mlp=None, cnn_dropout=0.):
         super().__init__()
-        self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
-        self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 3, 1)
-        # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 9, 1)
-        # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 7, 1)
+        # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
+        # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 3, 1)
+        # # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 9, 1)
+        # # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 7, 1)
         self.mlp = mlp
-        self.dropout = nn.Dropout(0.50)
+        # self.dropout = nn.Dropout(0.50)
+        
+        # conv & pool layers
+        c = 16
+        self.features = nn.Sequential(
+            conv_block(1,c,dropout=cnn_dropout), # (14,14)
+            conv_block(c,2*c,dropout=cnn_dropout), # (7,7)
+            conv_block(2*c,4*c,dropout=cnn_dropout), # (3,3)
+            conv_block(4*c,8*c,dropout=cnn_dropout), # (1,1)
+            # conv_block(8*c,16*c,dropout=cnn_dropout), # (1,1)
+        ) # final is (1,1,128)
+        # 397616 params
     
     def forward(self, x):
-        x = self.conv1(x)
-        x = F.relu(x)
-        # x = F.max_pool2d(x, 2) # addition
-        x = self.conv2(x)
-        x = F.relu(x)
-        x = F.max_pool2d(x, 2)
-        x = self.dropout(x)
+        # old
+        # x = self.conv1(x)
+        # x = F.relu(x)
+        # # x = F.max_pool2d(x, 2) # addition
+        # x = self.conv2(x)
+        # x = F.relu(x)
+        # x = F.max_pool2d(x, 2)
+        # x = self.dropout(x)
+        # x = torch.flatten(x, 1)
+        # new
+        x = self.features(x)
         x = torch.flatten(x, 1)
         # print("CNN out dim", x.shape)
-        if self.mlp:
+        # breakpoint()
+        if self.mlp != None:
             x = self.mlp(x)
         return x
 
@@ -1085,12 +1211,17 @@ def init_cnn(mlp_out_dim,
          - it's a squared image.
     """
     conv_output_size = cnn_out_dim #4608 #1600 #9216
+    # mlp 4399616 param 
     mlp = init_mlp(in_dim=conv_output_size, out_dim=mlp_out_dim, 
                                             hidden_dim=mlp_hidden_dim, 
                                             num_layers=num_mlp_layers)
+    # mlp = None
+
+    # old 4800 param; new 392816
     conv_net = ConvolutionNetwork(mlp=mlp, n_in_channels=n_in_channels,
                                             n_mid_channels=n_mid_channels, 
-                                            n_out_channels=n_out_channels)
+                                            n_out_channels=n_out_channels,
+                                            cnn_dropout=0.3,)
 
     return conv_net
 
@@ -1187,6 +1318,7 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
             '4_rotate': (shift x, y, scale, rotate) or 
             '4_no_rotate': (scale x, y, shift x, y)
             '5': (scale x, y, shift x, y, rotate)
+            '7': [shift; scale; rotate; shear]
     '''
     if center is None:
         center = torch.zeros_like(thetas[:, :2])
@@ -1220,8 +1352,8 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         angle = thetas[:, 4]
         angle_cos, angle_sin = (torch.cos(angle),\
                                 torch.sin(angle))
-        affine_matrix = torch.stack([angle_cos, -angle_sin, torch.empty_like(angle), 
-                                     angle_sin, angle_cos, torch.empty_like(angle)], 
+        affine_matrix = torch.stack([angle_cos, -angle_sin, torch.ones_like(angle), 
+                                     angle_sin, angle_cos, torch.ones_like(angle)], 
                                      dim=0).T.view(-1,2,3)
         # 2 scale
         affine_matrix[:, :, 0] *= thetas[:, 2].unsqueeze(-1)  
@@ -1235,7 +1367,8 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         translations = thetas[:, 2:4]
         angle = thetas[:, 3]
     elif z_where_type == '7':
-        # shear
+        # [shift; scale; rotate; shear]
+        # shear: 0, 0 is identity
         sx = thetas[:, 5]
         sy = thetas[:, 6]
         
@@ -1246,10 +1379,10 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
         affine_matrix = torch.stack([
                                     angle_cos * (1 + sx * sy) + angle_sin * sx, 
                                     -angle_sin * (1 + sx * sy) + sx * angle_cos, 
-                                    torch.empty_like(angle), 
+                                    torch.ones_like(angle), 
                                     angle_cos * sy + angle_sin, 
                                     -angle_sin * sy + angle_cos, 
-                                    torch.empty_like(angle)
+                                    torch.ones_like(angle)
                                 ], dim=0).T.view(-1,2,3)
         # 2 scale
         affine_matrix[:, :, 0] *= thetas[:, 2].unsqueeze(-1)  

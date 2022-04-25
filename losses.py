@@ -28,7 +28,7 @@ def get_loss_sequential(generative_model,
                         imgs, 
                         k=1,
                         iteration=0, writer=None, writer_tag=None, beta=1,
-                        args=None, alpha=0.8):
+                        args=None, alpha=0.8, train=True):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -224,28 +224,29 @@ def get_loss_sequential(generative_model,
         with torch.no_grad():
             if writer_tag is None:
                 writer_tag = ''
-            writer.add_scalar(
-                f"{writer_tag}Train curves/neg_log_likelihood in reinforce",
-                -reinforce_ll.mean(), iteration)
-            writer.add_scalar(f"{writer_tag}Train curves/beta", beta, 
-                              iteration)
-            writer.add_scalar(f"{writer_tag}Train curves/reinforce variance",
-                              reinforce_sgnl.detach().var(), iteration)
-            # loss
-            for n, log_prob in zip(log_post._fields, log_post):
-                writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
-                                    log_prob.detach().sum(-1).mean(), 
-                                    iteration)
-            for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
-                writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
-                                    log_prob.detach().sum(-1).mean(), 
-                                    iteration)
             # z posterior samples
             z_pres_smpls = guide_out.z_smpl.z_pres.detach()
             shp = z_pres_smpls.shape[:3]
-            writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
-                z_pres_smpls.sum(),
-                iteration)
+            if train:
+                writer.add_scalar(
+                    f"{writer_tag}Train curves/neg_log_likelihood in reinforce",
+                    -reinforce_ll.mean(), iteration)
+                writer.add_scalar(f"{writer_tag}Train curves/beta", beta, 
+                                iteration)
+                writer.add_scalar(f"{writer_tag}Train curves/reinforce variance",
+                                reinforce_sgnl.detach().var(), iteration)
+                # loss
+                for n, log_prob in zip(log_post._fields, log_post):
+                    writer.add_scalar(f"{writer_tag}Train curves/log_posterior/"+n, 
+                                        log_prob.detach().sum(-1).mean(), 
+                                        iteration)
+                for n, log_prob in zip(['z_pres', 'z_where', 'z_what'], log_prior):
+                    writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
+                                        log_prob.detach().sum(-1).mean(), 
+                                        iteration)
+                writer.add_scalar(f"{writer_tag}Train curves/# of 1s in z_pres",
+                    z_pres_smpls.sum(),
+                    iteration)
 
             if args.log_param:
                 log_z_post_samples = True
@@ -256,24 +257,24 @@ def get_loss_sequential(generative_model,
                 writer.add_histogram(f"{writer_tag}Parameters/img_dist_std",
                         generative_model.get_imgs_dist_std().detach(), 
                         iteration)
-                # if generative_model.input_dependent_param:
-                #     writer.add_histogram(f"{writer_tag}Parameters/gen.sigma",
-                #                 guide_out.decoder_param.sigma.detach(), 
-                #                 iteration)
-                #     writer.add_histogram(
-                #                 f"{writer_tag}Parameters/tanh.add_slopes",
-                #                 guide_out.decoder_param.slope[1].detach(), 
-                #                 iteration)
-                #     if generative_model.sgl_strk_tanh:
-                #         writer.add_histogram(
-                #                 f"{writer_tag}Parameters/tanh.stroke_slopes",
-                #                 guide_out.decoder_param.slope[0].detach(), 
-                #                 iteration)
+                if generative_model.input_dependent_param:
+                    writer.add_histogram(f"{writer_tag}Parameters/gen.sigma",
+                                guide_out.decoder_param.sigma.detach(), 
+                                iteration)
+                    writer.add_histogram(
+                                f"{writer_tag}Parameters/tanh.add_slopes",
+                                guide_out.decoder_param.slope[1].detach(), 
+                                iteration)
+                    if generative_model.sgl_strk_tanh:
+                        writer.add_histogram(
+                                f"{writer_tag}Parameters/tanh.stroke_slopes",
+                                guide_out.decoder_param.slope[0].detach(), 
+                                iteration)
                 
                 # z prior parameters
                 # if generative_model.prior_dist == 'Sequential':
                 #     pr_pri_p = guide.internal_decoder.z_pres_p.detach().cpu()
-                #     pr_pri_p = pr_pri_p.view(prod(shp), -1).numpy()[z_pres==1]
+                #     # pr_pri_p = pr_pri_p.view(prod(shp), -1).numpy()[z_pres==1]
                 #     writer.add_histogram(
                 #                 f"{writer_tag}Parameters/z_pres_prior.p",
                 #                 pr_pri_p, iteration)
@@ -407,6 +408,12 @@ def get_loss_sequential(generative_model,
                                                             z_what, iteration)
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
+    log_likelihood = (torch.logsumexp(log_likelihood, dim=0) - 
+                        torch.log(torch.tensor(k)))
+    log_prior_z = (torch.logsumexp(log_prior_z, dim=0) - 
+                    torch.log(torch.tensor(k)))
+    log_post_z = (torch.logsumexp(log_post_z, dim=0) - 
+                    torch.log(torch.tensor(k)))
     return SequentialLoss(overall_loss=loss, 
                             model_loss=model_loss,
                             baseline_loss=baseline_loss,
@@ -647,6 +654,12 @@ def get_loss_air(generative_model, guide, imgs, k=1,
 
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
+    log_likelihood = (torch.logsumexp(log_likelihood, dim=0) - 
+                        torch.log(torch.tensor(k)))
+    log_prior_z = (torch.logsumexp(log_prior_z, dim=0) - 
+                    torch.log(torch.tensor(k)))
+    log_post_z = (torch.logsumexp(log_post_z, dim=0) - 
+                    torch.log(torch.tensor(k)))
 
     return SequentialLoss(overall_loss=loss, 
                             model_loss=model_loss,

@@ -27,6 +27,8 @@ def get_args_parser():
                         type=str, help='model code')
     parser.add_argument("-ds", default='mn',
                         type=str, help='dataset name')
+    parser.add_argument("-trn", "--train_not_test", action='store_true',
+                        help='if specified, just train or else just eval')
     return parser
 
 if __name__ == '__main__':
@@ -34,11 +36,6 @@ if __name__ == '__main__':
     run_args = parser.parse_args()
 
     all_exp_args = {}
-
-    # VAE and AIR 
-    # Full model
-    # Full model ablation (Full minus 1 feature)
-    # MWS
 
     ablation_exp_name = [
             'Full-sequential_prior',
@@ -56,50 +53,27 @@ if __name__ == '__main__':
         'qd': 'Quickdraw',
     }
     ds_name = ds_dict[run_args.ds]
-    # ---
-    # v3.1 bernoulli: β8, 9 works well
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-bern-65strk'
-    # v0.1: β3 works
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
-    # v0.2: β2-4 works 
-    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-6strk'
-    # v0.3: β2 a bit more strokes then needed, 4 collapse
-    # exp_name = 'Full-spDec-sqPrior-dp-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-6strk'
 
-    # v1.1 β3 works better than 4; 4 stops using strokes
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
-    # v1.2 β2-4 all works
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
-    # v1.2 β2 works
-    # exp_name = 'Full-spDec-sqPrior-dp-5wr-detachRsdNotRsdEm-noTarget-sepPrWrNet-noWtPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk'
-    # exp_name = 'Full-neuralDec-fxPrior-useUndetachCanvas-anLr'
-    
-    # v2.1
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-omni'
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-km'
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-em'
-    # exp_name = 'Full-spDec-sqPrior-dp-rt-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk-qd'
     code_dict = {
-        'M': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
-        # 'MT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        'MT': 'Full-spDec-sq50MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        'AIR': 'AIR',
+        'AIR3': 'AIR',
+        'AIR': 'AIR4',
+        'DAIR': 'DAIR',
+        'M': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        '1MT': 'Full-spDec-sq1MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        '20MT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MNCT': 'Full-spDec-sq40MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MDT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        '1MNCT': 'Full-spDec-sq1MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTS': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MT5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPr5WrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTnT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-noTgt-65strk',
+        'MTnT5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPr5WrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-noTgt-65strk',
     }
     exp_name = code_dict[run_args.m]
-    # exp_name = 'Full' 
-    # β4->4/4 collapse; β1->4/4 steps; β3->3collapse 1full; β2->1var; 3full
-    # exp_name = ablation_exp_name[0] 
-    # also means no strk_tanh and add_tanh; β10 
-    # exp_name = ablation_exp_name[1]
-    # extramely hard to get to learn variable steps; maybe β4
-    # exp_name = ablation_exp_name[2]
-    # β4: 1/4 var, 3/4 full
-    # exp_name = ablation_exp_name[3]
-    # exp_name = 'MWS'
-    # exp_name = 'AIR'
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
     
-    train_not_test = False
+    train_not_test = run_args.train_not_test
     if train_not_test:
         train, evaluate = True, False
     else:
@@ -118,10 +92,6 @@ if __name__ == '__main__':
                         '--dataset', ds_name,
 
                         '--seed', f'{run_args.seed}',
-                        # '--dataset', 'Omniglot',
-                        # '--dataset', 'KMNIST',
-                        # '--dataset', 'Quickdraw',
-                        # '--dataset', 'EMNIST',
                         ])
             if run_args.ct:
                 args.append('--continue_training')

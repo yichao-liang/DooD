@@ -3,6 +3,7 @@ from random import shuffle
 
 import argparse
 from einops import rearrange
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib import offsetbox
@@ -18,7 +19,8 @@ from torch.utils.tensorboard import SummaryWriter
 from skimage.draw import line_aa, line
 from kornia.geometry.transform import invert_affine_transform
 from PIL import Image
-
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.metrics import silhouette_score
 
 import util
 from models.template import ZSample
@@ -34,6 +36,16 @@ resize_res = 64
 display_transform = transforms.Compose([
                         transforms.Resize([resize_res, resize_res]),
                         ])
+
+def save_img_debug(img, save_name):
+    '''Save image for debugging
+    Args:
+        img:tensor [bs, 1, res, res]
+    '''
+    img = display_transform(img)
+    save_image(img.cpu(), f'plots/sample_x_var/{save_name}.png', nrow=nrow)
+
+
 def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
     fig, ax = plt.subplots(1,1, figsize=(5,5))
     sns.swarmplot(x='Num_strokes', y='ELBO', hue='Label', dodge=True, size=1, 
@@ -85,7 +97,9 @@ def plot_reconstructions(imgs:torch.Tensor,
                          recons_per_img:int=1,
                          has_fixed_img=False,
                          target:torch.Tensor=None,
-                         dataset=None):
+                         dataset=None,
+                         invert_color=True,
+                         save_as_individual_img=False):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
     2) control points
@@ -180,14 +194,16 @@ def plot_reconstructions(imgs:torch.Tensor,
         
         cum_stroke_plot = True
         if cum_stroke_plot and args.model_type == 'Sequential':
-            plot_cum_recon(imgs, generative_model, latent, args.z_where_type, 
-                           writer, dataset_name, epoch, tag2=writer_tag)
+            plot_cum_recon(args, imgs, generative_model, latent, args.z_where_type, 
+                           writer, dataset_name, epoch, tag2=writer_tag,
+                           save_as_individual_img=save_as_individual_img)
 
         print(f"epoch {epoch}")
         print(np.array(guide_out.z_pms.z_pres.detach().cpu()).round(3))
         # if args.z_where_type == '4_rotate':
         #     print(np.array(latent.z_where[:n,:,3].detach().cpu()).round(2))
         # Add bounding boxes based on z_where
+        if invert_color: imgs = 1 - imgs
         imgs_w_box = batch_add_bounding_boxes_skimage(
                                 imgs=display_transform(imgs).cpu(), 
                                 z_where_mtrx=z_where_mtrx.cpu().clone(), 
@@ -203,8 +219,10 @@ def plot_reconstructions(imgs:torch.Tensor,
 
         # Get the transformed imgs for each z_where
 
+        if invert_color: imgs = 1 - imgs
         stn_out = util.spatial_transform(imgs.repeat_interleave(repeats=n_strks,
                               dim=0),z_where_mtrx).view(n, n_strks, 1, res, res)
+        if invert_color: stn_out = 1 - stn_out
 
         # Take only n image for display, and make it has RGB channels
         # Then view it in shape [n * n_strkes, 3, res, res]
@@ -248,6 +266,10 @@ def plot_reconstructions(imgs:torch.Tensor,
         else:
             cum_canvas = torch.zeros_like(imgs_w_box)
         # comparision: [n, 3, res * (1_for_target + n_strks_stn + 1_for_recon), res]
+        if invert_color: 
+            recon_img = 1 - recon_img
+            recon_glimpse = 1 - recon_glimpse
+            cum_canvas = 1 - cum_canvas
         comparision = torch.cat([imgs_w_box, 
                                  recon_img, 
                                  stn_out,
@@ -278,18 +300,30 @@ def plot_reconstructions(imgs:torch.Tensor,
         imgs.unsqueeze_(1)
         recon_img.unsqueeze_(1)
         comparision = torch.cat([display_transform(imgs), 
-                                 display_transform(recon_img)], dim=2)
+                                 display_transform(recon_img)], dim=2).cpu()
 
+    comparision = torch.clamp(comparision, min=0., max=1.)
     # Save image in a dir
     # suffix = 'trn' if is_train else 'tst'
     if writer_tag[-1] == '/': writer_tag = writer_tag[:-1]
     writer_tag = writer_tag + '_' + dataset_name
-    save_imgs_dir = util.get_save_test_img_dir(args, epoch, suffix=writer_tag)
-    try:
-        save_image(comparision.cpu(), save_imgs_dir, nrow=nrow)
-    except Exception as e:
-        print(e)
-        breakpoint()
+
+    if save_as_individual_img:
+        bs = comparision.shape[0]
+        for i in range(bs):
+            save_img_dir = util.get_save_test_img_dir(args, epoch, 
+                                               prefix='reconstruction',
+                                               suffix=f'{writer_tag}_{i}')
+            save_image(comparision[i], save_img_dir)
+    else:
+        save_imgs_dir = util.get_save_test_img_dir(args, epoch, 
+                                               prefix='reconstruction',
+                                               suffix=writer_tag)
+        try:
+            save_image(comparision, save_imgs_dir, nrow=nrow)
+        except:
+            breakpoint()
+
 
     # Log image in Tensorboard
     img_grid = make_grid(comparision, nrow=nrow)
@@ -326,8 +360,9 @@ def plot_reconstructions(imgs:torch.Tensor,
     #                             writer_tag=writer_tag, 
     #                             dataset_name=dataset_name)
 
-def plot_cum_recon(imgs, gen, latent, z_where_type, writer, 
-                   dataset_name, epoch, tag2, tag1='Cummulative Reconstruction'):
+def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer, 
+                   dataset_name, epoch, tag2, tag1='Cummulative Reconstruction',
+                   invert_color=True, save_as_individual_img=False):
     _, n, n_strks = latent.z_pres.shape
     res = gen.res
     
@@ -343,7 +378,8 @@ def plot_cum_recon(imgs, gen, latent, z_where_type, writer,
     # z_pres: originally in [n, n_strkes] -> [n * n_strkes]
     z_pres_b = latent.z_pres.view(n * n_strks).bool().cpu()
     cum_recon_img = color_img_edge(imgs=cum_recon_img, z_pres=z_pres_b, 
-                                                    color=pres_clr)
+                                                    color=1-pres_clr if 
+                                                    invert_color else pres_clr)
     cum_recon_img = display_transform(cum_recon_img)
     # [n*n_strks, 3, res, res]
     cum_recon_img = batch_add_bounding_boxes_skimage(
@@ -351,10 +387,15 @@ def plot_cum_recon(imgs, gen, latent, z_where_type, writer,
         z_where_mtrx=z_where_mtrx.cpu().view(n*n_strks,2,3),
         n_objs=torch.ones(n*n_strks),
         n_strks=1,
+        invert_color=invert_color,
     )
     cum_recon_img = cum_recon_img * latent.z_pres.view(n*n_strks
                                             )[:,None,None,None].cpu()
     
+    if invert_color:
+        imgs = 1 - imgs
+        cum_recon_img = 1 - cum_recon_img
+
     cum_recon_img = cum_recon_img.view(n, n_strks, 3, resize_res,
                                                         resize_res)
     cum_recon_img = cum_recon_img.transpose(1,2).reshape(
@@ -363,7 +404,7 @@ def plot_cum_recon(imgs, gen, latent, z_where_type, writer,
         target_imgs = display_transform(imgs).cpu().expand(
                                         n, 3, resize_res, resize_res)
         cum_recon_img = torch.cat([target_imgs, 
-                                cum_recon_img], dim=2)
+                                cum_recon_img], dim=2).cpu()
     cum_recon_plot = make_grid(cum_recon_img, nrow=n)
 
     if dataset_name is not None:
@@ -371,6 +412,20 @@ def plot_cum_recon(imgs, gen, latent, z_where_type, writer,
     else:
         tag = f'{tag1}/{tag2}'
     writer.add_image(tag, cum_recon_plot, epoch)
+
+    if save_as_individual_img:
+        bs = cum_recon_img.shape[0]
+        for i in range(bs):
+            save_img_dir = util.get_save_test_img_dir(args, epoch, 
+                                               prefix='cum_reconstruction',
+                                            suffix=f'{tag2}_{dataset_name}_{i}')
+            save_image(cum_recon_img[i], save_img_dir)
+    else:
+        save_imgs_dir = util.get_save_test_img_dir(args, epoch, 
+                                               prefix='cum_reconstruction',
+                                               suffix=f'{tag2}_{dataset_name}')
+        save_image(cum_recon_img, save_imgs_dir, nrow=n)
+    return cum_recon_img
 
     
 def plot_multi_recon(imgs, guide_out, args, gen, dataset_name, writer, 
@@ -587,7 +642,9 @@ def add_control_points_plot(gen, latents, writer, epoch=None,
     plt.close('all')
 
 def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/', 
-                                                z_what_to_keep=5000):
+                                                z_what_to_keep=5000,
+                                                clustering=None,
+                                                n_clusters=10):
     '''
     Args:
         ckpt_path: full path to checkpoint
@@ -628,7 +685,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
             
             # Create curves
             steps = torch.linspace(0, 1, bezier.steps).to(z_what.device)
-            curves = rearrange(bezier.sample_curve(z_what,steps), 'b strk xy pts -> (b strk) pts xy')
+            curves = rearrange(bezier.sample_curve(z_what,steps), 
+                               'b strk xy pts -> (b strk) pts xy')
             
             # Keep z_what with z_pres==1
             z_pres = z_pres.flatten().bool()
@@ -649,20 +707,35 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     print("z_what shape:", all_z_whats.shape, "curves shape:", all_curves.shape)
 
     # Generate visualization plot ----------------------------------------------
+    util.logging.info(f"Perform {clustering} clustering...")
+    if clustering == None:
+        color = None
+    elif clustering == 'kmeans':
+        color = KMeans(n_clusters=n_clusters).fit_predict(all_z_whats)
+    elif clustering == 'dbscan':
+        color = DBSCAN().fit_predict(all_z_whats)
+    else: 
+        raise NotImplementedError
+    # silhouette_score
+    sc = silhouette_score(all_z_whats, color)
+
     # t-sne z_whats
-    util.logging.info("Generating t-sne embeddings...")
+    util.logging.info("Generate t-sne embeddings...")
     all_z_whats_embedded = TSNE(n_components=2, 
                                 # init='pca', 
                                 learning_rate='auto'
                                 ).fit_transform(all_z_whats)
+    
 
     # plot the curves
-    util.logging.info("Generating curve images...")
+    util.logging.info("Generate curve images...")
+    cmap = matplotlib.cm.get_cmap(plt.cm.nipy_spectral)
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=n_clusters-1)
+
     images = []
-    for curve in all_curves:
+    for c, curve in zip(color, all_curves):
         fig, ax = plt.subplots(1,1,figsize=(.5,.5))
-        i = 19
-        ax.scatter(curve[:,0],curve[:,1], s=0.1,)
+        ax.scatter(curve[:,0],curve[:,1], s=0.1, c=[cmap(norm(c))])
         ax.set_aspect('equal')
         ax.axis('equal')
         ax.invert_yaxis()
@@ -683,10 +756,10 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     images_arr = images_arr.astype('int')
 
     util.logging.info("Plotting visualization...")
-    plot_embeddings(all_z_whats_embedded, imgs=images_arr, title=title, 
-                                                        save_dir=save_dir)
+    plot_embeddings(all_z_whats_embedded, imgs=images_arr, 
+                    title=f'{title}_sc{sc:.2f}', save_dir=save_dir, color=color)
 
-def plot_embeddings(X, imgs, title=None, save_dir=None):
+def plot_embeddings(X, imgs, title=None, save_dir=None, color=None):
     x_min, x_max = np.min(X, 0), np.max(X, 0)
     X = (X - x_min) / (x_max - x_min)
 
@@ -696,7 +769,8 @@ def plot_embeddings(X, imgs, title=None, save_dir=None):
     shown_images = np.array([[1. ,1.]])
     for i in range(X.shape[0]):
         dist = np.sum((X[i] - shown_images) ** 2, 1)
-        if np.min(dist) < 4e-3:
+        # if np.min(dist) < 4e-3:
+        if np.min(dist) < 8e-3:
             # don't show points that are too close
             continue
         shown_images = np.r_[shown_images, [X[i]]]
@@ -704,20 +778,21 @@ def plot_embeddings(X, imgs, title=None, save_dir=None):
                 offsetbox.OffsetImage(imgs[i]),
                 X[i], frameon=False)
         axs[0].add_artist(imagebox)
-    axs[0].scatter(X[:,0],X[:,1])
+    axs[0].scatter(X[:,0],X[:,1], c=color, cmap=plt.cm.nipy_spectral)
     axs[0].axes.xaxis.set_visible(False)
     axs[0].axes.yaxis.set_visible(False)
     plt.xticks([]), plt.yticks([])
-    axs[1].scatter(X[:,0],X[:,1])
+    axs[1].scatter(X[:,0],X[:,1], c=color, cmap=plt.cm.nipy_spectral)
     
     plt.tight_layout()
         
     if title:
-        plt.suptitle(title, y=1.01,fontsize=16)
-        plt.savefig(save_dir + title + ".pdf")
+        plt.suptitle(title)#, y=1.01,fontsize=16)
+        plt.savefig(f'{save_dir}_{title}.pdf')
 
 # Plotting
-def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks):
+def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks, 
+                                     invert_color=False):
     '''
     Args:
         imgs: [bs, 1 (c), res, res]
@@ -732,6 +807,7 @@ def batch_add_bounding_boxes_skimage(imgs, z_where_mtrx, n_objs, n_strks):
                            [1., 1., 0.],
                            [0., 1., 1.],
                            [1., 0., 1.]]).view(6,3,1)
+    if invert_color: colors = 1 - colors
     bs, res = imgs.shape[0], imgs.shape[-1]
     imgs = imgs.expand(bs, 3, res, res)
     new_img = imgs.clone()
@@ -959,3 +1035,37 @@ def add_bounding_box(img, z_where, color):
     img_shape = tuple(img.shape)
     assert img_shape == target_shape, "{}, {}".format(img_shape, target_shape)
     return img
+
+def plot_clf_score_heatmap(score_mtrx:np.array, preds, trues):
+    '''
+    Each row i is a test image, each column corresponds to it's score in class
+    j.
+    '''
+    fig, ax = plt.subplots(figsize=(12,12))
+    
+    im = ax.imshow(score_mtrx, cmap='cividis')
+
+    # ticks
+    # Show all ticks and label them with the respective list entries
+    ax.set_xticks(np.arange(20,step=2), labels=np.arange(20,step=2))
+    ax.set_yticks(np.arange(20,step=2), labels=np.arange(20,step=2))
+    ax.set_xlabel("Class score")
+    ax.set_ylabel("Query image")
+    
+    # Loop over data dimensions and create text annotations.
+    for i in range(20): # query
+        for j in range(20): # support
+            text_pre_fix = ''
+            if j+1 == preds[i]:
+                text_color = "red" # predicted class
+                text_pre_fix = 'p:' + text_pre_fix
+            else:
+                text_color = "white"
+            if j+1 == trues[i]:
+                text_color = "green" # true class
+                text_pre_fix = 't:' + text_pre_fix
+            text = ax.text(j, i, text_pre_fix+f'{int(score_mtrx[i, j])}',
+                        ha="center", va="center", color=text_color, weight=500)
+
+    fig.tight_layout()
+    return fig
