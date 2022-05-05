@@ -37,7 +37,115 @@ logging.basicConfig(
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
 
+def get_last_vars(hs, z_smpl):
+    '''Get the last vars with z_pres == 1 for each entry
+    hs: 
+        h_ls: [ptcs, bs, strks, h_dim]
+        h_cs: [ptcs, bs, strks, h_dim]
+    z_smpl:
+        z_pres [ptcs, bs, strks]
+        z_what [ptcs, bs, strks, pts, 2]
+        z_where [ptcs, bs, strks, 3]
+    '''
+    # Setup
+    h_ls, h_cs = hs
+    ptcs, bs, n_strks, h_dim = h_cs.shape
+    z_pres, z_what, z_where = z_smpl
+    _, _, _, wr_dim = z_where.shape
+    _, _, _, npts, _ = z_what.shape
+    # [ptcs, bs] use the position of the last z_pres==1 as index
+    idx_ = (z_pres.sum(dim=-1) - 1).long()
+    idx = (z_pres.sum(dim=-1) - 1).long()
+    print("--> Parsing idx:", idx)
+    # idx = torch.zeros_like(idx)
+
+    # select the last elements
+    if isinstance(h_ls, tuple):
+        h_prs, h_wrs = h_ls
+        h_pr = torch.gather(h_prs,2,idx_[:,:,None,None].repeat(1,1,1,h_dim))
+        h_wr = torch.gather(h_wrs,2,idx_[:,:,None,None].repeat(1,1,1,h_dim))
+        h_ls = (h_pr.squeeze(-2).squeeze(0), h_wr.squeeze(-2).squeeze(0))
+    else:
+        h_ls = torch.gather(h_ls,2,idx_[:,:,None,None].repeat(1,1,1,h_dim))
+    h_cs = torch.gather(h_cs, 2, idx_[:,:,None,None].repeat(1,1,1,h_dim))
+    h_cs = h_cs.squeeze(-2).squeeze(0)
+    h_state = (h_ls, h_cs)
+
+    # select the last latents
+    z_pres = torch.gather(z_pres,2,idx[:,:,None]).squeeze(0)
+    z_where = torch.gather(z_where,2,idx[:,:,None,None].repeat(1,1,1,wr_dim)
+                        ).squeeze(0)
+    z_what = torch.gather(z_what,2,idx[:,:,None,None,None].repeat(1,1,1,npts,2)
+                        ).squeeze(0)
+    latents = ZSample(z_pres,z_what.squeeze(-3),z_where.squeeze(-2))
+
+    return h_state, latents
+    
+           
+def get_top_k_latents_hiddens(guide, gen, img, ptcs, k=1):
+    '''choose top k latents from ptcs
+    '''
+    out = guide(img, ptcs)
+    latents, mask_prev, canvas, z_prior, hs, dec_param, log_post, rec = (
+                                    out.z_smpl, out.mask_prev,
+                                    out.canvas,out.z_prior, out.hidden_states,
+                                    out.decoder_param, out.z_lprb, out.canvas)
+    # log_post_z = torch.cat([prob.sum(-1, keepdim=True) for prob in log_post], 
+    #                     dim=-1).sum(-1)
+    log_prior, log_lld = gen.log_prob(latents=latents,
+                                    imgs=img,
+                                    z_pres_mask=mask_prev,
+                                    canvas=canvas,
+                                    z_prior=z_prior)
+    # log_prior_z = torch.cat([prob.sum(-1, keepdim=True) for prob in 
+    #                         log_prior], dim=-1).sum(-1)
+    # generative_joint_log_prob = (log_lld + log_prior_z)
+    # elbo = - log_post_z + generative_joint_log_prob
+
+    # [bs]
+    idx = log_lld.argmax(dim=0)
+    # idx = elbo.argmax(dim=0)
+    s, w, p = guide.max_strks, guide.z_where_dim, guide.pts_per_strk
+    # select zs
+    # z_pres [ps, bs, n_strk]
+    tp_z_pres = torch.gather(latents.z_pres, 0,
+                             idx[None,:,None].repeat(1,1,s))
+    # z_where [ps, bs, n_strk, wr_dim]
+    tp_z_where = torch.gather(latents.z_where, 0,
+                              idx[None,:,None,None].repeat(1,1,s,w))
+    # z_what [ps, bs, n_strk, npts, 2]
+    tp_z_what = torch.gather(latents.z_what, 0,
+                            idx[None,:,None,None,None].repeat(1,1,s,p,2))
+    tp_zs = ZSample(
+                tp_z_pres,
+                tp_z_what,
+                tp_z_where,
+            )
+
+    # select hs
+    h_ls, h_cs = hs
+    ptcs, bs, n_strks, h_dim = h_cs.shape
+    if isinstance(h_ls, tuple):
+        h_prs, h_wrs = h_ls
+        # h_pr [ps, bs, n_strk, h_dim]
+        h_pr = torch.gather(h_prs,0,idx[None,:,None,None].repeat(1,1,s,h_dim))
+        h_wr = torch.gather(h_wrs,0,idx[None,:,None,None].repeat(1,1,s,h_dim))
+        # h_ls = h_pr.squeeze(-2).squeeze(0), h_wr.squeeze(-2).squeeze(0)
+        h_ls = (h_pr, h_wr)
+    else:
+        h_ls = torch.gather(h_ls,0,idx[None,:,None,None].repeat(1,1,s,h_dim))
+    h_cs = torch.gather(h_cs,0,idx[None,:,None,None].repeat(1,1,s,h_dim))
+    # h_cs = h_cs.squeeze(-2).squeeze(0)
+    tp_hs = (h_ls, h_cs)
+
+    # select reconstruction
+    tp_rec = torch.gather(rec,0,idx[None,:,None,None,None].repeat(1,1,1,50,50))
+
+    return tp_zs, tp_hs, dec_param, tp_rec
+
 def get_top_k_latents(guide, gen, img, ptcs, k=1):
+    '''choose top k latents from ptcs
+    '''
     out = guide(img, ptcs)
     latents, mask_prev, canvas, z_prior = (
                                     out.z_smpl, out.mask_prev,
@@ -49,11 +157,17 @@ def get_top_k_latents(guide, gen, img, ptcs, k=1):
                                                     z_prior=z_prior)
     # [bs]
     idx = log_lld.argmax(dim=0)
-    breakpoint()
+    s, w, p = guide.max_strks, guide.z_where_dim, guide.pts_per_strk
+    tp_z_pres = torch.gather(latents.z_pres, 0,
+                             idx[None,:,None].repeat(1,1,s))
+    tp_z_where = torch.gather(latents.z_where, 0,
+                              idx[None,:,None,None].repeat(1,1,s,w))
+    tp_z_what = torch.gather(latents.z_what, 0,
+                            idx[None,:,None,None,None].repeat(1,1,s,p,2))
     latents = ZSample(
-                        latents.z_pres[idx].unsqueeze(0),
-                        latents.z_what[idx].unsqueeze(0),
-                        latents.z_where[idx].unsqueeze(0),
+                        tp_z_pres,
+                        tp_z_what,
+                        tp_z_where,
                     )
     return latents
 
@@ -98,7 +212,8 @@ def get_sample_affine(device):
                                         ).to(device)
     return transform_z_wheres
 
-def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True):
+def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True, 
+                    args=None):
     # Dataloader
     # Train dataset
     if dataset in [
@@ -201,6 +316,12 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True):
                         transforms.Lambda(lambda x: 1-x),
                         transforms.ToPILImage(mode=None)]+ tst_transform_lst), 
                             download=True)        
+    elif dataset == 'Synthetic':
+        # train and test dataloader
+        trn_dataset, tst_dataset = synthetic.get_data_loader(args=args,
+                                                        make_new_dataset=True
+                                                        )
+
     else: raise NotImplementedError
 
     def seed_worker(worker_id):
@@ -598,6 +719,7 @@ def get_save_test_img_dir(args, epoch, prefix='reconstruction',
 def get_save_count_swarm_img_dir(args, iteration, suffix='tst'):
     Path(f"{get_save_dir(args)}/images").mkdir(parents=True, exist_ok=True)
     return f"{get_save_dir(args)}/images/count_swarm_ep{iteration}_{suffix}.pdf"
+
 def get_checkpoint_path(args, checkpoint_iteration=-1):
     '''e.g. get_path_base_from_args: "base"
     '''
@@ -630,7 +752,8 @@ def init(run_args, device, init_data_loader=True):
         train_loader, test_loader, trn_dataset, tst_dataset = init_dataloader(
                                                         run_args.img_res, 
                                                         run_args.dataset,
-                                                        run_args.batch_size)
+                                                        run_args.batch_size,
+                                                        args=run_args)
         if run_args.model_type == 'MWS':
             from models.mws import handwritten_characters as mws
             train_loader = mws.data.get_data_loader(trn_dataset.data/255,
@@ -644,7 +767,6 @@ def init(run_args, device, init_data_loader=True):
         data_loader = train_loader, test_loader
     else:
         data_loader = None
-
     # elif run_args.dataset == 'generative_model':
     #     # train and test dataloader
     #     data_loader = synthetic.get_data_loader(generative_model, 
@@ -686,12 +808,13 @@ def init(run_args, device, init_data_loader=True):
         # assert ((run_args.use_canvas == (not run_args.no_sgl_strk_tanh)) or
         #         not run_args.use_canvas),\
             # "use_canvas should be used in accordance with strk_tanh norm"
-        hid_dim = 256
+        hid_dim = run_args.hid_dim
+        img_feat_dim = run_args.img_feat_dim
         generative_model = ssp.GenerativeModel(
                     max_strks=int(run_args.strokes_per_img),
                     pts_per_strk=run_args.points_per_stroke,
-                    z_where_type=run_args.z_where_type,
                     res=run_args.img_res,
+                    z_where_type=run_args.z_where_type,
                     use_canvas=run_args.use_canvas,
                     transform_z_what=run_args.transform_z_what,
                     input_dependent_param=run_args.input_dependent_render_param,
@@ -711,6 +834,7 @@ def init(run_args, device, init_data_loader=True):
                     dependent_prior=run_args.dependent_prior,
                     prior_dependency=run_args.prior_dependency,
                     hidden_dim=hid_dim,
+                    img_feat_dim=img_feat_dim,
                     bern_img_dist=run_args.bern_img_dist,
                     n_comp=int(run_args.num_mixtures),
                     correlated_latent=run_args.correlated_latent,
@@ -723,13 +847,15 @@ def init(run_args, device, init_data_loader=True):
                 pts_per_strk=run_args.points_per_stroke,
                 z_where_type=run_args.z_where_type,
                 img_dim=[1, run_args.img_res, run_args.img_res],
+                
                 use_canvas=run_args.use_canvas,
                 transform_z_what=run_args.transform_z_what,
                 input_dependent_param=run_args.input_dependent_render_param,
                 use_residual=run_args.use_residual,
                 prior_dist=run_args.prior_dist,
                 target_in_pos=run_args.target_in_pos,
-                feature_extractor_sharing=run_args.no_feature_extractor_sharing,
+                feature_extractor_sharing=not 
+                                        run_args.no_feature_extractor_sharing,
                 num_mlp_layers=run_args.num_mlp_layers,
                 num_bl_layers=run_args.num_baseline_layers,
                 bl_mlp_hid_dim=run_args.bl_mlp_hid_dim,
@@ -762,6 +888,7 @@ def init(run_args, device, init_data_loader=True):
                 no_pres_post_rnn=run_args.no_pres_post_rnn,
                 only_rsd_ratio_pres=run_args.only_rsd_ratio_pres,
                 hidden_dim=hid_dim,
+                img_feat_dim=img_feat_dim,
                 bern_img_dist=run_args.bern_img_dist,
                 dataset=run_args.dataset,
                 linear_sum=run_args.linear_sum,
@@ -786,7 +913,7 @@ def init(run_args, device, init_data_loader=True):
                         z_where_type=run_args.z_where_type,
                         use_canvas=run_args.use_canvas,
                         use_residual=run_args.use_residual,
-                        feature_extractor_sharing=\
+                        feature_extractor_sharing=not
                                             run_args.no_feature_extractor_sharing,
                                             # True,
                         z_what_dim=run_args.z_dim,
@@ -1145,9 +1272,9 @@ def init_mlp(in_dim, out_dim, hidden_dim, num_layers, non_linearity=None,):
 
     return MultilayerPerceptron(dims, non_linearity)
 
-def conv_block(in_channels, out_channels, dropout=0.):
+def conv_block(in_channels, out_channels, dropout=0., ks=3):
     block = nn.Sequential(
-        nn.Conv2d(in_channels,out_channels,kernel_size=3,stride=1,padding=1,
+        nn.Conv2d(in_channels,out_channels,kernel_size=ks,stride=1,padding=1,
                   bias=False),
         nn.BatchNorm2d(out_channels),
         nn.Tanh(),
@@ -1160,39 +1287,48 @@ class ConvolutionNetwork(nn.Module):
     def __init__(self, n_in_channels=1, n_mid_channels=32, n_out_channels=64,
                     mlp=None, cnn_dropout=0.):
         super().__init__()
-        # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 3, 1)
-        # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 3, 1)
-        # # self.conv1 = nn.Conv2d(n_in_channels, n_mid_channels, 9, 1)
-        # # self.conv2 = nn.Conv2d(n_mid_channels, n_out_channels, 7, 1)
         self.mlp = mlp
-        # self.dropout = nn.Dropout(0.50)
+        # arch 1
+        c = 8
+        # c = 16
+        modules = [
+            nn.Conv2d(n_in_channels, c, 3, 1),
+            nn.ReLU(True),
+            # nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(c, c*2, 3, 1),
+            nn.ReLU(True),
+            # nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(),
+        ]
         
-        # conv & pool layers
-        c = 16
-        self.features = nn.Sequential(
-            conv_block(1,c,dropout=cnn_dropout), # (14,14)
-            conv_block(c,2*c,dropout=cnn_dropout), # (7,7)
-            conv_block(2*c,4*c,dropout=cnn_dropout), # (3,3)
-            conv_block(4*c,8*c,dropout=cnn_dropout), # (1,1)
-            # conv_block(8*c,16*c,dropout=cnn_dropout), # (1,1)
-        ) # final is (1,1,128)
-        # 397616 params
-    
+        # sid's
+        # c = 64 
+        # self.mlp = None
+        # modules = [
+        #     # input size: 1 x 50 x 50
+        #     nn.Conv2d(n_in_channels, c, 4, 2, 1, bias=True),
+        #     nn.ReLU(True),
+        #     # input size: c x 25 x 25
+        #     nn.Conv2d(c, c * 2, 4, 2, 1, bias=True),
+        #     nn.ReLU(True),
+        #     # size: (c * 2) x 12 x 12
+        #     nn.Conv2d(c * 2, c * 4, 4, 2, 1, bias=True),
+        #     nn.ReLU(True),
+        #     # size: (c * 4) x 6 x 6
+        #     nn.Conv2d(c * 4, c * 8, 4, 2, 1, bias=True),
+        #     nn.ReLU(True),
+        #     # size: c * 8 x 3 x 3
+        #     nn.Conv2d(c * 8, 512, 3, 1, 0, bias=True),
+        #     # size: 512 x 1 x 1
+        #     ]
+
+        self.features = nn.Sequential(*modules)
+
     def forward(self, x):
-        # old
-        # x = self.conv1(x)
-        # x = F.relu(x)
-        # # x = F.max_pool2d(x, 2) # addition
-        # x = self.conv2(x)
-        # x = F.relu(x)
-        # x = F.max_pool2d(x, 2)
-        # x = self.dropout(x)
-        # x = torch.flatten(x, 1)
-        # new
         x = self.features(x)
-        x = torch.flatten(x, 1)
         # print("CNN out dim", x.shape)
         # breakpoint()
+        x = torch.flatten(x, 1)
         if self.mlp != None:
             x = self.mlp(x)
         return x

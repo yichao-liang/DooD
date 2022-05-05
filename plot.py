@@ -98,7 +98,7 @@ def plot_reconstructions(imgs:torch.Tensor,
                          has_fixed_img=False,
                          target:torch.Tensor=None,
                          dataset=None,
-                         invert_color=True,
+                         invert_color=False,
                          save_as_individual_img=False):
     '''Plot 
     1) reconstructions in the format: target -> reconstruction
@@ -196,7 +196,8 @@ def plot_reconstructions(imgs:torch.Tensor,
         if cum_stroke_plot and args.model_type == 'Sequential':
             plot_cum_recon(args, imgs, generative_model, latent, args.z_where_type, 
                            writer, dataset_name, epoch, tag2=writer_tag,
-                           save_as_individual_img=save_as_individual_img)
+                           save_as_individual_img=save_as_individual_img,
+                           invert_color=invert_color)
 
         print(f"epoch {epoch}")
         print(np.array(guide_out.z_pms.z_pres.detach().cpu()).round(3))
@@ -393,7 +394,6 @@ def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer,
                                             )[:,None,None,None].cpu()
     
     if invert_color:
-        imgs = 1 - imgs
         cum_recon_img = 1 - cum_recon_img
 
     cum_recon_img = cum_recon_img.view(n, n_strks, 3, resize_res,
@@ -401,6 +401,8 @@ def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer,
     cum_recon_img = cum_recon_img.transpose(1,2).reshape(
                         [n, 3, n_strks * resize_res, resize_res])
     if imgs != None:
+        if invert_color:
+            imgs = 1 - imgs
         target_imgs = display_transform(imgs).cpu().expand(
                                         n, 3, resize_res, resize_res)
         cum_recon_img = torch.cat([target_imgs, 

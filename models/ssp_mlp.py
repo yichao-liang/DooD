@@ -69,7 +69,7 @@ def constrain_z_what(z_what_loc, clamp=False, more_range=False):
             # z_what_loc = util.constrain_parameter(z_what_loc, min=0., max=1.)
     return z_what_loc
 
-class RendererParamMLP(nn.Module):
+class GlobalRendererParamMLP(nn.Module):
     """Predict the render parameters
     """
     def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, sgl_strk_tanh,
@@ -84,38 +84,69 @@ class RendererParamMLP(nn.Module):
         self.spline_decoder=spline_decoder
         self.trans_z_what=trans_z_what
         self.seq = util.init_mlp(in_dim=in_dim, 
-                                 out_dim=3,
+                                 out_dim=1,
                                  hidden_dim=hidden_dim,
                                  num_layers=num_layers)        
         self.seq.linear_modules[-1].weight.data.zero_()
 
-        # init_b1, init_b2 = -6, 6
-        # if dataset in [
-        #             'Omniglot', 
-        #             'Quickdraw'
-        #             ]:
-        # if trans_z_what:
-        # b2: [-2:.2, 0:.5, .5:.6, 1:.67, 6:.9]
-        # b3: [-1:.48, 1:1.1, 2:2.3]
-        # b1, b2, b3 = 0, 0, -1 # .25, , .48
-        # b1, b2, b3 = -2, 2, 2 # .25, .32, .48
-        b1, b2, b3 = -2, 2, -1 # .25, .32, .48
+        b = -1 # .25, .32, .48 works for all tran_zwhat dataset
+        if dataset in ['Omniglot'] and not trans_z_what:
+            b = 4
+        if self.maxnorm and self.sgl_strk_tanh:
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                        torch.tensor([b], 
+                                     dtype=torch.float))
+
+        elif not self.sgl_strk_tanh and not self.maxnorm:
+            self.seq.linear_modules[-1].bias = torch.nn.Parameter(
+                    torch.tensor([2], dtype=torch.float)) 
+
+        else:
+            raise NotImplementedError
+
+    def forward(self, h):
+        z = self.seq(h)
+        # add slope
+        if self.sgl_strk_tanh:
+            # works well with no canvas
+            add_slope = util.constrain_parameter(z, min=.1, max=1.5)
+        else:
+            add_slope = F.softplus(z) + 1e-3
+        return add_slope
+
+class LocalRendererParamMLP(nn.Module):
+    """Predict the render parameters
+    """
+    def __init__(self, in_dim, hidden_dim, num_layers, maxnorm, sgl_strk_tanh,
+                 trans_z_what, spline_decoder=True, dataset=None, ):
+        '''
+        Args:
+            trans_z_what: if trans_z_what then sigma needs more range
+        '''
+        super().__init__()
+        self.maxnorm = maxnorm
+        self.sgl_strk_tanh = sgl_strk_tanh
+        self.spline_decoder = spline_decoder
+        self.trans_z_what = trans_z_what
+        self.seq = util.init_mlp(in_dim=in_dim, 
+                                 out_dim=2,
+                                 hidden_dim=hidden_dim,
+                                 num_layers=num_layers)        
+        self.seq.linear_modules[-1].weight.data.zero_()
+
+        b1, b2= -2, 2 # .25, .32, .48
+        if dataset in ['Omniglot'] and not trans_z_what:
+            b1, b2= -4, 4 # .25, .32, .48
         # else:
         #     init_b1, init_b2 = -1, 10
         if self.maxnorm and self.sgl_strk_tanh:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
                         # works well with no canvas
-                        torch.tensor([b1,b2,b3], 
+                        torch.tensor([b1,b2], 
                         dtype=torch.float))
-                        # torch.tensor([2,2,2], dtype=torch.float))
-
         elif not self.sgl_strk_tanh and not self.maxnorm:
             self.seq.linear_modules[-1].bias = torch.nn.Parameter(
-                    torch.tensor([0,0,2], dtype=torch.float)) 
-
-        # elif not self.maxnorm and self.sgl_strk_tanh:
-        #     self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-        #         [0,1,0], dtype=torch.float)) # without maxnorm
+                    torch.tensor([0,0], dtype=torch.float)) 
         else:
             raise NotImplementedError
 
@@ -126,7 +157,6 @@ class RendererParamMLP(nn.Module):
             sigma = util.constrain_parameter(z[:, 0:1], min=.005, max=.04)
         else:
             sigma = util.constrain_parameter(z[:, 0:1], min=.01, max=.04)
-            # sigma = util.constrain_parameter(z[:, 0:1], min=.02, max=.04)
 
         # stroke slope
         if self.maxnorm:
@@ -134,16 +164,8 @@ class RendererParamMLP(nn.Module):
                                                       min=.1, max=.9) # maxnorm
         else:
             sgl_strk_slope = F.softplus(z[:, 1:2]) + 1e-3 # tanh
-
-        # add slope
-        if self.sgl_strk_tanh:
-            # works well with no canvas
-            add_slope = util.constrain_parameter(z[:, 2:3], min=.1, max=1.5)
-        else:
-            add_slope = F.softplus(z[:, 2:3]) + 1e-3
-        return sigma, sgl_strk_slope, add_slope
-
-
+        return sigma, sgl_strk_slope
+    
 class PresMLP(nn.Module):
     def __init__(self, in_dim, hidden_dim, num_layers, dataset=None, 
                  bzRnn=False, trans_what=False):
@@ -159,9 +181,13 @@ class PresMLP(nn.Module):
         init_bias = 2
         if dataset in [
                 'Omniglot',
+                'Synthetic',
                 # 'Quickdraw'
             ]:
-            init_bias = 8 # ok for [.01]+20comp+[bzrnn,mlp]
+            if trans_what:
+                init_bias = 8 # ok for [.01]+20comp+[bzrnn,mlp]
+            else:
+                init_bias = 10 # ok for [.01]+20comp+[bzrnn,mlp]
                 
         self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
             [init_bias], dtype=torch.float)) # works for stable models

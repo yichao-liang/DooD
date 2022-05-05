@@ -51,6 +51,7 @@ if __name__ == '__main__':
         'km': 'KMNIST',
         'qm': 'QMNIST',
         'qd': 'Quickdraw',
+        'sy': 'Synthetic',
     }
     ds_name = ds_dict[run_args.ds]
 
@@ -59,16 +60,26 @@ if __name__ == '__main__':
         'AIR': 'AIR4',
         'DAIR': 'DAIR',
         'M': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
-        '1MT': 'Full-spDec-sq1MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        '20MT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        'MNCT': 'Full-spDec-sq40MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        'MDT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
-        '1MNCT': 'Full-spDec-sq1MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'Ma1': 'Full-spDec-indPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'Ma2': 'Full-nnDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MS': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MS2': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MS3': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MS4': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MS5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk',
+        'MnT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-noTgt-65strk',
+        # '1MT': 'Full-spDec-sq1MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        # '20MT': 'Full-spDec-sq20MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        # 'MNCT': 'Full-spDec-sq40MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        # 'MDT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        # '1MNCT': 'Full-spDec-sq1MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTL': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmL-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTL2': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmL-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MTS': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MT5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPr5WrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MTnT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-noTgt-65strk',
-        'MTnT5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPr5WrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-noTgt-65strk',
+        # 'MTnT5': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPr5WrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-noTgt-65strk',
     }
     exp_name = code_dict[run_args.m]
     all_exp_args[exp_name] = ed.exp_dict[exp_name]
@@ -85,7 +96,7 @@ if __name__ == '__main__':
         if train:
             print(f"==> Begin training the '{model_name}' model")
             args.extend(['--save_model_name', model_name,
-                        '--tb_dir', f'/om/user/ycliang/log/debug1/{tb_name}',
+                        '--tb_dir', f'/om/user/ycliang/log/hyper/{tb_name}',
                         # '--tb_dir', f'/om/user/ycliang/log/full-{run_args.m}/{model_name}',
                         #  '--tb_dir', f'./log/full-beta/{model_name}',
                         '--beta', f'{run_args.beta}',

@@ -436,7 +436,8 @@ def classification_evaluation(guide, args, writer, dataset, stats,
         eval_df.to_csv(log_file_name)
 
 
-def unconditioned_generation(model, args, writer, in_img, stats):
+def unconditioned_generation(model, args, writer, in_img, stats, 
+                             max_strks=None):
     '''draw samples conditioned on nothing from the generative model
     Args:
         n::int: number of samples to draw
@@ -444,11 +445,13 @@ def unconditioned_generation(model, args, writer, in_img, stats):
             normalization slope prediction.
     '''
     # Display the in_img
+    bs = in_img.shape[0]
     ite_so_far = len(stats.trn_losses)
-    imgs_disp = display_transform(in_img)
-    in_img_grid = make_grid(imgs_disp, nrow=NROW)
-    writer.add_image(f'Unconditioned Generation/in_img', in_img_grid,
-                     ite_so_far)
+    if max_strks == None:
+        imgs_disp = display_transform(in_img)
+        in_img_grid = make_grid(imgs_disp, nrow=NROW)
+        writer.add_image(f'Unconditioned Generation/in_img', in_img_grid,
+                        ite_so_far)
 
     if args.model_type == 'MWS':
         generative_model, guide, memory = model
@@ -467,34 +470,26 @@ def unconditioned_generation(model, args, writer, in_img, stats):
             else:    
                 generative_model.wr_rnn = guide.wr_rnn
                 generative_model.pr_rnn = guide.pr_rnn
-            # init_h_pr = guide.init_h_pr
-            # init_h_wr = guide.init_h_wr
-            # init_h_prwr = (init_h_pr, init_h_wr)
         else:
             generative_model.pr_wr_rnn = guide.pr_wr_rnn
-            # init_h_prwr = guide.init_h_prwr
         generative_model.wt_rnn = guide.wt_rnn
-        # init_h_wt = guide.init_h_wt
-        # generative_model.renderer_param_mlp = guide.renderer_param_mlp
-        # generative_model.target_in_pos = guide.target_in_pos
-        max_step = guide.max_strks
 
         from models.ssp import DecoderParam
-        bs = in_img.shape[0]
         decoder_param = DecoderParam(
-            sigma=decoder_param.sigma[:,:,0:1].median().repeat(1,bs,max_step),
+            sigma=decoder_param.sigma[:,:,0:1].median().repeat(1,bs,
+                                                        guide.max_strks),
             slope=[
-                decoder_param.slope[0][:,:,0:1].median().repeat(1,bs,max_step),
-                decoder_param.slope[1][:,:,0:1].median().repeat(1,bs,max_step)
+                decoder_param.slope[0][:,:,0:1].median().repeat(1,bs,
+                                                            guide.max_strks),
+                decoder_param.slope[1][:,:,0:1].median().repeat(1,bs,
+                                                            guide.max_strks)
             ]
         )
         # sample
         gen_out = generative_model.sample(bs=[bs], 
                                           decoder_param=decoder_param,
-                                          char_cond_gen=False,
                                           linear_sum=guide.linear_sum,
-                                          pseudo_completion=False,
-                                        #   init_h=(init_h_prwr, init_h_wt),
+                                          max_strks=max_strks,
                                           )
 
         gen.sigma = decoder_param.sigma
@@ -506,40 +501,93 @@ def unconditioned_generation(model, args, writer, in_img, stats):
         
         # display the results
         gen_imgs = gen_out.canvas
-        if gen_imgs == None:
-            gen_imgs = gen.renders_imgs(gen_out.z_smpl)
-        gen_imgs = display_transform(gen_imgs.squeeze(0))
-        gen_img_grid = make_grid(gen_imgs, nrow=NROW)
-        writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid, 
-                         ite_so_far)
-        # cummulative rendering
-        plot.plot_cum_recon(args=args, imgs=None, gen=gen, latent=gen_out.z_smpl, 
+        # if gen_imgs == None:
+        #     gen_imgs = gen.renders_imgs(gen_out.z_smpl)
+        if max_strks == None:
+            gen_imgs_l = display_transform(gen_imgs.squeeze(0))
+            gen_img_grid = make_grid(gen_imgs_l, nrow=NROW)
+            writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid, 
+                            ite_so_far)
+            # cummulative rendering
+            plot.plot_cum_recon(args=args, imgs=None, gen=gen, 
+                            latent=gen_out.z_smpl, 
                             z_where_type=gen.z_where_type, writer=writer,
                             dataset_name=None, 
                             epoch=ite_so_far, tag2='out_cum', 
                             tag1='Unconditioned Generation')
+        return gen_imgs
 
 def one_shot_classification(model, args, writer, its_so_far):
     '''Perform one shot clf as in Omniglot challenge
     '''
+    from train import save
     
     gen, guide = model
     tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res)
 
     # train
     # check if it has been finetuned
-    # checkpoint_path = util.get_checkpoint_path(args)
-    # if not Path(checkpoint_path).exists():
-    #     model, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
-    #                                                     path=ckpt_path,
-    #                                                     device=device,
-    #                                                     init_data_loader=False)
-    # else:
-    #     model, _, _, _, _ = util.load_checkpoint(path=ckpt_path,
-    #                                             device=device,
-    #                                             init_data_loader=False)
-    # ...
-     
+    # pretrained base model ckpt path
+    base_checkpoint_path = util.get_checkpoint_path(args)
+    # ckpt path for the finetune model
+    args.save_model_name = args.save_model_name + '_OneShotClf'
+    clf_checkpoint_path = util.get_checkpoint_path(args)
+
+    continue_training = False
+    if Path(clf_checkpoint_path).exists() and continue_training:
+        model, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
+                                                path=clf_checkpoint_path,
+                                                device=device,
+                                                init_data_loader=False)
+    else:
+        _, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
+                                                    path=base_checkpoint_path,
+                                                    device=device,
+                                                    init_data_loader=False)
+        stats.tst_elbos.clear()
+
+    # fine-tuning
+    finetune_ite = 1e4
+    ft_ite_so_far = 0 if not continue_training else len(stats.tst_elbos)
+    while ft_ite_so_far < finetune_ite: 
+        for sup_img, qry_img, _ in tst_loader:
+            sup_img.squeeze_(0), qry_img.squeeze_(0)
+            sup_img = sup_img.to(args.device)
+            qry_img = qry_img.to(args.device) 
+            imgs = torch.cat([sup_img, qry_img], dim=0)
+
+            # optimzier
+            optimizer.zero_grad()
+            loss_tuple = losses.get_loss_sequential(
+                                generative_model=gen, 
+                                guide=guide,
+                                imgs=imgs, 
+                                k=1,
+                                iteration=ft_ite_so_far,
+                                writer=writer,
+                                beta=float(args.beta),
+                                args=args)
+            loss = loss_tuple.overall_loss.mean()
+            loss.backward()
+            optimizer.step()
+            # log
+            for n, l in zip(loss_tuple._fields, loss_tuple):
+                writer.add_scalar("OneShot clf finetuning/"+n, 
+                                    l.detach().mean(), ft_ite_so_far)
+            stats.tst_elbos.append(loss)
+
+            if ft_ite_so_far % 50 == 0:
+                util.logging.info(f"Iteration {ft_ite_so_far} |"+
+                                  f"Loss = {stats.tst_elbos[-1]:.3f}")
+            # save
+            if ft_ite_so_far % args.save_interval == 0 or ft_ite_so_far == \
+                                                            finetune_ite:
+                save(args, ft_ite_so_far, model, optimizer, scheduler, stats) 
+            ft_ite_so_far += 1
+
+    save(args, ft_ite_so_far, model, optimizer, scheduler, stats) 
+    breakpoint()
+
     # test
     with torch.no_grad():
         accuracys = []
@@ -550,16 +598,16 @@ def one_shot_classification(model, args, writer, its_so_far):
             label = label.to(args.device)
 
             # our model:
-            # get k choose j top latents
+            # get choose top k latents from ptcs
             sup_latents = util.get_top_k_latents(guide, gen, sup_img, 
-                                                 ptcs=2, k=1)
+                                                 ptcs=3, k=1)
             sup_out = guide(sup_img)
             sup_latents, mask_prev, canvas, z_prior = (
                                                 sup_out.z_smpl, sup_out.mask_prev,
                                                 sup_out.canvas,sup_out.z_prior)
+
             # get support sample curve dist 
-            # sample_res = 200 # works well wo affine
-            sample_res = 200
+            sample_res = 200 # works well wo affine
             # norm_std = 0.05
             norm_std = 0.05
             sup_crv = gen.get_sample_curve(sup_latents, uni_out_dim=True, 
@@ -654,6 +702,7 @@ def one_shot_classification(model, args, writer, its_so_far):
     print("#### One shot classification accuracy per run:", accuracys)
     print("#### One shot classification accuracy average:", av_acc)
     writer.add_scalar("One shot classification/accuracy", av_acc, its_so_far)
+    writer.close()
 
 def LoadImgAsPoints(I):
 	# Load image file and return coordinates of 'inked' pixels in the binary image
@@ -755,6 +804,90 @@ def num_strokes_plot(model, stats, args, writer, max_strks=40):
     fig.set_tight_layout(tight=True)
     writer.add_figure('#Stroke Histgram', fig, ite_so_far)
 
+def auto_complete(model, args, writer, partial_img, stats):
+    '''Perform auto-completion conditioned on "partial-completed" images
+    '''
+    # Setup
+    bs = partial_img.shape[0]
+    ite_so_far = len(stats.trn_losses)
+    imgs_disp = display_transform(partial_img)
+    in_img_grid = make_grid(imgs_disp, nrow=NROW)
+    writer.add_image(f'Partial completion/in_img', in_img_grid,
+                     ite_so_far)
+
+    _, guide = model
+    gen = guide.internal_decoder
+    gen.img_feature_extractor = guide.img_feature_extractor
+    if guide.sep_where_pres_net:
+        if guide.no_pres_rnn:
+            gen.wr_rnn = guide.wr_rnn
+        else:    
+            gen.wr_rnn = guide.wr_rnn
+            gen.pr_rnn = guide.pr_rnn
+    else:
+        gen.pr_wr_rnn = guide.pr_wr_rnn
+    gen.wt_rnn = guide.wt_rnn
+
+    # Parse the partial image to get hidden states
+    # single parse
+    # out = guide(partial_img)
+    # hs, z_smpl, dec_param = out.hidden_states, out.z_smpl, out.decoder_param
+    # last_hs, last_z_sample = util.get_last_vars(hs, z_smpl)
+    # recs = out.canvas
+
+    # top parse
+    z_smpl, hs, dec_param, recs = util.get_top_k_latents_hiddens(guide, gen, 
+                                                    partial_img, ptcs=5, k=1)
+    last_hs, last_z_sample = util.get_last_vars(hs, z_smpl)
+
+    from models.ssp import DecoderParam
+    new_dec_param = DecoderParam(
+        sigma=dec_param.sigma[0:1,:,0:1].median().repeat(1,bs,guide.max_strks),
+        slope=[
+            dec_param.slope[0][0:1,:,0:1].median().repeat(1,bs,guide.max_strks),
+            dec_param.slope[1][0:1,:,0:1].repeat(1,1,guide.max_strks)
+            ])
+
+
+    # Resume completing the samples
+    # partial_img = (dec_param.slope[1][0:1,:,0].squeeze(0)[:,None,None,None] * 
+    partial_img = (dec_param.slope[1][0:1,:,0].squeeze(0)[:,None,None,None] * 
+                    # torch.atanh(partial_img))
+                    torch.atanh(recs.squeeze(0)))
+    gen_out = gen.sample(bs=[bs], 
+                            init_canvas=partial_img,
+                            init_h=last_hs,
+                            init_z=last_z_sample,
+                            decoder_param=new_dec_param,
+                            linear_sum=guide.linear_sum,
+                        )
+    
+    # Log the results
+    # - check the posterior quality
+    recs = display_transform(recs.squeeze(0))
+    rec_img_grid = make_grid(recs, nrow=NROW)
+    writer.add_image(f'Partial completion/partial image recons', rec_img_grid, 
+                    ite_so_far)
+    # - log the completion results
+    gen_imgs = gen_out.canvas
+    gen_imgs_l = display_transform(gen_imgs.squeeze(0))
+    gen_img_grid = make_grid(gen_imgs_l, nrow=NROW)
+    writer.add_image(f'Partial completion/out_img', gen_img_grid, 
+                    ite_so_far)
+    # cummulative rendering
+    gen.sigma = new_dec_param.sigma
+    gen.sgl_strk_tanh_slope = new_dec_param.slope[0]
+    if guide.linear_sum:
+        gen.add_strk_tanh_slope = new_dec_param.slope[1][:, :, 0]
+    else:
+        gen.add_strk_tanh_slope = new_dec_param.slope[1][:, :, -1]
+    # plot.plot_cum_recon(args=args, imgs=None, gen=gen, 
+    #                         latent=gen_out.z_smpl, 
+    #                         z_where_type=gen.z_where_type, writer=writer,
+    #                         dataset_name=None, 
+    #                         epoch=ite_so_far, tag2='out_cum', 
+    #                         tag1='Partial completion')
+
 def get_args_parser():
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
@@ -776,13 +909,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Choose the dataset to test on
-    mll_eval = False
+    mll_eval = True
     recon_eval = True
     clf_eval = False
     uncon_sample = False
     one_shot_clf_eval = False
     num_strokes_eval = False # plot a distribution of number of strokes / dataset
     plot_tsne = False
+    auto_complete_demo = False
 
     test_run = False
     
@@ -827,9 +961,9 @@ if __name__ == "__main__":
     res = gen.res
     
     if args.tb_name == None:
-        tb_dir = f"/om/user/ycliang/log/debug1/{args.save_model_name}"
+        tb_dir = f"/om/user/ycliang/log/hyper/{args.save_model_name}"
     else:
-        tb_dir = f"/om/user/ycliang/log/debug1/{args.tb_name}"
+        tb_dir = f"/om/user/ycliang/log/hyper/{args.tb_name}"
     writer = SummaryWriter(log_dir=tb_dir)
 
     if plot_tsne:
@@ -920,7 +1054,7 @@ if __name__ == "__main__":
             # print(f"===> Done testing on {dataset} dataset \n\n")
 
     # Unconditioned generation
-    if uncon_sample:
+    if uncon_sample or auto_complete_demo:
         num_to_sample = 64
         trn_loader, _, _, _ = util.init_dataloader(res, trn_args.dataset, 
                                                     batch_size=num_to_sample,
@@ -936,16 +1070,38 @@ if __name__ == "__main__":
         #         in_img = torch.cat(in_img, dim=0)
         #         break
 
-        print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
-        unconditioned_generation(model=model, 
+        if uncon_sample:
+            print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
+            unconditioned_generation(model=model, 
                                 args=trn_args,
                                 writer=writer, 
                                 in_img=in_img[:num_to_sample],
-                                stats=stats)
-        print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
+                                stats=stats,
+                                max_strks=None
+                                )
+            print(f"===> Done Unconditioned generation on with {args.save_model_name}\n")
+        if auto_complete_demo:
+            print(f"===> Begin autocompletion demo with {args.save_model_name}")
+            partial_img = None
+            if partial_img == None:
+                # Sample some synthetic partial img
+                partial_img = unconditioned_generation(model=model, 
+                                args=trn_args,
+                                writer=writer, 
+                                in_img=in_img[:num_to_sample],
+                                stats=stats,
+                                max_strks=1,
+                                )
+            auto_complete(model=model, 
+                            args=trn_args, 
+                            writer=writer, 
+                            partial_img=partial_img,
+                            stats=stats)
+            print(f"===> Done autocompletion demo with {args.save_model_name}")
 
     if one_shot_clf_eval:
         one_shot_classification(model, trn_args, writer, len(stats.trn_losses))
+    
     # print(f"===> Begin Character-conditioned generation on with {args.save_model_name}")
     # character_conditioned_generation(model=model,
     #                                  args=trn_args,

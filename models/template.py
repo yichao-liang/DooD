@@ -23,6 +23,7 @@ class Guide(nn.Module):
                 max_strks=2, 
                 img_dim=[1,28,28],
                 hidden_dim=256, 
+                img_feat_dim=256,
                 z_where_type='3', 
                 use_canvas=False,
                 use_residual=None,
@@ -146,10 +147,11 @@ class Guide(nn.Module):
         #                                 num_layers=num_layers,
         #                             )
         # else:
+        # arch 1
         # self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
-        self.cnn_out_dim = 1152 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
-        # self.cnn_out_dim = 3872 if self.img_dim[-1] == 50 else 4608
-        self.feature_extractor_out_dim = hidden_dim
+        # arch 4
+        self.cnn_out_dim = 33856
+        self.feature_extractor_out_dim = img_feat_dim
         self.img_feature_extractor = util.init_cnn(
                                             n_in_channels=1,
                                             n_mid_channels=16,#32, 
@@ -157,9 +159,12 @@ class Guide(nn.Module):
                                             cnn_out_dim=self.cnn_out_dim,
                                             mlp_out_dim=
                                                 self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=hidden_dim,
+                                            mlp_hidden_dim=
+                                                self.feature_extractor_out_dim,
                                             num_mlp_layers=1)
+        self.use_sep_trans_img_extractor = False
         if not self.feature_extractor_sharing:
+            self.use_sep_trans_img_extractor = True
             self.trans_img_feature_extractor = util.init_cnn(
                                             n_in_channels=1,
                                             n_mid_channels=16,#32, 
@@ -167,20 +172,26 @@ class Guide(nn.Module):
                                             cnn_out_dim=self.cnn_out_dim,
                                             mlp_out_dim=
                                                 self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=hidden_dim,
+                                            mlp_hidden_dim=
+                                                self.feature_extractor_out_dim,
                                             num_mlp_layers=1)
+        self.use_sep_rsd_extractor = False
+        self.use_sep_trans_rsd_extractor = False
         if use_residual and not detach_rsd_embed:
+            self.use_sep_rsd_extractor = True
             # if detach_rsd_embed, not gradient is produced to learn this
             self.residual_feature_extractor = util.init_cnn(
-                                                n_in_channels=1,
-                                                n_mid_channels=16,#32, 
-                                                n_out_channels=32,#64,
-                                                cnn_out_dim=self.cnn_out_dim,
-                                                mlp_out_dim=
+                                            n_in_channels=1,
+                                            n_mid_channels=16,#32, 
+                                            n_out_channels=32,#64,
+                                            cnn_out_dim=self.cnn_out_dim,
+                                            mlp_out_dim=
                                                 self.feature_extractor_out_dim,
-                                                mlp_hidden_dim=hidden_dim,
-                                                num_mlp_layers=1)
+                                            mlp_hidden_dim=
+                                                self.feature_extractor_out_dim,
+                                            num_mlp_layers=1)
             if not self.feature_extractor_sharing:
+                self.use_sep_trans_rsd_extractor = True
                 self.trans_rsd_feature_extractor = util.init_cnn(
                                             n_in_channels=1,
                                             n_mid_channels=16,#32, 
@@ -188,7 +199,8 @@ class Guide(nn.Module):
                                             cnn_out_dim=self.cnn_out_dim,
                                             mlp_out_dim=
                                                 self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=hidden_dim,
+                                            mlp_hidden_dim=
+                                                self.feature_extractor_out_dim,
                                             num_mlp_layers=1)
 
 
@@ -362,7 +374,7 @@ class Guide(nn.Module):
             self.wt_mlp_in_dim += self.feature_extractor_out_dim
 
         # 4. baseline
-        self.bl_in = []
+        self.bl_in = ['target', 'all_prev_z']
         self.bl_hid_dim = bl_rnn_hid_dim
         self.bl_in_dim = (self.feature_extractor_out_dim  + 
                           self.z_pres_dim + 
@@ -376,6 +388,47 @@ class Guide(nn.Module):
                                           out_dim=1,
                                           hidden_dim=bl_mlp_hid_dim,
                                           num_layers=num_bl_layers)
+        self.print_model_statistics()
+
+    def print_model_statistics(self):
+        # feature extractors
+        print("=== Feature extractors ===")
+        tot_num_param = sum(p.numel() for p in 
+                            self.img_feature_extractor.parameters())
+        print(f"## Each feat. extr. has {tot_num_param} parameters")
+        print(f"## [{self.use_sep_rsd_extractor}] Use seperate rsd extractor")
+        print(f"## [{self.use_sep_trans_rsd_extractor}] "+
+                                        "Use seperated rsd glimpse extractor")
+        print(f"## [{self.use_sep_trans_img_extractor}] "+
+                                        "Use seperated img glimpse extractor\n")
+
+        print("=== Posterior networks ===")
+        if self.sep_where_pres_net:
+            print("# Seperated z_where, z_pres networks:")
+            # pres, where rnn and mlp
+            if self.no_pres_rnn:
+                print("## No z_pres RNN")
+            else:
+                print(f"## z_pres rnn in {self.pr_rnn_in_dim}dim: "+
+                        f"{self.pr_rnn_in}")
+            print(f"## z_pres mlp in {self.pr_mlp_in_dim}dim: "+
+                    f"{self.pr_mlp_in}\n")
+            print(f"## z_where rnn in {self.wr_rnn_in_dim}dim: "+
+                    f"{self.wr_rnn_in}")
+            print(f"## z_where mlp in {self.wr_mlp_in_dim}dim: "+
+                    f"{self.wr_mlp_in}\n")
+                
+        else:
+            print("# Shared z_where, z_pres networks:")
+            print(f"## z_pres_where rnn in {self.pr_wr_rnn_in_dim}dim: "+
+                    f"{self.pr_wr_rnn_in}")
+            print(f"## z_pres_where mlp in {self.pr_wr_mlp_in_dim}dim: "+
+                    f"{self.pr_wr_mlp_in}\n")
+        print(f"## z_where rnn in {self.wt_rnn_in_dim}dim: {self.wt_rnn_in}")
+        print(f"## z_where mlp in {self.wt_mlp_in_dim}dim: {self.wt_mlp_in}\n")
+
+        print("=== Baseline networks ===")
+        print(f"## bl_rnn in {self.bl_in_dim}dim: {self.bl_in}")
 
     def get_pr_rsd_power(self):
         # return F.softplus(self.pr_rsd_power)
@@ -388,7 +441,7 @@ class Guide(nn.Module):
         ptcs, bs = shp = imgs.shape[:2]
         img_dim = imgs.shape[2:]
         
-        img_embed, canvas_embed, residual_embed, rsd_ratio = [None]*4
+        canvas_embed, residual_embed, rsd_ratio = [None]*3
 
         # embed image
         img_embed = self.img_feature_extractor(imgs.view(prod(shp), *img_dim
@@ -409,6 +462,8 @@ class Guide(nn.Module):
                         residual.view(prod(shp), *img_dim)).view(*shp, -1)
         if self.simple_pres or self.residual_pixel_count:
             rsd_ratio = residual.sum([2,3,4]) / imgs.sum([2,3,4])
+            rsd_ratio = torch.nan_to_num(rsd_ratio, nan=0.)
+            # print("rsd_ratio", rsd_ratio.isnan().any())
 
             if self.detach_rsd_embed: rsd_ratio = rsd_ratio.detach()
                
@@ -430,9 +485,9 @@ class Guide(nn.Module):
             pr_wr_rnn_in [ptcs, bs, pr_wr_rnn_in_dim]
         '''
         if img_embed != None:
-            ptcs, bs = shp = img_embed.shape[:2]
+            shp = img_embed.shape[:2]
         else:
-            ptcs, bs = shp = residual_embed.shape[:2]
+            shp = residual_embed.shape[:2]
         # Style RNN input
 
         if self.sep_where_pres_net:
@@ -600,6 +655,7 @@ class Guide(nn.Module):
         '''
         shp = z_pres_p.shape[:2]
 
+        z_pres_p_tmp = z_pres_p
         # If previous z_pres is 0, force z_pres to 0
         z_pres_p = z_pres_p * p_state.z_pres
         # Numerical stability
@@ -608,8 +664,12 @@ class Guide(nn.Module):
 
         # Sample z_pres
         assert z_pres_p.shape == torch.Size([*shp, 1])
-        z_pres_post = Independent(Bernoulli(z_pres_p), 
+
+        try:
+            z_pres_post = Independent(Bernoulli(z_pres_p), 
                                         reinterpreted_batch_ndims=1)
+        except:
+            breakpoint()
         assert (z_pres_post.event_shape == torch.Size([1]) and
                 z_pres_post.batch_shape == torch.Size([*shp]))
         # z_pres: [ptcs, bs, 1]

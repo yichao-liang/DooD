@@ -1,81 +1,91 @@
-import sys
-import random
-from pathlib import Path
-
 import torch
-from tqdm import tqdm
 
-import models.base
-
+from models import ssp
+from models.ssp import DecoderParam
 class SyntheticDataset(torch.utils.data.Dataset):
     """Synthetic dataset based on the generative model
     """
-    def __init__(self, generative_model, train=True, return_latent:bool=True):
-        self.generative_model = generative_model
-        self.train = train
-        self.return_latent = return_latent
-        self.train_set_size = 60800
-        self.test_set_size = 1024
-
-        save_path = Path(f"./data/synthetic_dataset/").mkdir(
-                                                            parents=True, 
-                                                            exist_ok=True)
-        self.dataset_path = ("./data/synthetic_dataset/train.pt" if train else
-                        "./data/synthetic_dataset/test.pt")
-        self.load_dataset()
+    def __init__(self, dataset, return_latent:bool=True):
+        self.imgs = dataset['imgs']
+        print(f"===> dataset size: {self.imgs.shape}")
+        # self.zs = dataset['zs']
     
     def __getitem__(self, index: int):
-        imgs, control_points = self.dataset
-
-        if self.return_latent:
-            return imgs[index].squeeze(0), control_points[index].squeeze(0)
-        else:
-            return imgs[index].squeeze(0)
+        # if self.return_latent:
+        #     return self.imgs[index], self.zs[index]
+        # else:
+        return self.imgs[index], torch.tensor(0)
 
     def __len__(self):
-        if self.train:
-            return 60800
-        else:
-            return 1024
-    
-    def load_dataset(self):
-        try:
-            dataset = torch.load(self.dataset_path)
-            self.dataset = dataset['images'], dataset['control_points']
-        except FileNotFoundError:
-            self.make_dataset()
-    
-    def make_dataset(self,):
-        # make and save the dataset
-        imgs_lst, control_points_lst = [], []
-        size = self.train_set_size if self.train else self.test_set_size
-        for i in tqdm(range(size)):
-            img, points = self.generative_model.sample()
-            imgs_lst.append(img)
-            control_points_lst.append(points)
-        dataset = {"images": imgs_lst,
-                    "control_points": control_points_lst}
-        torch.save(dataset, self.dataset_path)
-        self.dataset = imgs_lst, control_points_lst
+        return self.imgs.shape[0]
 
+    
+def make_dataset(args, dataset_size, dataset_path):
+    print("===> Start making synthetic dataset")
+    # init generative model
+    it_per_sample = 100
+    gen = ssp.GenerativeModel(max_strks=int(args.strokes_per_img), 
+                                pts_per_strk=args.points_per_stroke, 
+                                res=args.img_res, 
+                                z_where_type=args.z_where_type,
+                                use_canvas=False, 
+                                transform_z_what=True,
+                                input_dependent_param=True,
+                                prior_dist='Independent',
+                                maxnorm=True,
+                                sgl_strk_tanh=True,
+                                add_strk_tanh=True,
+                                fixed_prior=True,
+                                spline_decoder=True,
+                                render_method=args.render_method,
+                                dependent_prior=False,
+                                linear_sum=True,
+                                generate_data=True,
+                            )
+    # Make and save the dataset
+    all_xs, all_zs = [], []
+    num_data = 0
+    while num_data < dataset_size:
+        n_strokes = torch.randint(low=1,high=6,size=()
+                                  ).item()
+        bs = [1, it_per_sample, n_strokes]
+
+        # Sample render param
+        gen.sigma = 0.026 + 0.0001 * torch.randn(bs)
+        gen.sgl_strk_tanh_slope = 0.7 + 0.0001 * torch.randn(bs)
+        gen.add_strk_tanh_slope = 0.46 + 0.0001 * torch.randn(bs[:2])
+
+        # Sample obs, latent
+        _, img = gen.sample(bs=bs)
+        all_xs.append(img)
+        # all_zs.append(zs)
+        num_data += it_per_sample
+
+        if num_data % 5000 == 0:
+            print(f"Have generatived {num_data}/{dataset_size}")
+
+    # Aggregate data
+    imgs = torch.cat(all_xs,1).squeeze(0)
+    # all_zs ...
+    dataset = {"imgs": imgs}
+    torch.save(dataset, dataset_path)
+    print("===> Done making synthetic dataset")
         
-def get_data_loader(generative_model=None, control_points_dim=2, 
-                                            batch_size=None,
-                                            device=None):
-    if generative_model is None:
-        gen = models.base.GenerativeModel(control_points_dim=control_points_dim, 
-                                            prior_dist='Normal',device=device)
-    else:
-        gen = generative_model
-    
-    trn_dataset = SyntheticDataset(gen, train=True)
-    tst_dataset = SyntheticDataset(gen, train=False)
+def get_data_loader(args, make_new_dataset=False):
+    # Try load from save, if not exist then make one
+    datasets = []
+    for train in [True, False]:
+        name = "train" if train else "test"
+        dataset_path = f"./data/synthetic_dataset/{name}.pt"
+        try:
+            if make_new_dataset:
+                raise FileNotFoundError
+            data_dict = torch.load(dataset_path)
+        except FileNotFoundError:
+            dataset_size = 60000 if train else 10000
+            make_dataset(args, dataset_size, dataset_path)
+            data_dict = torch.load(dataset_path)
+        dataset = SyntheticDataset(data_dict)
+        datasets.append(dataset)
 
-    trn_dataloader = torch.utils.data.DataLoader(trn_dataset,
-                                        batch_size=batch_size,
-                                        shuffle=True,)
-    tst_dataloader = torch.utils.data.DataLoader(tst_dataset,
-                                        batch_size=batch_size,
-                                        shuffle=True,)
-
-    return trn_dataloader, tst_dataloader   
+    return datasets

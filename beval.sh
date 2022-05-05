@@ -27,48 +27,18 @@ IT=320000
 # sbatch -J emEv execute.sh python sweep.py -m MT --beta 2.5 -ds em --seed 3 -it 400000
 # sbatch -J emEv execute.sh python sweep.py -m MT --beta 2.5 -ds em --seed 4 -it 400000
 
-IT=300000
-sbatch -J mn1E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 5 -it $IT
-sbatch -J mn1E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 6 -it $IT
-sbatch -J mn1E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 7 -it $IT
-sbatch -J mn1E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 8 -it $IT
-sbatch -J mn1E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 9 -it $IT
+IT=500000
+sbatch -J EVmn7 execute.sh python sweep.py -m M --beta 4 -ds mn --seed 0 -it $IT
+sbatch -J EVmn7 execute.sh python sweep.py -m M --beta 4 -ds mn --seed 1 -it $IT
+sbatch -J EVmn7 execute.sh python sweep.py -m M --beta 4 -ds mn --seed 2 -it $IT
+sbatch -J EVmn7 execute.sh python sweep.py -m M --beta 4 -ds mn --seed 3 -it $IT
+sbatch -J EVmn7 execute.sh python sweep.py -m M --beta 4 -ds mn --seed 4 -it $IT
 
-sbatch -J mn2E execute.sh python sweep.py -m MT5 --beta 4 -ds mn --seed 5 -it $IT
-sbatch -J mn2E execute.sh python sweep.py -m MT5 --beta 4 -ds mn --seed 6 -it $IT
-sbatch -J mn2E execute.sh python sweep.py -m MT5 --beta 4 -ds mn --seed 7 -it $IT
-sbatch -J mn2E execute.sh python sweep.py -m MT5 --beta 4 -ds mn --seed 8 -it $IT
-sbatch -J mn2E execute.sh python sweep.py -m MT5 --beta 4 -ds mn --seed 9 -it $IT
-
-sbatch -J mn3E execute.sh python sweep.py -m MTnT --beta 3 -ds mn --seed 5 -it $IT
-sbatch -J mn3E execute.sh python sweep.py -m MTnT --beta 3 -ds mn --seed 6 -it $IT
-sbatch -J mn3E execute.sh python sweep.py -m MTnT --beta 3 -ds mn --seed 7 -it $IT
-sbatch -J mn3E execute.sh python sweep.py -m MTnT --beta 3 -ds mn --seed 8 -it $IT
-sbatch -J mn3E execute.sh python sweep.py -m MTnT --beta 3 -ds mn --seed 9 -it $IT
-
-sbatch -J mn4E execute.sh python sweep.py -m MTnT --beta 3.5 -ds mn --seed 5 -it $IT
-sbatch -J mn4E execute.sh python sweep.py -m MTnT --beta 3.5 -ds mn --seed 6 -it $IT
-sbatch -J mn4E execute.sh python sweep.py -m MTnT --beta 3.5 -ds mn --seed 7 -it $IT
-sbatch -J mn4E execute.sh python sweep.py -m MTnT --beta 3.5 -ds mn --seed 8 -it $IT
-sbatch -J mn4E execute.sh python sweep.py -m MTnT --beta 3.5 -ds mn --seed 9 -it $IT
-
-sbatch -J mn5E execute.sh python sweep.py -m MTnT --beta 4 -ds mn --seed 5 -it $IT
-sbatch -J mn5E execute.sh python sweep.py -m MTnT --beta 4 -ds mn --seed 6 -it $IT
-sbatch -J mn5E execute.sh python sweep.py -m MTnT --beta 4 -ds mn --seed 7 -it $IT
-sbatch -J mn5E execute.sh python sweep.py -m MTnT --beta 4 -ds mn --seed 8 -it $IT
-sbatch -J mn5E execute.sh python sweep.py -m MTnT --beta 4 -ds mn --seed 9 -it $IT
-
-sbatch -J mn6E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 10 -it $IT
-sbatch -J mn6E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 11 -it $IT
-sbatch -J mn6E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 12 -it $IT
-sbatch -J mn6E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 13 -it $IT
-sbatch -J mn6E execute.sh python sweep.py -m MT --beta 4 -ds mn --seed 14 -it $IT
-
-sbatch -J mn7E execute.sh python sweep.py -m MTS --beta 4 -ds mn --seed 10 -it $IT
-sbatch -J mn7E execute.sh python sweep.py -m MTS --beta 4 -ds mn --seed 11 -it $IT
-sbatch -J mn7E execute.sh python sweep.py -m MTS --beta 4 -ds mn --seed 12 -it $IT
-sbatch -J mn7E execute.sh python sweep.py -m MTS --beta 4 -ds mn --seed 13 -it $IT
-sbatch -J mn7E execute.sh python sweep.py -m MTS --beta 4 -ds mn --seed 14 -it $IT
+sbatch -J EVmn8 execute.sh python sweep.py -m MS --beta 4 -ds mn --seed 0 -it $IT
+sbatch -J EVmn8 execute.sh python sweep.py -m MS --beta 4 -ds mn --seed 1 -it $IT
+sbatch -J EVmn8 execute.sh python sweep.py -m MS --beta 4 -ds mn --seed 2 -it $IT
+sbatch -J EVmn8 execute.sh python sweep.py -m MS --beta 4 -ds mn --seed 3 -it $IT
+sbatch -J EVmn8 execute.sh python sweep.py -m MS --beta 4 -ds mn --seed 4 -it $IT
 
 # AIR
 # sbatch -J AmnEv execute.sh python sweep.py -m AIR --beta 4 -ds mn --seed 0 -it 500000

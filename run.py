@@ -365,6 +365,8 @@ def get_args_parser():
                         help='use a rnn for prior control points')
     parser.add_argument('--condition_by_img', action='store_true',
                         help='add dependency between prior through image')
+    parser.add_argument('--hid_dim', default=256, type=int, help='')
+    parser.add_argument('--img_feat_dim', default=256, type=int, help='')
 
     # Baseline network
     parser.add_argument('--num_baseline_layers', default=3, type=int, help='')
@@ -397,7 +399,7 @@ def get_args_parser():
                     default='MNIST',
                     # default="generative_model",
                     choices=['MNIST', 'Omniglot', 'EMNIST', 'KMNIST', 'QMNIST',
-                            'Quickdraw', 'generative_model', 
+                            'Quickdraw', 'Synthetic', 
                             'multimnist'],
                     type=str, help=" ")
     # parser.add_argument("--data-dir", 
