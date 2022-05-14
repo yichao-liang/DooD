@@ -185,7 +185,8 @@ class PresMLP(nn.Module):
                 # 'Quickdraw'
             ]:
             if trans_what:
-                init_bias = 8 # ok for [.01]+20comp+[bzrnn,mlp]
+                # init_bias = 8 # ok for [.01]+20comp+[bzrnn,mlp]
+                init_bias = 10 # ok for [.01]+20comp+[bzrnn,mlp]
             else:
                 init_bias = 10 # ok for [.01]+20comp+[bzrnn,mlp]
                 
@@ -605,7 +606,7 @@ class WhatPriorMLP(nn.Module):
 class ImageMLP(nn.Module):
     def __init__(self, in_dim, out_dim, hid_dim, num_layers):
         super().__init__()
-        self.mlp = util.WhatPriorMLP(in_dim=in_dim, 
+        self.mlp = util.init_mlp(in_dim=in_dim, 
                                 out_dim=out_dim,
                                 hidden_dim=hid_dim,
                                 num_layers=num_layers)

@@ -37,6 +37,8 @@ def get_loss_sequential(generative_model,
         c, v, alpha: parameters for NVIL algorithm for centering, normalizing
             the REINFORCE learning signals.
     '''
+    if args.no_spline_renderer:
+        generative_model = guide.internal_decoder
     # beta=3
     # if iteration >= 60000:
     #     guide.wt_mlp.more_range, guide.where_mlp.more_range = True, True
@@ -248,7 +250,7 @@ def get_loss_sequential(generative_model,
                     z_pres_smpls.sum(),
                     iteration)
 
-            if args.log_param:
+            if args.log_param and iteration % 50 == 0:
                 log_z_post_samples = True
                 z_pres = z_pres_smpls.view(prod(shp)).detach().cpu().numpy()
                 # this includes: renderer parameters, prior parameters,
@@ -464,7 +466,7 @@ def get_loss_base(generative_model, guide, imgs, loss="elbo"):
     else:
         raise NotImplementedError("not implemented")
 
-def get_loss_air(generative_model, guide, imgs, k=1,
+def get_loss_air(guide, imgs, k=1,
                                                     iteration=0, 
                                                     writer=None,
                                                     writer_tag='',
@@ -477,6 +479,7 @@ def get_loss_air(generative_model, guide, imgs, k=1,
     '''
     # Guide output
     guide_out = guide(imgs, k)
+    generative_model = guide.internal_decoder
     # wheater to mask current value based on prev.z_pres; 
     # more doc in model
     latents, log_post, bl_value, mask_prev, canvas, z_prior = (
@@ -600,7 +603,11 @@ def get_loss_air(generative_model, guide, imgs, k=1,
                 writer.add_scalar(f"{writer_tag}Train curves/log_prior/"+n, 
                                     log_prob.detach().sum(-1).mean(), 
                                     iteration)
-            if args.log_param:
+            if args.log_param and iteration % 50 == 0:
+            # if iteration % 50 == 0:
+                writer.add_histogram(f"{writer_tag}Parameters/img_dist_std",
+                        generative_model.get_imgs_dist_std().detach(), 
+                        iteration)
                 # z prior parameters
                 if generative_model.prior_dist == 'Sequential':
                     writer.add_histogram(f"{writer_tag}Parameters/z_pres_prior.p",
@@ -649,8 +656,8 @@ def get_loss_air(generative_model, guide, imgs, k=1,
                             guide_out.z_pms.z_what.detach()[:, :, :, 1], 
                             iteration)
             
-                writer.add_histogram("Parameters/img.loc", 
-                        generative_model.renders_imgs(latents), iteration)
+                # writer.add_histogram("Parameters/img.loc", 
+                #         generative_model.renders_imgs(latents), iteration)
 
     loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
     elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))

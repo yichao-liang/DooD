@@ -75,7 +75,7 @@ class PresWhereMLP(nn.Module):
     """
     Infer presence and location from RNN hidden state
     """
-    def __init__(self, in_dim, z_where_type, z_where_dim):
+    def __init__(self, in_dim, z_where_type, z_where_dim, dataset):
         nn.Module.__init__(self)
         self.z_where_dim = z_where_dim
         self.type = z_where_type
@@ -83,10 +83,14 @@ class PresWhereMLP(nn.Module):
                                  out_dim=1 + z_where_dim * 2,
                                  hidden_dim=256,
                                  num_layers=2)
+        # init_bias = 4
+        # if dataset == "Omniglot":
+        #     init_bias = 20
+        # print("pres_bias=", init_bias)
         # self.seq.linear_modules[-1].weight.data.zero_()
         # # [pres,  loc:scale,shift,rot,  std:scale,shift,rot]
         # self.seq.linear_modules[-1].bias = torch.nn.Parameter(torch.tensor(
-        #     [4,.5,.5,1., 0,0,0], dtype=torch.float)) # works for stable models
+        #     [init_bias,0,0,1.,0, 0,0,0,0], dtype=torch.float)) # works for stable models
 
     def forward(self, h):
         # todo make capacible with other z_where_types

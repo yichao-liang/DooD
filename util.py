@@ -329,7 +329,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True,
         np.random.seed(worker_seed)
         random.seed(worker_seed)
     g = torch.Generator()
-    g.manual_seed(6)
+    g.manual_seed(8)
 
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, 
                                 shuffle=True if shuffle else False, 
@@ -396,7 +396,7 @@ def init_classification_nets(guide, args, dataset, batch_size, trned_ite):
     optimizer = torch.optim.Adam([
         {
             'params': lv_classifier.parameters(), 
-            'lr': 1e-5
+            'lr': 1e-5,
         }
     ])
     
@@ -746,6 +746,9 @@ blur = transforms.Compose([
                    ])
 
 def init(run_args, device, init_data_loader=True):  
+    # if run_args.dataset == 'Omniglot' and run_args.model_type == 'AIR':
+    #     run_args. = 5e-5
+    print(f'args.batch_size={run_args.batch_size}')
     # Data
     # res = run_args.img_res
     if init_data_loader:
@@ -906,6 +909,7 @@ def init(run_args, device, init_data_loader=True):
                                 use_canvas=run_args.use_canvas,
                                 z_what_dim=run_args.z_dim,
                                 prior_dist=run_args.prior_dist,
+                                likelihood_dist=run_args.likelihood_dist,
                         ).to(device)
         guide = air.Guide(
                         max_strks=run_args.strokes_per_img,
@@ -923,6 +927,9 @@ def init(run_args, device, init_data_loader=True):
                         sep_where_pres_net=run_args.sep_where_pres_net,
                         residual_no_target=run_args.residual_no_target,
                         detach_rsd_embed=run_args.detach_rsd_embed,
+                        dataset=run_args.dataset,
+                        feature_extractor_type=run_args.feature_extractor_type,
+                        likelihood_dist=run_args.likelihood_dist,
                         ).to(device)
     elif run_args.model_type == 'VAE':
         generative_model = vae.GenerativeModel(
@@ -990,11 +997,6 @@ def init_optimizer(run_args, model):
             }
         ])
     elif run_args.model_type == 'Sequential':
-        if run_args.dataset in ['EMNIST', 
-                                'Omniglot', 
-                                'KMNIST', 
-                                'Quickdraw']:
-            run_args.lr = 1e-4
         if run_args.use_canvas or run_args.prior_dist == 'Sequential':
             if run_args.anneal_non_pr_net_lr:
                 assert run_args.sep_where_pres_net != run_args.simple_pres,\

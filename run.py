@@ -392,6 +392,8 @@ def get_args_parser():
     parser.add_argument("--loss", default="elbo", choices=['elbo','l1','nll'], 
         type=str, help=" ",
     )
+    parser.add_argument("--feature_extractor_type", default='CNN',
+                        choices=['CNN', 'MLP'])
 
     # Dataset
     parser.add_argument("--dataset",
@@ -418,8 +420,6 @@ def get_args_parser():
         help='if not specified then False')
     parser.add_argument("--increase_beta", action='store_true',
         help='if not specified then False')
-    parser.add_argument("--final_beta", default=1, type=float, 
-                        help="Minimal value for the beta")
     parser.add_argument("--log_grad", action='store_true',
                         help="store gradient values in tensorboard")
     parser.add_argument("--log_param", action='store_true',

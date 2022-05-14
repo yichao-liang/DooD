@@ -85,7 +85,7 @@ def debug_plot(imgs, recon, writer, ite):
 
 def plot_reconstructions(imgs:torch.Tensor, 
                          guide:torch.nn.Module, 
-                         generative_model:torch.nn.Module, 
+                        #  generative_model:torch.nn.Module, 
                          args:argparse.ArgumentParser, 
                          writer:SummaryWriter, 
                          iteration:int=None,
@@ -106,6 +106,7 @@ def plot_reconstructions(imgs:torch.Tensor,
     Args:
         tag:str: in the format of, e.g. Train or Test
     '''
+    generative_model = guide.internal_decoder
     bs = imgs.shape[0]
     res = imgs.shape[-1]
     n_strks = args.strokes_per_img
@@ -189,12 +190,15 @@ def plot_reconstructions(imgs:torch.Tensor,
                 recon_img = guide_out.canvas[0].expand(n,3,res,res)
         else:
             recon_img = generative_model.renders_imgs(latent)[0].expand(n,3,res,res)
+
         # debug_plot(imgs.unsqueeze(0), recon_img.unsqueeze(0), writer, 6)
         # breakpoint()
         
         cum_stroke_plot = True
-        if cum_stroke_plot and args.model_type == 'Sequential':
-            plot_cum_recon(args, imgs, generative_model, latent, args.z_where_type, 
+        if cum_stroke_plot: # and args.model_type == 'Sequential':
+            plot_cum_recon(args, imgs, 
+                           generative_model, 
+                           latent, args.z_where_type, 
                            writer, dataset_name, epoch, tag2=writer_tag,
                            save_as_individual_img=save_as_individual_img,
                            invert_color=invert_color)
@@ -400,6 +404,7 @@ def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer,
                                                         resize_res)
     cum_recon_img = cum_recon_img.transpose(1,2).reshape(
                         [n, 3, n_strks * resize_res, resize_res])
+    cum_recon_img = torch.clamp(cum_recon_img, min=0., max=1.)
     if imgs != None:
         if invert_color:
             imgs = 1 - imgs
@@ -673,7 +678,8 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
     bezier = Bezier(res=28, steps=num_steps_per_strk, method='base')
     bs = data_loader.batch_size
     n_strks = guide.max_strks
-    pts_per_strk = guide.pts_per_strk
+    z_what_dim = (guide.pts_per_strk * 2) if hasattr(guide, 'pts_per_strk')\
+                                          else guide.z_what_dim
 
     with torch.no_grad():
         keep_num = 0
@@ -692,7 +698,7 @@ def plot_stroke_tsne(ckpt_path:str, title:str, save_dir:str='plots/',
             
             # Keep z_what with z_pres==1
             z_pres = z_pres.flatten().bool()
-            z_what = z_what.view(bs*n_strks, pts_per_strk* 2)[z_pres]
+            z_what = z_what.view(bs*n_strks, z_what_dim)[z_pres]
             curves = curves[z_pres]
 
             # Store them

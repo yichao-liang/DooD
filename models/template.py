@@ -128,80 +128,85 @@ class Guide(nn.Module):
         #     self.img_feature_extractor = lambda x: torch.reshape(
         #                                             x, (x.shape[0], -1))
         #     self.feature_extractor_out_dim = 2500
-        # elif feature_extractor_type == 'MLP':
-        #     in_dim = prod(self.img_dim)
-        #     self.feature_extractor_out_dim = 256
-        #     hid_dim, num_layers = 512, 3
-        #     self.img_feature_extractor = ImageMLP(
-        #                                 in_dim=in_dim,
-        #                                 out_dim=self.feature_extractor_out_dim,
-        #                                 hid_dim=hid_dim,
-        #                                 num_layers=num_layers,
-        #                             )
-        #     if use_residual and not detach_rsd_embed:
-        #         # if detach_rsd_embed, not gradient is produced to learn this
-        #         self.residual_feature_extractor = ImageMLP(
-        #                                 in_dim=in_dim,
-        #                                 out_dim=self.feature_extractor_out_dim,
-        #                                 hid_dim=hid_dim,
-        #                                 num_layers=num_layers,
-        #                             )
-        # else:
+        self.feature_extractor_type = feature_extractor_type
+        if feature_extractor_type == 'MLP':
+            in_dim = prod(self.img_dim)
+            self.feature_extractor_out_dim = img_feat_dim
+            hid_dim, num_layers = 256, 2
+            self.img_feature_extractor = ImageMLP(
+                                        in_dim=in_dim,
+                                        out_dim=self.feature_extractor_out_dim,
+                                        hid_dim=hid_dim,
+                                        num_layers=num_layers,
+                                    )
+            self.use_sep_rsd_extractor = False
+            self.use_sep_trans_img_extractor = False
+            self.use_sep_trans_rsd_extractor = False
+            if use_residual and not detach_rsd_embed:
+                self.use_sep_rsd_extractor = True
+                # if detach_rsd_embed, not gradient is produced to learn this
+                self.residual_feature_extractor = ImageMLP(
+                                        in_dim=in_dim,
+                                        out_dim=self.feature_extractor_out_dim,
+                                        hid_dim=hid_dim,
+                                        num_layers=num_layers,
+                                    )
+        else:
         # arch 1
         # self.cnn_out_dim = 16928 if self.img_dim[-1] == 50 else 4608 # 1568 -- if another maxnorm
         # arch 4
-        self.cnn_out_dim = 33856
-        self.feature_extractor_out_dim = img_feat_dim
-        self.img_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=
-                                                self.feature_extractor_out_dim,
-                                            num_mlp_layers=1)
-        self.use_sep_trans_img_extractor = False
-        if not self.feature_extractor_sharing:
-            self.use_sep_trans_img_extractor = True
-            self.trans_img_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=
-                                                self.feature_extractor_out_dim,
-                                            num_mlp_layers=1)
-        self.use_sep_rsd_extractor = False
-        self.use_sep_trans_rsd_extractor = False
-        if use_residual and not detach_rsd_embed:
-            self.use_sep_rsd_extractor = True
-            # if detach_rsd_embed, not gradient is produced to learn this
-            self.residual_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=
-                                                self.feature_extractor_out_dim,
-                                            num_mlp_layers=1)
+            self.cnn_out_dim = 33856
+            self.feature_extractor_out_dim = img_feat_dim
+            self.img_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=
+                                                    self.feature_extractor_out_dim,
+                                                num_mlp_layers=1)
+            self.use_sep_trans_img_extractor = False
             if not self.feature_extractor_sharing:
-                self.use_sep_trans_rsd_extractor = True
-                self.trans_rsd_feature_extractor = util.init_cnn(
-                                            n_in_channels=1,
-                                            n_mid_channels=16,#32, 
-                                            n_out_channels=32,#64,
-                                            cnn_out_dim=self.cnn_out_dim,
-                                            mlp_out_dim=
-                                                self.feature_extractor_out_dim,
-                                            mlp_hidden_dim=
-                                                self.feature_extractor_out_dim,
-                                            num_mlp_layers=1)
+                self.use_sep_trans_img_extractor = True
+                self.trans_img_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=
+                                                    self.feature_extractor_out_dim,
+                                                num_mlp_layers=1)
+            self.use_sep_rsd_extractor = False
+            self.use_sep_trans_rsd_extractor = False
+            if use_residual and not detach_rsd_embed:
+                self.use_sep_rsd_extractor = True
+                # if detach_rsd_embed, not gradient is produced to learn this
+                self.residual_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=
+                                                    self.feature_extractor_out_dim,
+                                                num_mlp_layers=1)
+                if not self.feature_extractor_sharing:
+                    self.use_sep_trans_rsd_extractor = True
+                    self.trans_rsd_feature_extractor = util.init_cnn(
+                                                n_in_channels=1,
+                                                n_mid_channels=16,#32, 
+                                                n_out_channels=32,#64,
+                                                cnn_out_dim=self.cnn_out_dim,
+                                                mlp_out_dim=
+                                                    self.feature_extractor_out_dim,
+                                                mlp_hidden_dim=
+                                                    self.feature_extractor_out_dim,
+                                                num_mlp_layers=1)
 
 
         self.sep_where_pres_net = sep_where_pres_net
@@ -395,6 +400,7 @@ class Guide(nn.Module):
         print("=== Feature extractors ===")
         tot_num_param = sum(p.numel() for p in 
                             self.img_feature_extractor.parameters())
+        print(f"## Extractor type: {self.feature_extractor_type}")
         print(f"## Each feat. extr. has {tot_num_param} parameters")
         print(f"## [{self.use_sep_rsd_extractor}] Use seperate rsd extractor")
         print(f"## [{self.use_sep_trans_rsd_extractor}] "+
@@ -424,8 +430,8 @@ class Guide(nn.Module):
                     f"{self.pr_wr_rnn_in}")
             print(f"## z_pres_where mlp in {self.pr_wr_mlp_in_dim}dim: "+
                     f"{self.pr_wr_mlp_in}\n")
-        print(f"## z_where rnn in {self.wt_rnn_in_dim}dim: {self.wt_rnn_in}")
-        print(f"## z_where mlp in {self.wt_mlp_in_dim}dim: {self.wt_mlp_in}\n")
+        print(f"## z_what rnn in {self.wt_rnn_in_dim}dim: {self.wt_rnn_in}")
+        print(f"## z_what mlp in {self.wt_mlp_in_dim}dim: {self.wt_mlp_in}\n")
 
         print("=== Baseline networks ===")
         print(f"## bl_rnn in {self.bl_in_dim}dim: {self.bl_in}")

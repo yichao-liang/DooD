@@ -39,11 +39,14 @@ class GenerativeModel(nn.Module):
                                                     hidden_dim=256,
                                                     z_what_dim=50,
                                                     prior_dist='Independent',
+                                                    likelihood_dist='Laplace',
                                                     ):
         super().__init__()
         self.max_strks = max_strks
         self.use_canvas=use_canvas
         self.h_dim = hidden_dim
+        self.likelihood_dist = likelihood_dist
+        print(f"image likelihood: {self.likelihood_dist}")
 
         # Prior parameters
         self.prior_dist = prior_dist
@@ -187,7 +190,15 @@ class GenerativeModel(nn.Module):
         ptcs, bs = shp = imgs_dist_loc.shape[:2]
 
         imgs_dist_std = self.get_imgs_dist_std()
-        dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
+        # imgs_dist_std = self.imgs_dist_std
+        # base_dist = Laplace
+        if self.likelihood_dist == 'Laplace':
+            base_dist = Laplace
+        elif self.likelihood_dist == 'Normal':
+            base_dist = Normal
+        else:
+            raise NotImplementedError
+        dist = Independent(base_dist(imgs_dist_loc, imgs_dist_std), 
                             reinterpreted_batch_ndims=3)
 
         assert (dist.event_shape == torch.Size([1, self.res, self.res]) and 
@@ -231,7 +242,6 @@ class GenerativeModel(nn.Module):
         imgs = imgs.sum(1) 
         # imgs = util.normalize_pixel_values(imgs, method="tanh", slope=0.6) # tanh works
 
-
         try:
             assert not imgs.isnan().any()
         except:
@@ -256,7 +266,48 @@ class GenerativeModel(nn.Module):
         recon = recon.view(ptcs, bs, n_strks, 1, self.res, self.res)
 
         return recon
+    
+    def renders_cum_imgs(self, latents):
+        '''Batched img rendering. Decode z_what then transform accroding to
+        z_where with inverse spatial transform.
+        Args:
+            latents: 
+                z_pres: [ptcs, bs, n_strks] 
+                z_what: [ptcs, bs, n_strks, pts_per_strk, 2 (x, y)]
+                z_where:[ptcs, bs, n_strks, z_where_dim]
+        Return:
+            images: [ptcs, bs, 1 (channel), H, W]
+        '''
+        z_pres, z_what, z_where = latents
+        ptcs, bs, n_strks, pts_per_strk = z_what.shape
+        shp = z_pres.shape[:2]
+        
+        # Get rendered image: [bs, n_strk, n_channel (1), H, W]
 
+        imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))
+
+        imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
+        # reshape image for further processing
+        imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
+
+        # Get affine matrix: [ptcs*bs*n_strk, 2, 3]
+        z_where_mtrx = util.get_affine_matrix_from_param(
+                                z_where.view(ptcs*bs*n_strks, -1), 
+                                self.z_where_type)
+        imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
+
+        # Change back to [ptcs, bs, n_strk, n_channel (1), H, W]
+        imgs = imgs.view(ptcs, bs, n_strks, 1, self.res, self.res)
+
+        # [ptcs, bs, n_strk, n_channel, res, res]
+        imgs = imgs.cumsum(2)
+        imgs = imgs * z_pres.reshape(*shp, -1)[:, :, :, None, None, None]
+        # imgs = imgs.sum(2) 
+
+        imgs = imgs.view(ptcs, bs, n_strks, 1, self.res, self.res)
+
+        return imgs 
+    
     def log_prob(self, latents, imgs, z_pres_mask, canvas, z_prior=None):
         '''
         Args:
@@ -341,6 +392,9 @@ class Guide(template.Guide):
                     sep_where_pres_net=False,
                     residual_no_target=True,
                     detach_rsd_embed=True,
+                    dataset='MNIST',
+                    feature_extractor_type='CNN',
+                    likelihood_dist='Laplace',
                                             ):
         # Parameters
         self.z_what_dim = z_what_dim
@@ -355,22 +409,23 @@ class Guide(template.Guide):
                     prior_dist=prior_dist,
                     target_in_pos=target_in_pos,
                     intermediate_likelihood=intermediate_likelihood,
-                    feature_extractor_type='CNN',
+                    feature_extractor_type=feature_extractor_type,
                     sep_where_pres_net=sep_where_pres_net,
                     residual_no_target=residual_no_target,
                     detach_rsd_embed=detach_rsd_embed,
                     )
 
         # Internal renderer
-        if (self.use_canvas or self.use_residual or 
-            self.prior_dist == 'Sequential'):
-            self.internal_decoder = GenerativeModel(
-                                            z_where_type=self.z_where_type,
-                                            z_what_dim=self.z_what_dim,
-                                            max_strks=self.max_strks,
-                                            res=img_dim[-1],
-                                            use_canvas=use_canvas,
-                                            prior_dist=self.prior_dist,
+        # if (self.use_canvas or self.use_residual or 
+        #     self.prior_dist == 'Sequential'):
+        self.internal_decoder = GenerativeModel(
+                                        z_where_type=self.z_where_type,
+                                        z_what_dim=self.z_what_dim,
+                                        max_strks=self.max_strks,
+                                        res=img_dim[-1],
+                                        use_canvas=use_canvas,
+                                        prior_dist=self.prior_dist,
+                                        likelihood_dist=likelihood_dist,
                                             )
         # Inference networks
         # if self.sep_where_pres_mlp:
@@ -381,7 +436,8 @@ class Guide(template.Guide):
         # else:
         self.pr_wr_mlp = PresWhereMLP(in_dim=self.pr_wr_mlp_in_dim, 
                                       z_where_type=self.z_where_type,
-                                      z_where_dim=self.z_where_dim)
+                                      z_where_dim=self.z_where_dim,
+                                      dataset=dataset,)
 
         # Module 2: z_what_cnn, wt_rnn, wt_mlp
         # stn transformed image -> (`z_what_dim` control points)

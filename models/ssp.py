@@ -259,7 +259,7 @@ class GenerativeModel(nn.Module):
                                                             = None, None, None
         else:
             self.sigma = torch.nn.Parameter(torch.tensor(6.), 
-                                                            requires_grad=True)
+                                                            requires_grad=True)/3
             self.sgl_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
                                                             requires_grad=True)
             self.add_strk_tanh_slope = torch.nn.Parameter(torch.tensor(6.), 
@@ -1600,8 +1600,8 @@ class Guide(template.Guide):
         self.correlated_latent = correlated_latent
 
         # Internal renderer
-        if self.use_canvas or self.prior_dist == 'Sequential':
-            self.internal_decoder = GenerativeModel(
+        # if self.use_canvas or self.prior_dist == 'Sequential':
+        self.internal_decoder = GenerativeModel(
                                             z_where_type=self.z_where_type,
                                             pts_per_strk=self.pts_per_strk,
                                             max_strks=self.max_strks,
@@ -1959,8 +1959,13 @@ class Guide(template.Guide):
                 #             prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
                 #     h_l = [h_l, h_l]
                 if self.no_pres_rnn:
-                    h_l0 = self.img_feature_extractor(
+                    if self.use_canvas:
+                        h_l0 = self.img_feature_extractor(
                             prev_canv.view(prod(shp), *img_dim)).view(*shp, -1)
+                    else:
+                        h_l0 = self.img_feature_extractor(
+                            imgs.view(prod(shp), *img_dim)).view(*shp, -1)
+                            
                     h_l = [h_l0, h_l[1]]
 
                 z_pres_prir[:, :, t] = self.internal_decoder.presence_dist(

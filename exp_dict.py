@@ -45,7 +45,7 @@ models_2_cmd = {
         '--target_in_pos', 'RNN',
         '--save_history_ckpt',
     ],
-    'AIR4': [
+    'AIR4_Lapl': [
         '--model-type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
@@ -55,8 +55,61 @@ models_2_cmd = {
         '--z_what_in_pos', 'z_where_rnn',
         '--target_in_pos', 'RNN',
         '--save_history_ckpt',
+        '--log_param',
     ],
-    'DAIR': [
+    'AIR4_Gaus': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--save_history_ckpt',
+        '--z_dim', '10',
+        "--likelihood_dist", 'Normal',
+        '--log_param',
+    ],
+    'AIR4_50': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--save_history_ckpt',
+        '--z_dim', '50',
+    ],
+    'AIR4_50G': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--save_history_ckpt',
+        '--z_dim', '50',
+        "--likelihood_dist", 'Normal',
+    ],
+    'AIR4_50_mlp': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--save_history_ckpt',
+        '--z_dim', '50',
+        '--feature_extractor_type', 'MLP',
+    ],
+    'DAIR_Lapl': [
         '--model-type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
@@ -69,6 +122,39 @@ models_2_cmd = {
         # '--use_canvas',
         '--residual_no_target',
         '--save_history_ckpt',
+        # '--batch-size', '128',
+        '--log_param',
+    ],
+    'DAIR_Gaus': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--use_residual',
+        # '--use_canvas',
+        '--residual_no_target',
+        '--save_history_ckpt',
+        '--log_param',
+        "--likelihood_dist", 'Normal',
+    ],
+    'DAIR50': [
+        '--model-type', 'AIR',
+        '--prior_dist', 'Independent',
+        '--lr', '1e-4', 
+        '--bl_lr', '1e-3',
+        '--z_where_type', '4_rotate',
+        '--strokes_per_img', strokes_per_img,
+        '--z_what_in_pos', 'z_where_rnn',
+        '--target_in_pos', 'RNN',
+        '--use_residual',
+        # '--use_canvas',
+        '--residual_no_target',
+        '--save_history_ckpt',
+        '--z_dim', 50,
     ],
     'MWS': [
         '--model-type', 'MWS',
@@ -451,9 +537,40 @@ exp_dict = {
             '--residual_no_target_pres',         
             '--img_feat_dim', '256',
             '--no_spline_renderer',
-            '--no_maxnorm', # seem necessary for no spline_dec model 
-            '--no_sgl_strk_tanh', # seem necessary for no spline_dec model
+            # '--no_maxnorm', # seem necessary for no spline_dec model 
+            # '--no_sgl_strk_tanh', # seem necessary for no spline_dec model
+            # '--no_add_strk_tanh',
             ], 
+    # Ma3: ablation 3: full - intermediate rendering
+    'Full-spDec-sq40MCorPrior-dp-tr-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': full_no_canvas +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            # '--detach_canvas_so_far', # detachRsdNotRsdEm
+            '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            # '--use_residual', # detachRsdNotRsdEm
+            # '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wt|wr', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            '--dataset', 'MNIST',
+            '--linear_sum',
+            '--num_mixtures', '40', #20M
+            '--correlated_latent', #Cor
+            # '--condition_by_img', #Imc
+            # '--transform_z_what', #tranWhat
+            # '--residual_no_target_pres',         
+            '--img_feat_dim', '256',
+            ],
     # MS
     'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-65strk': basic_full_model +\
         [
@@ -514,6 +631,8 @@ exp_dict = {
             '--transform_z_what', #tranWhat
             '--residual_no_target_pres',
             '--img_feat_dim', '256',
+            # '--batch-size', '128',
+
          ],
     # MTS
     'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': basic_full_model +\

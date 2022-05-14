@@ -70,7 +70,7 @@ def train(model,
         ite_since_last_plot = 0
         with torch.no_grad():
             plot.plot_reconstructions(imgs=imgs, guide=guide, 
-                                      generative_model=generative_model, 
+                                    #   generative_model=generative_model, 
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset, 
@@ -168,7 +168,7 @@ def train(model,
                 ite_since_last_plot = 0
                 with torch.no_grad():
                     plot.plot_reconstructions(imgs=imgs, guide=guide, 
-                                      generative_model=generative_model, 
+                                    #   generative_model=generative_model, 
                                       args=args, writer=writer, epoch=epoch,
                                       writer_tag='Train', 
                                       dataset_name=args.dataset, 
@@ -260,7 +260,7 @@ def get_loss_tuple(args, generative_model, guide, iteration, imgs, writer,
                                 args=args)
     elif args.model_type == 'AIR':
         loss_tuple = losses.get_loss_air(
-                                generative_model=generative_model, 
+                                # generative_model=generative_model, 
                                 guide=guide,
                                 imgs=imgs, 
                                 k=1,
@@ -362,7 +362,7 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
 
 def save(args, iteration, model, optimizer, scheduler, stats):
     # save iteration.pt
-    if iteration % 5000 == 0:
+    if iteration % 10000 == 0:
     # if iteration % 100 == 0:
         if args.save_history_ckpt:
             util.save_checkpoint(
