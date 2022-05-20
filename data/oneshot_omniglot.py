@@ -29,7 +29,7 @@ class OneShotClfDataset(torch.utils.data.Dataset):
     def __len__(self):
         return self.dataset_size
     
-def get_dataloader(transform, batch_size):
+def get_dataloader(transform, batch_size, shuffle=False):
     data_dict_path = './data/omniglot/python/one-shot-classification/data-dict.pt'
 
     try:
@@ -41,7 +41,7 @@ def get_dataloader(transform, batch_size):
     dataset = OneShotClfDataset(data_dict, transform)
     dataloader = torch.utils.data.DataLoader(dataset, 
                                             batch_size=batch_size,
-                                            shuffle=False,)
+                                            shuffle=shuffle,)
 
     return dataloader
 

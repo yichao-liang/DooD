@@ -81,7 +81,7 @@ def get_args_parser():
         default="full-test", 
         type=str, help='name for ckpt dir')
     parser.add_argument(
-        "--model-type",
+        "--model_type",
         default="Sequential", # Spline latent representation
         # default="AIR",        # Distribution latent representation    
         # default="VAE", 

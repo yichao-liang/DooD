@@ -28,7 +28,8 @@ def get_loss_sequential(generative_model,
                         imgs, 
                         k=1,
                         iteration=0, writer=None, writer_tag=None, beta=1,
-                        args=None, alpha=0.8, train=True):
+                        args=None, alpha=0.8, train=True, 
+                        average_particle_score=True):
     '''Get loss for sequential model, e.g. AIR
     Args:
         loss_type (str): "nll": negative log likelihood, "l1": L1 loss, "elbo": -ELBO
@@ -408,14 +409,15 @@ def get_loss_sequential(generative_model,
                                                     z_where_rot, iteration)
                         writer.add_histogram(f"{writer_tag}Samples/z_what",
                                                             z_what, iteration)
-    loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
-    elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
-    log_likelihood = (torch.logsumexp(log_likelihood, dim=0) - 
+    if average_particle_score:
+        loss = torch.logsumexp(loss, dim=0) - torch.log(torch.tensor(k))
+        elbo = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(k))
+        log_likelihood = (torch.logsumexp(log_likelihood, dim=0) - 
+                            torch.log(torch.tensor(k)))
+        log_prior_z = (torch.logsumexp(log_prior_z, dim=0) - 
                         torch.log(torch.tensor(k)))
-    log_prior_z = (torch.logsumexp(log_prior_z, dim=0) - 
-                    torch.log(torch.tensor(k)))
-    log_post_z = (torch.logsumexp(log_post_z, dim=0) - 
-                    torch.log(torch.tensor(k)))
+        log_post_z = (torch.logsumexp(log_post_z, dim=0) - 
+                        torch.log(torch.tensor(k)))
     return SequentialLoss(overall_loss=loss, 
                             model_loss=model_loss,
                             baseline_loss=baseline_loss,

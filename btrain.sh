@@ -69,26 +69,31 @@
 # sbatch -J syT execute.sh python sweep.py -m MT --beta 4 -ds sy --seed 2 -trn
 # sbatch -J syT execute.sh python sweep.py -m MT --beta 4 -ds sy --seed 3 -trn
 # sbatch -J syT execute.sh python sweep.py -m MT --beta 4 -ds sy --seed 4 -trn
-# DAIR
-sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 0 -trn -ct
-sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 1 -trn -ct
-sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 2 -trn -ct
 
-sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 0 -trn -ct
-sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 1 -trn -ct
-sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 2 -trn -ct
+sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 0 -trn
+sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 1 -trn
+sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 2 -trn
 
-sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 0 -trn -ct
-sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 1 -trn -ct
-sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 2 -trn -ct
+# AIR
+# sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 0 -trn -ct
+# sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 1 -trn -ct
+# sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 2 -trn -ct
+
+# sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 0 -trn -ct
+# sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 1 -trn -ct
+# sbatch -J Akm execute.sh python sweep.py -m AIR_l --beta 5 -ds km --seed 2 -trn -ct
+
+# sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 0 -trn -ct
+# sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 1 -trn -ct
+# sbatch -J Aem execute.sh python sweep.py -m AIR_l --beta 5 -ds em --seed 2 -trn -ct
 
 # sbatch -J Aqd execute.sh python sweep.py -m AIR_l --beta 5 -ds qd --seed 0 -trn
 # sbatch -J Aqd execute.sh python sweep.py -m AIR_l --beta 5 -ds qd --seed 1 -trn
 # sbatch -J Aqd execute.sh python sweep.py -m AIR_l --beta 5 -ds qd --seed 2 -trn
 
-#sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 0 -trn
-#sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 1 -trn
-#sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 2 -trn
+# sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 0 -trn
+# sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 1 -trn
+# sbatch -J Aom execute.sh python sweep.py -m AIR_g --beta 5 -ds om --seed 2 -trn
 
 # sbatch -J Dmn execute.sh python sweep.py -m DAIR_l --beta 5 -ds mn --seed 0 -trn -ct
 # sbatch -J Dmn execute.sh python sweep.py -m DAIR_l --beta 5 -ds mn --seed 1 -trn -ct

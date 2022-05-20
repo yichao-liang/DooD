@@ -360,9 +360,9 @@ def log_stat(args, stats, iteration, loss, loss_tuple):
             util.logging.info(f"Iteration {iteration} | Loss = {stats.trn_losses[-1]:.3f}")
     return stats
 
-def save(args, iteration, model, optimizer, scheduler, stats):
+def save(args, iteration, model, optimizer, scheduler, stats, save_ite=10000):
     # save iteration.pt
-    if iteration % 10000 == 0:
+    if iteration % save_ite == 0:
     # if iteration % 100 == 0:
         if args.save_history_ckpt:
             util.save_checkpoint(

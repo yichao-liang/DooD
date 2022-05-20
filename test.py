@@ -17,8 +17,7 @@ import pandas as pd
 from tqdm import tqdm
 from scipy.spatial.distance import cdist
 import seaborn as sns
-
-
+import matplotlib.pylab as plt
 
 import util, plot, losses, train
 from plot import display_transform
@@ -29,6 +28,7 @@ from models.ssp import SampleCurveDist, AffineSampleCurveDist, \
             SampleCurveDistWithAffine
 
 mws_transform = transforms.Resize([50, 50], antialias=True)
+gns_transform = transforms.Resize([105,105], antialias=True)
 NROW = 16
 
 def marginal_likelihoods(model, stats, test_loader, args, 
@@ -96,6 +96,10 @@ def marginal_likelihoods(model, stats, test_loader, args,
         else:
             args.log_param = False
         for imgs, target in test_loader:
+            # for i, im in enumerate(imgs):
+            #     im = 1 - gns_transform(im)
+            #     save_image(im, f'/om2/user/ycliang/im{i}.png')
+            # breakpoint()
             # sid(imgs[-8], 'target')
             if args.model_type == 'MWS':
                     # for mll evaluation
@@ -209,6 +213,7 @@ def marginal_likelihoods(model, stats, test_loader, args,
                     dataset=test_loader.dataset,
                     invert_color=True,
                     save_as_individual_img=save_as_individual_img,
+                    multi_sample=only_reconstruction,
                 )
 
         if log_to_file:
@@ -436,63 +441,10 @@ def unconditioned_generation(model, args, writer, in_img, stats,
         writer.add_image(f'Unconditioned Generation/in_img', in_img_grid,
                         ite_so_far)
 
-    if args.model_type == 'MWS':
-        generative_model, guide, memory = model
-    else:
-        _, guide = model
-        generative_model = guide.internal_decoder
-    
-    # todo: check for AIR, Full, Full-seq_prir
+    (gen, guide), dec_param = init_generator(args, model, in_img)
+
+    gen_imgs = draw_samples(gen, guide, bs, dec_param, max_strks)
     with torch.no_grad():
-        # pass on the parameters
-        decoder_param = guide(in_img).decoder_param
-        generative_model.img_feature_extractor = guide.img_feature_extractor
-        if guide.sep_where_pres_net:
-            if guide.no_pres_rnn:
-                generative_model.wr_rnn = guide.wr_rnn
-            else:    
-                generative_model.wr_rnn = guide.wr_rnn
-                generative_model.pr_rnn = guide.pr_rnn
-        else:
-            generative_model.pr_wr_rnn = guide.pr_wr_rnn
-        generative_model.wt_rnn = guide.wt_rnn
-
-        from models.ssp import DecoderParam
-        # breakpoint()
-        decoder_param = DecoderParam(
-            sigma=
-                    # torch.zeros_like(
-                        decoder_param.sigma[:,:,0:1].median().repeat(1,bs,
-                                                        guide.max_strks)
-                    # )+0.019
-                ,
-            slope=[
-                decoder_param.slope[0][:,:,0:1].median().repeat(1,bs,
-                                                            guide.max_strks),
-                # torch.zeros_like(
-                    decoder_param.slope[1][:,:,0:1].median().repeat(1,bs,
-                                                            guide.max_strks)
-                # )+0.018
-                ,
-            ]
-        )
-        # sample
-        # generative_model.transform_z_what = True
-        gen_out = generative_model.sample(bs=[bs], 
-                                          decoder_param=decoder_param,
-                                          linear_sum=guide.linear_sum,
-                                          max_strks=max_strks,
-                                          )
-
-        gen.sigma = decoder_param.sigma
-        gen.sgl_strk_tanh_slope = decoder_param.slope[0]
-        if guide.linear_sum:
-            gen.add_strk_tanh_slope = decoder_param.slope[1][:, :, 0]
-        else:
-            gen.add_strk_tanh_slope = decoder_param.slope[1][:, :, -1]
-        
-        # display the results
-        gen_imgs = gen_out.canvas
         # if gen_imgs == None:
         #     gen_imgs = gen.renders_imgs(gen_out.z_smpl)
         if max_strks == None:
@@ -514,31 +466,44 @@ def unconditioned_generation(model, args, writer, in_img, stats,
                             tag1='Unconditioned Generation')
         return gen_imgs
 
-def one_shot_classification(model, args, writer, its_so_far):
+def one_shot_classification(model, args, writer, its_so_far, 
+                            do_fine_tune=False):
     '''Perform one shot clf as in Omniglot challenge
     '''
     from train import save
-    from classify import parse, fine_tune, score
-    n_parse = 1
+    from classify import parse, fine_tune, score, optimize_and_score
+    if args.model_type == 'AIR':
+        n_parse_per_ite, run_per_eps = 3, 3
+    else:
+        n_parse_per_ite, run_per_eps = 3, 4
+        
     
     # gen, guide = model
-    tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res)
 
     # Init plot of parses
-    latents, dec_params = parse(args, model, tst_loader, writer, 
-                                n_parse=n_parse,
-                                tag="Before Finetune Parse")
-    breakpoint()
+    # tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res)
+    # latents, dec_params, gen_probs = parse(args, model, tst_loader, writer, 
+    #                                 n_parse=n_parse, tag="Before Finetune Parse")
     # Finetune the model
-    # fine_tune()
-    # Parse again
-    # parse(model, tst_loader, writer, tag="After Finetune Parse")
+    if do_fine_tune:
+        tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res, 
+                                                        shuffle=True)
+        model = fine_tune(args, model, tst_loader, writer)
 
+    # Parse again
+    tst_loader = util.init_ontshot_clf_data_loader(res=args.img_res, 
+                                                   shuffle=False)
+    # latents, dec_params, gen_probs = parse(args, model, tst_loader, writer, 
+    #                                 n_parse=n_parse, tag="After Finetune Parse")
     # Compute the score
-    accuracies = optimize_and_score(args, model, latents, dec_params, 
-                                    tst_loader, 
-                                    writer, 
-                                    n_parse=n_parse)
+    accuracies = optimize_and_score(
+                                    # latents, dec_params, gen_probs,
+                                    args, model, tst_loader, writer, 
+                                    n_parse_per_ite=n_parse_per_ite, 
+                                    run_per_eps=run_per_eps,
+                                    two_way_clf=False,
+                                    optimize=True, 
+                                    tag="After Finutune")
         # get pred
         # pred = score.argmax(score, dim=1)
         # accuracy = compute_accuracy(pred, label)
@@ -646,11 +611,20 @@ def num_strokes_plot(model, stats, args, writer, max_strks=10):
                         {'dataset': name, 'number of strokes': n_strks}
                                     ) for name, n_strks in ds_counts.items()
                     ], ignore_index=True)   
+
     ax = sns.histplot(df, x='number of strokes', hue='dataset', stat='percent', 
                     #   kde=True, 
                       discrete=True)
+    # Set plot font size
+    plt.legend(title='Dataset', labels=["MNIST","Omniglot","Quickdraw"])
+    plt.setp(ax.get_legend().get_texts(), fontsize='16') # for legend text
+    plt.setp(ax.get_legend().get_title(), fontsize='16') # for legend title
+    ax.set_xlabel("Number of strokes",fontsize=18)
+    ax.set_ylabel("Percentage",fontsize=18)
+    ax.tick_params(labelsize=16)
+
     ax.set_xlim(0,max_strks+1)
-    ax.set_ylim(0,30)
+    ax.set_ylim(0,34)
     fig = ax.get_figure()
     fig.set_tight_layout(tight=True)
     fig.savefig(f"plots/z_pr_generalize_{args.save_model_name}.pdf") 
@@ -660,10 +634,12 @@ def auto_complete(model, args, writer, partial_img, stats):
     '''Perform auto-completion conditioned on "partial-completed" images
     '''
     # Setup
+    par_img_set = display_transform(partial_img)
+    partial_img = torch.repeat_interleave(partial_img,8,dim=0)
     bs = partial_img.shape[0]
     ite_so_far = len(stats.trn_losses)
     imgs_disp = display_transform(partial_img)
-    in_img_grid = make_grid(imgs_disp, nrow=NROW)
+    in_img_grid = 1-make_grid(imgs_disp, nrow=NROW)
     writer.add_image(f'Partial completion/in_img', in_img_grid,
                      ite_so_far)
 
@@ -688,8 +664,8 @@ def auto_complete(model, args, writer, partial_img, stats):
     # recs = out.canvas
 
     # top parse
-    z_smpl, hs, dec_param, recs = util.get_top_k_latents_hiddens(guide, gen, 
-                                                    partial_img, ptcs=5, k=1)
+    z_smpl, hs, dec_param, recs, _, _ = util.get_top_latents_hiddens(guide, gen, 
+                                                    partial_img, ptcs=1)
     last_hs, last_z_sample = util.get_last_vars(hs, z_smpl)
 
     from models.ssp import DecoderParam
@@ -706,6 +682,7 @@ def auto_complete(model, args, writer, partial_img, stats):
     partial_img = (dec_param.slope[1][0:1,:,0].squeeze(0)[:,None,None,None] * 
                     # torch.atanh(partial_img))
                     torch.atanh(recs.squeeze(0)))
+                    
     gen_out = gen.sample(bs=[bs], 
                             init_canvas=partial_img,
                             init_h=last_hs,
@@ -717,15 +694,33 @@ def auto_complete(model, args, writer, partial_img, stats):
     # Log the results
     # - check the posterior quality
     recs = display_transform(recs.squeeze(0))
-    rec_img_grid = make_grid(recs, nrow=NROW)
+    rec_img_grid = 1-make_grid(recs, nrow=NROW)
     writer.add_image(f'Partial completion/partial image recons', rec_img_grid, 
                     ite_so_far)
     # - log the completion results
     gen_imgs = gen_out.canvas
     gen_imgs_l = display_transform(gen_imgs.squeeze(0))
-    gen_img_grid = make_grid(gen_imgs_l, nrow=NROW)
+    gen_img_grid = 1-make_grid(gen_imgs_l, nrow=NROW)
     writer.add_image(f'Partial completion/out_img', gen_img_grid, 
                     ite_so_far)
+    # save
+    gen_imgs_wrap = gen_imgs_l.view(4,8,1,64,64).transpose(1,2).reshape(4,1,8*64,64)
+    cat = 1 - torch.cat([par_img_set, gen_imgs_wrap], dim=2)
+    for i in range(4):
+        save_imgs_dir = f'/om/user/ycliang/{args.dataset}-par_com-{(7+int(args.seed))*4 + i}.pdf'
+        # util.get_save_test_img_dir(args, ite_so_far, 
+        #                             prefix=f'partial_completion/{args.dataset}_partial_completion',
+        #                             suffix=f'out{int(args.seed)*4 + i}')
+        save_image(cat[i], save_imgs_dir)
+  
+    # cat_img = torch.cat([imgs_disp, gen_imgs_l],dim=-1)
+    # # cat_img_grid = make_grid(cat_img, nrow=2)
+
+    # save_imgs_dir = util.get_save_test_img_dir(args, ite_so_far, 
+    #                                            prefix='partial_completion',
+    #                                            suffix=f'out')
+    # cat_img = 1 - make_grid(cat_img, nrow=1)
+    # save_image(cat_img, save_imgs_dir)
     # cummulative rendering
     gen.sigma = new_dec_param.sigma
     gen.sgl_strk_tanh_slope = new_dec_param.slope[0]
@@ -740,6 +735,120 @@ def auto_complete(model, args, writer, partial_img, stats):
     #                         epoch=ite_so_far, tag2='out_cum', 
     #                         tag1='Partial completion')
 
+def draw_samples(generative_model, guide, bs, dec_param, max_strks=None):
+    with torch.no_grad():
+        # sample
+        # generative_model.transform_z_what = True
+        gen_out = generative_model.sample(bs=[bs], 
+                                          decoder_param=dec_param,
+                                          linear_sum=guide.linear_sum,
+                                          max_strks=max_strks,
+                                          )
+
+        
+        # display the results
+        return gen_out.canvas
+
+def init_generator(args, model, in_img):
+    bs = in_img.shape[0]
+
+    if args.model_type == 'MWS':
+        generative_model, guide, memory = model
+    else:
+        _, guide = model
+        generative_model = guide.internal_decoder
+
+    with torch.no_grad():
+        # pass on the parameters
+        decoder_param = guide(in_img).decoder_param
+        generative_model.img_feature_extractor = guide.img_feature_extractor
+        if guide.sep_where_pres_net:
+            if guide.no_pres_rnn:
+                generative_model.wr_rnn = guide.wr_rnn
+            else:    
+                generative_model.wr_rnn = guide.wr_rnn
+                generative_model.pr_rnn = guide.pr_rnn
+        else:
+            generative_model.pr_wr_rnn = guide.pr_wr_rnn
+        generative_model.wt_rnn = guide.wt_rnn
+
+        from models.ssp import DecoderParam
+        # breakpoint()
+        decoder_param = DecoderParam(
+            sigma=decoder_param.sigma[:,:,0:1].median().repeat(1,bs,
+                                                        guide.max_strks),
+            slope=[
+                decoder_param.slope[0][:,:,0:1].median().repeat(1,bs,
+                                                            guide.max_strks),
+                decoder_param.slope[1][:,:,0:1].median().repeat(1,bs,
+                                                            guide.max_strks)
+            ]
+        )
+    model = generative_model, guide 
+
+    gen.sigma = decoder_param.sigma
+    gen.sgl_strk_tanh_slope = decoder_param.slope[0]
+    if guide.linear_sum:
+        gen.add_strk_tanh_slope = decoder_param.slope[1][:, :, 0]
+    else:
+        gen.add_strk_tanh_slope = decoder_param.slope[1][:, :, -1]
+
+    return model, decoder_param
+
+def compute_fid_score(model, args, data_loader, writer):
+    from ignite.metrics import FID
+    from ignite.engine import Engine
+    # Init FID evaluator
+    def eval_step(engine, batch):
+        return batch
+    default_evaluator = Engine(eval_step)
+    metric = FID()
+    metric.attach(default_evaluator, "fid")
+    res = 128
+    eval_trans = transforms.Compose([transforms.Resize([res, res])])
+
+    # Obtain some samples
+    # Draw samples from model
+    samples_to_use = 1500
+    in_img, _ = next(iter(data_loader))
+    in_img = in_img.to(args.device)
+    bs = in_img.shape[0]
+    (gen, guide), dec_param = init_generator(args, model, in_img)
+    gen.eval(), guide.eval()
+
+    print("===> Generating samples from model")
+    y_preds, count = [], 0
+    while count < samples_to_use:
+        gen_imgs = draw_samples(gen, guide, bs, dec_param)
+        y_preds.append(gen_imgs)
+        count += bs
+    y_preds = torch.cat(y_preds, dim=0)
+    y_preds = y_preds[:samples_to_use]
+    # trans to [bs,3,res,res]
+    y_preds = eval_trans(y_preds).repeat(1,3,1,1).cpu() 
+    print("===> Done\n")
+
+    # Draw samples from dataset
+    print("===> Taking dataset samples")
+    y_trues, count = [], 0
+    while count < samples_to_use:
+        for imgs,_ in data_loader:
+            y_trues.append(imgs)
+            count += bs
+            if count >= samples_to_use:
+                break
+    y_trues = torch.cat(y_trues, dim=0)
+    y_trues = y_trues[:samples_to_use]
+    # trans to [bs,3,res,res]
+    y_trues = eval_trans(y_trues).repeat(1,3,1,1).cpu()
+    print("===> Done\n")
+
+    # Compute score
+    state = default_evaluator.run([[y_preds, y_trues]])
+    fid = state.metrics["fid"]
+    writer.add_scalar("FID/", fid)
+    print("## FID score:", fid)
+
 def get_args_parser():
     parser = argparse.ArgumentParser(formatter_class=
                                         argparse.ArgumentDefaultsHelpFormatter)
@@ -752,7 +861,7 @@ def get_args_parser():
                         help='name for ckpt dir')
     parser.add_argument("--tb_name", default=None, type=str, 
                         help='name for tensorboard log')
-    parser.add_argument("--clf_trn_interations", default=700000, type=int, help=" ")
+    parser.add_argument("--clf_trn_interations", default=800000, type=int, help=" ")
     # parser.add_argument("--clf_trn_interations", default=20, type=int, help=" ")
     return parser
 
@@ -763,17 +872,18 @@ if __name__ == "__main__":
     # Choose the tasks to test on
     test_run = False
     # broad generalization
-    mll_eval = False
+    mll_eval = True
     recon_eval = False
-    save_as_individual_img = False
+    save_as_individual_img = True
     num_strokes_eval = False # plot a distribution of number of strokes / dataset
-    clf_eval = True
+    clf_eval = False
     # deep generalization
     uncon_sample = False
     auto_complete_demo = False
     char_con_sample = False
     one_shot_clf_eval = False
     plot_tsne = False
+    compute_fid = False
 
     
 
@@ -828,11 +938,12 @@ if __name__ == "__main__":
             # coloring = 'dbscan'
             n_clusters = [8, 10, 15, 5]
             for n in n_clusters:
-                plot.plot_stroke_tsne(ckpt_path=ckpt_path,
+                plot.plot_stroke_tsne(trn_args,
+                                ckpt_path=ckpt_path,
                                 title=f'tsne',
                                 save_dir=f'plots/tsne_{args.save_model_name}'+
                                         f'_{coloring}{n}',
-                                z_what_to_keep=5000,
+                                z_what_to_keep=10000,
                                 clustering=coloring,
                                 n_clusters=n)
     if num_strokes_eval:
@@ -858,31 +969,18 @@ if __name__ == "__main__":
                                 save_as_individual_img=save_as_individual_img)
             print(f"===> Done Reconstruction on {dataset}\n")
 
-        if char_con_sample:
-            print(f'===> Generating multiple parse for a data')
-            trn_args.save_model_name = args.save_model_name
-            marginal_likelihoods(model=model, stats=stats, 
-                                test_loader=train_loader, 
-                                args=trn_args, save_imgs_dir=None, epoch=None, 
-                                writer=writer, k=1,
-                                train_loader=None, optimizer=None,
-                                dataset_name=dataset, 
-                                only_marginal_likelihood_evaluation=False,
-                                only_reconstruction=True,
-                                recons_per_img=10)
-            print(f'===> Done generating multiple parse for a data')
 
         # Evaluate marginal likelihood
         if mll_eval:
             train_loader, test_loader, _,_ = util.init_dataloader(res, dataset, 
-                                                            batch_size=64)
+                                                            batch_size=2)
             print(f"===> Begin Marginal Likelihood evaluation on {dataset}")
             model = marginal_likelihoods(model=model, stats=stats, 
                             test_loader=test_loader, 
                             args=trn_args, save_imgs_dir=None, epoch=None, 
                             writer=writer, 
-                            k=1, # used for debug why the signs are different
-                            # k=200, # use for current results
+                            # k=1, # used for debug why the signs are different
+                            k=200, # use for current results
                             train_loader=train_loader, 
                             optimizer=None, scheduler=scheduler,
                             # train_loader=train_loader, optimizer=optimizer,
@@ -894,6 +992,23 @@ if __name__ == "__main__":
                             log_to_file=True,
                             test_run=test_run)
             print(f"===> Done elbo_evalution on {dataset}\n")
+    if char_con_sample:
+        train_loader, test_loader, _, _ = util.init_dataloader(res, 
+                                                        trn_args.dataset, 
+                                                        batch_size=32, 
+                                                        rot=False)
+        print(f'===> Generating multiple parse for a data')
+        trn_args.save_model_name = args.save_model_name
+        marginal_likelihoods(model=model, stats=stats, 
+                            test_loader=test_loader, 
+                            args=trn_args, save_imgs_dir=None, epoch=None, 
+                            writer=writer, k=1,
+                            train_loader=None, optimizer=None,
+                            dataset_name=dataset, 
+                            only_marginal_likelihood_evaluation=False,
+                            only_reconstruction=True,
+                            recons_per_img=10)
+        print(f'===> Done generating multiple parse for a data')
         
 
     # Evaluate classification
@@ -913,7 +1028,7 @@ if __name__ == "__main__":
             # print(f"===> Done testing on {dataset} dataset \n\n")
 
     # Unconditioned generation
-    if uncon_sample or auto_complete_demo:
+    if uncon_sample or auto_complete_demo or compute_fid:
         num_to_sample = 64
         trn_loader, _, _, _ = util.init_dataloader(res, trn_args.dataset, 
                                                     batch_size=num_to_sample,
@@ -929,6 +1044,11 @@ if __name__ == "__main__":
         #         in_img = torch.cat(in_img, dim=0)
         #         break
 
+        if compute_fid:
+            print(f"===> Begin FID eval on with {args.save_model_name}")
+            compute_fid_score(model, trn_args, trn_loader, writer)
+            
+            print(f"===> Done FID eval on with {args.save_model_name}\n")
         if uncon_sample:
             print(f"===> Begin Unconditioned generation on with {args.save_model_name}")
             unconditioned_generation(model=model, 
@@ -951,6 +1071,8 @@ if __name__ == "__main__":
                                 stats=stats,
                                 max_strks=1,
                                 )
+            partial_img = partial_img[0:4]
+            # partial_img = partial_img[0:16].repeat(4,1,1,1)
             auto_complete(model=model, 
                             args=trn_args, 
                             writer=writer, 

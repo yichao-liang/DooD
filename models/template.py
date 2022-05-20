@@ -398,8 +398,9 @@ class Guide(nn.Module):
     def print_model_statistics(self):
         # feature extractors
         print("=== Feature extractors ===")
-        tot_num_param = sum(p.numel() for p in 
-                            self.img_feature_extractor.parameters())
+        # tot_num_param = sum(p.numel() for p in 
+        #                     self.img_feature_extractor.parameters())
+        tot_num_param = util.count_parameters(self.img_feature_extractor)
         print(f"## Extractor type: {self.feature_extractor_type}")
         print(f"## Each feat. extr. has {tot_num_param} parameters")
         print(f"## [{self.use_sep_rsd_extractor}] Use seperate rsd extractor")

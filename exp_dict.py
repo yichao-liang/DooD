@@ -31,11 +31,11 @@ full_config = [
 
 models_2_cmd = {
     'VAE': [ 
-        '--model-type', 'VAE',
+        '--model_type', 'VAE',
         '--lr', '1e-4',
     ],
     'AIR': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -46,7 +46,7 @@ models_2_cmd = {
         '--save_history_ckpt',
     ],
     'AIR4_Lapl': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -58,7 +58,7 @@ models_2_cmd = {
         '--log_param',
     ],
     'AIR4_Gaus': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -72,7 +72,7 @@ models_2_cmd = {
         '--log_param',
     ],
     'AIR4_50': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -84,7 +84,7 @@ models_2_cmd = {
         '--z_dim', '50',
     ],
     'AIR4_50G': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -97,7 +97,7 @@ models_2_cmd = {
         "--likelihood_dist", 'Normal',
     ],
     'AIR4_50_mlp': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -110,7 +110,7 @@ models_2_cmd = {
         '--feature_extractor_type', 'MLP',
     ],
     'DAIR_Lapl': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -126,7 +126,7 @@ models_2_cmd = {
         '--log_param',
     ],
     'DAIR_Gaus': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -142,7 +142,7 @@ models_2_cmd = {
         "--likelihood_dist", 'Normal',
     ],
     'DAIR50': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Independent',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -157,10 +157,10 @@ models_2_cmd = {
         '--z_dim', 50,
     ],
     'MWS': [
-        '--model-type', 'MWS',
+        '--model_type', 'MWS',
     ],
     'AIR+seq_prir': [
-        '--model-type', 'AIR',
+        '--model_type', 'AIR',
         '--prior_dist', 'Sequential',
         '--lr', '1e-4', 
         '--bl_lr', '1e-3',
@@ -175,7 +175,7 @@ def args_from_kw_list(kw_config):
     '''Get the arguments for running the full model/ablations from keywords
     '''
     args = []
-    args.extend(['--model-type', 'Sequential'])
+    args.extend(['--model_type', 'Sequential'])
     # --- Prior distribution:
     args.append('--prior_dist')
     if 'sequential_prior' in kw_config:
@@ -228,11 +228,11 @@ def ablation_args():
 # Record all experiment configs
 # full_model_args = args_from_kw_list(full_config)
 # i.e. ['--prior_dist', 'Sequential', 
-    #   '--model-type', 'Sequential', 
+    #   '--model_type', 'Sequential', 
     #   '--z_what_in_pos', 'z_what_rnn',
     #   '--use_canvas']
 basic_full_model = ['--prior_dist', 'Sequential', 
-                    '--model-type', 'Sequential', 
+                    '--model_type', 'Sequential', 
                     '--use_canvas', 
                     '--z_what_in_pos', 'z_what_rnn']
 full_no_canvas = basic_full_model.copy()
@@ -632,7 +632,38 @@ exp_dict = {
             '--residual_no_target_pres',
             '--img_feat_dim', '256',
             # '--batch-size', '128',
+         ],
+    # MTmlp
+    'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmMlp-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': basic_full_model +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
 
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wt|wr', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            '--dataset', 'MNIST',
+            '--linear_sum',
+            '--num_mixtures', '40', #20M
+            '--correlated_latent', #Cor
+            # '--condition_by_img', #Imc
+            '--transform_z_what', #tranWhat
+            '--residual_no_target_pres',
+            '--img_feat_dim', '256',
+            # '--batch-size', '128',
+            '--feature_extractor_type', 'MLP',
          ],
     # MTS
     'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmNoShrg-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': basic_full_model +\
@@ -2490,7 +2521,7 @@ exp_dict = {
         ],
     'AIR-seq': 
         [
-            '--model-type', 'Sequential',
+            '--model_type', 'Sequential',
             '--prior_dist', 'Independent',
             '--no_spline_renderer',
             '--lr', '1e-4', 

@@ -190,7 +190,7 @@ class GenerativeModel(nn.Module):
         ptcs, bs = shp = imgs_dist_loc.shape[:2]
 
         imgs_dist_std = self.get_imgs_dist_std()
-        # imgs_dist_std = self.imgs_dist_std
+        # imgs_dist_std = imgs_dist_std / torch.sqrt(.5)
         # base_dist = Laplace
         if self.likelihood_dist == 'Laplace':
             base_dist = Laplace
@@ -220,15 +220,15 @@ class GenerativeModel(nn.Module):
         shp = z_pres.shape[:2]
         
         # Get rendered image: [bs, n_strk, n_channel (1), H, W]
-        imgs = self.decoder(z_what.view(prod(shp), n_strks, -1))  
-        imgs = imgs * z_pres.view(prod(shp), -1)[:, :, None, None, None]
+        imgs = self.decoder(z_what.reshape(prod(shp), n_strks, -1))  
+        imgs = imgs * z_pres.reshape(prod(shp), -1)[:, :, None, None, None]
 
         # reshape image for further processing
-        imgs = imgs.view(ptcs*bs*n_strks, 1, self.res, self.res)
+        imgs = imgs.reshape(ptcs*bs*n_strks, 1, self.res, self.res)
 
         # Get affine matrix: [bs * n_strk, 2, 3]
         z_where_mtrx = util.get_affine_matrix_from_param(
-                                z_where.view(ptcs*bs*n_strks, -1), 
+                                z_where.reshape(ptcs*bs*n_strks, -1), 
                                 self.z_where_type)
         imgs = util.inverse_spatial_transformation(imgs, z_where_mtrx)
 
@@ -236,7 +236,7 @@ class GenerativeModel(nn.Module):
         # [bs*n_strk, n_channel (1), H, W]
 
         # Change back to [bs, n_strk, n_channel (1), H, W]
-        imgs = imgs.view(ptcs*bs, n_strks, 1, self.res, self.res)
+        imgs = imgs.reshape(ptcs*bs, n_strks, 1, self.res, self.res)
 
         # Change to [bs, n_channel (1), H, W] through `sum`
         imgs = imgs.sum(1) 
@@ -246,7 +246,7 @@ class GenerativeModel(nn.Module):
             assert not imgs.isnan().any()
         except:
             breakpoint()
-        return imgs.view(*shp, 1, self.res, self.res)
+        return imgs.reshape(*shp, 1, self.res, self.res)
 
     def renders_glimpses(self, z_what):
         '''Get glimpse reconstruction from z_what control points

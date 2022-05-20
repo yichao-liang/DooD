@@ -405,7 +405,7 @@ class GenerativeModel(nn.Module):
                 tril = tril.view(*bs, n_comp, wr_dim, wr_dim)
 
                 if sample or self.constrain_var:
-                    print("cons where")
+                    # print("cons where")
                     cov = tril @ tril.transpose(-1,-2)
                     # print("where cov", cov)
                     cov[:,:,:2] = cov[:,:,:2] * 0.01 # shift
@@ -474,19 +474,19 @@ class GenerativeModel(nn.Module):
                 tril = tril.view([*bs, pts_per_strk, n_comp, 2, 2])
                 
                 if sample or self.constrain_var:
-                    print("cons what")
+                    # print("cons what")
                     cov = tril @ tril.transpose(-1,-2)
                     # cov = cov * .01
                     tv = torch.gather(cov[...,0,0], 2, 
                                             pi.max(2)[1].unsqueeze(-1))
                     tc = torch.gather(cov[...,0,1], 2, 
                                             pi.max(2)[1].unsqueeze(-1))
-                    print(f"top_var: max={tv.max()}")
-                    print(f"top_var: min={tv.min()}")
-                    print(f"top_var: mean={tv.mean()}")
-                    print(f"top_cov: max={tc.max()}")
-                    print(f"top_cov: min={tc.min()}")
-                    print(f"top_cov: mean={tc.mean()}")
+                    # print(f"top_var: max={tv.max()}")
+                    # print(f"top_var: min={tv.min()}")
+                    # print(f"top_var: mean={tv.mean()}")
+                    # print(f"top_cov: max={tc.max()}")
+                    # print(f"top_cov: min={tc.min()}")
+                    # print(f"top_cov: mean={tc.mean()}")
                     # print("what cov:", cov)
                     cov[:, 2] = cov[:, 2] * .01
                     cov[:, :2] = cov[:, :2] * .01
@@ -878,7 +878,7 @@ class GenerativeModel(nn.Module):
         #     log_likelihood = F.binary_cross_entropy(rec, imgs,reduction='none'
         #                                             ).sum([2,3,4])
         # else:
-        imgs = torch.clamp(imgs, min=0., max=1.)
+        # imgs = torch.clamp(imgs, min=0., max=1.)
         log_likelihood = self.img_dist(latents=latents, 
                                        canvas=canvas).log_prob(imgs)
 
@@ -958,7 +958,7 @@ class GenerativeModel(nn.Module):
             else:
                 max_steps = max_strks
             for t in range(max_steps):
-                print(f"sampling time {t}")
+                # print(f"sampling time {t}")
 
                 result = self.generation_step(state, 
                                               canvas, 
@@ -1544,6 +1544,7 @@ class Guide(template.Guide):
                         use_bezier_rnn=False,
                         condition_by_img=True,
                         residual_no_target_pres=True,
+                        feature_extractor_type='CNN',
                 ):
         '''
         Args:
@@ -1588,6 +1589,7 @@ class Guide(template.Guide):
                 only_rsd_ratio_pres=only_rsd_ratio_pres,
                 no_what_post_rnn=no_what_post_rnn,
                 no_pres_post_rnn=no_pres_post_rnn,
+                feature_extractor_type=feature_extractor_type,
                 )
         # Parameters
         # self.constrain_param = constrain_param

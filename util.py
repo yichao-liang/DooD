@@ -36,7 +36,22 @@ logging.basicConfig(
 
 ZWhereParam = collections.namedtuple("ZWhereParam", "loc std dim")
 ZSample = namedtuple("ZSample", "z_pres z_what z_where")
+DecoderParam = namedtuple("DecoderParam", "sigma slope")
 
+def count_parameters(model): 
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def normlized_exp(x):
+    '''When given a batch of log numbers, return a batch of normalized(exp(x)) 
+    numbers that sum to 1 for each row
+    Args:
+        x: [bs, ptcs]
+    Return: [bs, ptcs] -- sum to 1 for each row
+    '''
+    b = x.max(dim=1)[0][:,None]
+    y = torch.exp(x - b)
+    return y / y.sum(-1, keepdim=True)
+    
 def get_last_vars(hs, z_smpl):
     '''Get the last vars with z_pres == 1 for each entry
     hs: 
@@ -82,7 +97,7 @@ def get_last_vars(hs, z_smpl):
     return h_state, latents
     
            
-def get_top_k_latents_hiddens(guide, gen, img, ptcs, k=1):
+def get_top_latents_hiddens(guide, gen, img, ptcs, crit='likelihood'):
     '''choose top k latents from ptcs
     '''
     out = guide(img, ptcs)
@@ -90,20 +105,27 @@ def get_top_k_latents_hiddens(guide, gen, img, ptcs, k=1):
                                     out.z_smpl, out.mask_prev,
                                     out.canvas,out.z_prior, out.hidden_states,
                                     out.decoder_param, out.z_lprb, out.canvas)
-    # log_post_z = torch.cat([prob.sum(-1, keepdim=True) for prob in log_post], 
-    #                     dim=-1).sum(-1)
+    log_post_z = torch.cat([prob.sum(-1, keepdim=True) for prob in log_post], 
+                        dim=-1).sum(-1)
     log_prior, log_lld = gen.log_prob(latents=latents,
                                     imgs=img,
                                     z_pres_mask=mask_prev,
                                     canvas=canvas,
                                     z_prior=z_prior)
-    # log_prior_z = torch.cat([prob.sum(-1, keepdim=True) for prob in 
-    #                         log_prior], dim=-1).sum(-1)
-    # generative_joint_log_prob = (log_lld + log_prior_z)
-    # elbo = - log_post_z + generative_joint_log_prob
+    log_prior_z = torch.cat([prob.sum(-1, keepdim=True) for prob in 
+                            log_prior], dim=-1).sum(-1)
+    generative_joint_log_prob = (log_lld + log_prior_z)
+    elbo = - log_post_z + generative_joint_log_prob
 
     # [bs]
-    idx = log_lld.argmax(dim=0)
+    if crit == 'joint':
+        idx = generative_joint_log_prob.argmax(dim=0)
+        tp_prob = generative_joint_log_prob.max(dim=0)[0]
+    elif crit == 'likelihood':
+        idx = log_lld.argmax(dim=0)
+        tp_prob = torch.gather(generative_joint_log_prob, 0, idx[None,])
+        
+    ave_elbos = torch.logsumexp(elbo, dim=0) - torch.log(torch.tensor(ptcs))
     # idx = elbo.argmax(dim=0)
     s, w, p = guide.max_strks, guide.z_where_dim, guide.pts_per_strk
     # select zs
@@ -138,10 +160,19 @@ def get_top_k_latents_hiddens(guide, gen, img, ptcs, k=1):
     # h_cs = h_cs.squeeze(-2).squeeze(0)
     tp_hs = (h_ls, h_cs)
 
+    # select dec_param
+    tp_sigma = torch.gather(dec_param[0], 0, idx[None,:,None].repeat(1,1,s))
+    tp_strk_tanh = torch.gather(dec_param[1][0], 0,
+                                idx[None,:,None].repeat(1,1,s))
+    tp_add_tanh = torch.gather(dec_param[1][1], 0,
+                               idx[None,:,None].repeat(1,1,s))
+    tp_dec_param = DecoderParam(
+                               sigma=tp_sigma,
+                               slope=(tp_strk_tanh, tp_add_tanh))
     # select reconstruction
     tp_rec = torch.gather(rec,0,idx[None,:,None,None,None].repeat(1,1,1,50,50))
 
-    return tp_zs, tp_hs, dec_param, tp_rec
+    return tp_zs, tp_hs, tp_dec_param, tp_rec, tp_prob, ave_elbos
 
 def get_top_k_latents(guide, gen, img, ptcs, k=1):
     '''choose top k latents from ptcs
@@ -329,7 +360,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True,
         np.random.seed(worker_seed)
         random.seed(worker_seed)
     g = torch.Generator()
-    g.manual_seed(8)
+    g.manual_seed(7)
 
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, 
                                 shuffle=True if shuffle else False, 
@@ -342,7 +373,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True,
     
     return train_loader, test_loader, trn_dataset, tst_dataset
 
-def init_ontshot_clf_data_loader(res):
+def init_ontshot_clf_data_loader(res, shuffle=False):
     trn_transform_lst = [
                             # transforms.Resize([120, 120], antialias=True),
                             transforms.Resize([res, res], antialias=True),
@@ -354,7 +385,8 @@ def init_ontshot_clf_data_loader(res):
                         transforms.ToTensor(),
                         transforms.Lambda(lambda x: 1-x),
                         transforms.ToPILImage(mode=None)]+ trn_transform_lst),
-            batch_size=1)
+            batch_size=1,
+            shuffle=shuffle)
     return data_loader
 
 def init_classification_nets(guide, args, dataset, batch_size, trned_ite):
@@ -572,6 +604,19 @@ def debug_gradient(name, param, imgs, guide, generative_model, optimizer,
                             )
                 breakpoint()
         va = 1+1
+
+
+def get_affines(logits):
+    '''logits [ps, bs, strks, 7]
+    '''
+    shift = constrain_parameter(logits[...,:2], -.1, .1)
+    # good for om
+    # scale = constrain_parameter(logits[...,2:4], .8, 1.2)
+    # good for qd
+    scale = constrain_parameter(logits[...,2:4], .9, 1.1)
+    rot = constrain_parameter(logits[...,4:5], -.1*math.pi, .1*math.pi)
+    shear = constrain_parameter(logits[...,5:7], -.1*math.pi, .1*math.pi)
+    return torch.cat([shift,scale,rot,shear], dim=3)
 
 def transform_z_what(z_what, z_where, z_where_type):
     '''Apply z_where_mtrx to z_what such that it has a similar result as
@@ -900,6 +945,7 @@ def init(run_args, device, init_data_loader=True):
                 use_bezier_rnn=run_args.use_bezier_rnn,
                 condition_by_img=run_args.condition_by_img,
                 residual_no_target_pres=run_args.residual_no_target_pres,
+                feature_extractor_type=run_args.feature_extractor_type,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         generative_model = air.GenerativeModel(
