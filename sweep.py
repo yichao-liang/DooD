@@ -74,6 +74,8 @@ if __name__ == '__main__':
         # 'MDT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         # '1MNCT': 'Full-spDec-sq1MImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MT': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTa1': 'Full-spDec-indPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
+        'MTa3': 'Full-spDec-sq40MCorPrior-dp-tr-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         'MTmlp': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmMlp-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         # 'MTL': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmL-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',
         # 'MTL2': 'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmL-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk',

@@ -151,13 +151,15 @@ def plot_reconstructions(imgs:torch.Tensor,
                                                        (generative_model,
                                                               guide), 
                                                        crit='likelihood',
-                                                       n_parse=1, 
+                                                       n_parse=recons_per_img, 
                                                        device=args.device)
             recon_canvas = None
         else:
             guide_out = guide(imgs, num_particles=recons_per_img)#, writer=writer)
             latent = guide_out.z_smpl
-            dec_params = guide_out.decoder_param
+            dec_params = None
+            if args.model_type == 'Sequential':
+                dec_params = guide_out.decoder_param
             recon_canvas = guide_out.canvas
         if recons_per_img > 1:
             # when plotting multiple recons, stepwise progression is not shown
@@ -326,9 +328,13 @@ def plot_reconstructions(imgs:torch.Tensor,
     if save_as_individual_img:
         bs = comparision.shape[0]
         for i in range(bs):
-            save_img_dir = util.get_save_test_img_dir(args, epoch, 
-                                               prefix='reconstruction',
-                                               suffix=f'{writer_tag}_{i}')
+            # usual
+            # save_img_dir = util.get_save_test_img_dir(args, epoch, 
+            #                                    prefix='reconstruction',
+            #                                    suffix=f'{writer_tag}_{i}')
+            # temp
+            save_img_dir = f'/om/user/ycliang/temp_img/{args.dataset}/'+\
+                            f'recon_{writer_tag}_{i}.pdf'
             save_image(comparision[i], save_img_dir)
     else:
         save_imgs_dir = util.get_save_test_img_dir(args, epoch, 
@@ -378,7 +384,7 @@ def plot_reconstructions(imgs:torch.Tensor,
 def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer, 
                    dataset_name, epoch, tag2, tag1='Cummulative Reconstruction',
                    invert_color=True, save_as_individual_img=False,
-                   render_write_window=False, render_z_pres=False):
+                   render_write_window=True, render_z_pres=True):
     _, n, n_strks = latent.z_pres.shape
     res = gen.res
     
@@ -436,9 +442,12 @@ def plot_cum_recon(args, imgs, gen, latent, z_where_type, writer,
     if save_as_individual_img:
         bs = cum_recon_img.shape[0]
         for i in range(bs):
-            save_img_dir = util.get_save_test_img_dir(args, epoch, 
-                                            prefix='cum_reconstruction',
-                                            suffix=f'{tag2}_{dataset_name}_{i}')
+            # save_img_dir = util.get_save_test_img_dir(args, epoch, 
+            #                                 prefix='cum_reconstruction',
+            #                                 suffix=f'{tag2}_{dataset_name}_{i}')
+            # temp
+            save_img_dir = f'/om/user/ycliang/temp_img/{args.dataset}/'+\
+                        f'cum_recon_{tag2}_{dataset_name}_{i}.pdf'
             save_image(cum_recon_img[i], save_img_dir)
     else:
         save_imgs_dir = util.get_save_test_img_dir(args, epoch, 
@@ -461,8 +470,8 @@ def plot_multi_recon(imgs, latent, dec_param, args, gen, dataset_name,
     res = gen.res
     z_pres, z_what, z_where = latent
     # latent = pr.repeat(ptcs,1,1),wt.repeat(ptcs,1,1,1,1),wr.repeat(ptcs,1,1,1)
-    add_motor_noise, add_render_noise, add_affine_noise = True, True, True
-
+    add_motor_noise, add_render_noise, add_affine_noise = True, False, True
+    add_render_noise = dataset_name == 'Quickdraw'
     # _, log_likelihood = gen.log_prob(latents=latent, 
     #                                 imgs=imgs,
     #                                 z_pres_mask=guide_out.mask_prev,
@@ -566,9 +575,10 @@ def plot_multi_recon(imgs, latent, dec_param, args, gen, dataset_name,
     else:
         tag = f'Multi-reconstruction/{writer_tag}'
     writer.add_image(tag, img_grid, epoch)
-    save_imgs_dir = util.get_save_test_img_dir(args, epoch=None,
-                                               prefix='char_con_generation',
-                                               suffix=f'out')
+    # save_imgs_dir = util.get_save_test_img_dir(args, epoch=None,
+    #                                            prefix='char_con_generation',
+    #                                            suffix=f'out')
+    save_imgs_dir = f'/om/user/ycliang/char-con_gen/{args.save_model_name}.pdf'
     save_image(img_grid, save_imgs_dir, nrow=32)
 
     # all_ref_img = []

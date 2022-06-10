@@ -105,6 +105,15 @@ def get_top_latents_hiddens(guide, gen, img, ptcs, crit='likelihood'):
                                     out.z_smpl, out.mask_prev,
                                     out.canvas,out.z_prior, out.hidden_states,
                                     out.decoder_param, out.z_lprb, out.canvas)
+
+    if (canvas is None and gen.input_dependent_param):
+        # If we haven't rendered the final reconstruction AND we have
+        # predicted render parameters
+        gen.sigma = dec_param.sigma
+        gen.sgl_strk_tanh_slope = dec_param.slope[0]
+        gen.add_strk_tanh_slope = dec_param.slope[1][:, :, -1]
+        rec = gen.renders_imgs(latents)
+
     log_post_z = torch.cat([prob.sum(-1, keepdim=True) for prob in log_post], 
                         dim=-1).sum(-1)
     log_prior, log_lld = gen.log_prob(latents=latents,
@@ -360,7 +369,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True,
         np.random.seed(worker_seed)
         random.seed(worker_seed)
     g = torch.Generator()
-    g.manual_seed(7)
+    g.manual_seed(8)
 
     train_loader = DataLoader(trn_dataset, batch_size=batch_size, 
                                 shuffle=True if shuffle else False, 
@@ -856,6 +865,10 @@ def init(run_args, device, init_data_loader=True):
         # assert ((run_args.use_canvas == (not run_args.no_sgl_strk_tanh)) or
         #         not run_args.use_canvas),\
             # "use_canvas should be used in accordance with strk_tanh norm"
+        if run_args.no_spline_renderer and run_args.dataset != 'MNIST':
+            run_args.likelihood_dist = 'Normal'
+            print("## Using Normal image distribution")
+            
         hid_dim = run_args.hid_dim
         img_feat_dim = run_args.img_feat_dim
         generative_model = ssp.GenerativeModel(
@@ -889,6 +902,7 @@ def init(run_args, device, init_data_loader=True):
                     use_bezier_rnn=run_args.use_bezier_rnn,
                     condition_by_img=run_args.condition_by_img,
                     dataset=run_args.dataset,
+                    likelihood_dist=run_args.likelihood_dist,
                                     ).to(device)
         guide = ssp.Guide(
                 max_strks=int(run_args.strokes_per_img),
@@ -945,7 +959,8 @@ def init(run_args, device, init_data_loader=True):
                 use_bezier_rnn=run_args.use_bezier_rnn,
                 condition_by_img=run_args.condition_by_img,
                 residual_no_target_pres=run_args.residual_no_target_pres,
-                feature_extractor_type=run_args.feature_extractor_type,
+                # feature_extractor_type=run_args.feature_extractor_type,
+                likelihood_dist=run_args.likelihood_dist,
                                 ).to(device)
     elif run_args.model_type == 'AIR':
         generative_model = air.GenerativeModel(
@@ -1498,7 +1513,7 @@ def get_affine_matrix_from_param(thetas, z_where_type, center=None):
     Args:
         thetas [bs, z_where_dim]
         z_where_type::str:
-            '3': (scale, shift x, y)
+            '3': (shift x, y; scale)
             '4_rotate': (shift x, y, scale, rotate) or 
             '4_no_rotate': (scale x, y, shift x, y)
             '5': (scale x, y, shift x, y, rotate)

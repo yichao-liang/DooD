@@ -633,6 +633,67 @@ exp_dict = {
             '--img_feat_dim', '256',
             # '--batch-size', '128',
          ],
+    # MTa1: ablation 1: full - sequential prior
+    'Full-spDec-indPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': basic_full_model +\
+        [
+            '--prior_dist', 'Independent',
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            '--detach_canvas_so_far', # detachRsdNotRsdEm
+            '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            '--use_residual', # detachRsdNotRsdEm
+            '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wt|wr', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            '--dataset', 'MNIST',
+            '--linear_sum',
+            '--num_mixtures', '40', #20M
+            '--correlated_latent', #Cor
+            '--condition_by_img', #Imc
+            '--transform_z_what', #tranWhat
+            '--residual_no_target_pres',         
+            '--img_feat_dim', '256',
+            ],
+    # MTa3: ablation 3: full - intermediate rendering
+    'Full-spDec-sq40MCorPrior-dp-tr-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': full_no_canvas +\
+        [
+            '--anneal_lr', # anNonPrLr
+            '--anneal_non_pr_net_lr', # anNonPrLr
+            '--log_param',
+            # '--detach_canvas_so_far', # detachRsdNotRsdEm
+            '--no_pres_rnn',
+            '--no_pres_post_rnn', # noPrPosRnn
+
+            # '--use_residual', # detachRsdNotRsdEm
+            # '--residual_pixel_count', # detachRsdNotRsdEm
+            # '--detach_rsd_embed', #detachRsdNotRsdEm
+            '--update_reinforce_loss', # normRfLoss
+            '--sep_where_pres_net', # sepPrWrNet
+            '--dependent_prior', # dp
+            '--prior_dependency', 'wt|wr', # t|r
+            '--save_history_ckpt',
+            '--strokes_per_img', '6', # 6strk
+            # '--residual_no_target', # noTarget
+            # '--no_what_post_rnn', # noWtPrPosRnn
+            '--dataset', 'MNIST',
+            '--linear_sum',
+            '--num_mixtures', '40', #20M
+            '--correlated_latent', #Cor
+            # '--condition_by_img', #Imc
+            '--transform_z_what', #tranWhat
+            # '--residual_no_target_pres',         
+            '--img_feat_dim', '256',
+            ],
     # MTmlp
     'Full-spDec-sq40MCorImcPrior-dp-tr-detachRsdNotRsdEmMlp-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk': basic_full_model +\
         [

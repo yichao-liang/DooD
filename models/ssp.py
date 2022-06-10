@@ -78,8 +78,10 @@ class GenerativeModel(nn.Module):
                                                 constrain_var=False,
                                                 dataset='MNIST',
                                                 generate_data=False,
+                                                likelihood_dist='Laplace',
                                                     ):
         super().__init__()
+        self.likelihood_dist = likelihood_dist
         self.max_strks = max_strks
         self.pts_per_strk = pts_per_strk
         self.use_canvas = use_canvas
@@ -589,16 +591,15 @@ class GenerativeModel(nn.Module):
             # [bs, n_canvas, n_channel, res, res]
             imgs_dist_std = self.get_imgs_dist_std().repeat(*shp, 1, 1, 1, 1)
 
-        try:
-            if self.bern_img_dist:
-                dist = Independent(ContinuousBernoulli(imgs_dist_loc),
+        if self.likelihood_dist == 'Laplace':
+            base_dist = Laplace
+        elif self.likelihood_dist == 'Normal':
+            base_dist = Normal
+        else:
+            raise NotImplementedError
+
+        dist = Independent(base_dist(imgs_dist_loc, imgs_dist_std), 
                                                 reinterpreted_batch_ndims=3)
-            else:
-                dist = Independent(Laplace(imgs_dist_loc, imgs_dist_std), 
-                                                reinterpreted_batch_ndims=3)
-        except ValueError as e:
-            print(e, "Invalid scale parameters {imgs_dist_std}")
-            breakpoint()
 
         if canvas is not None and self.intr_ll is not None:
             batch_size = [*shp, self.max_strks]
@@ -1545,12 +1546,14 @@ class Guide(template.Guide):
                         condition_by_img=True,
                         residual_no_target_pres=True,
                         feature_extractor_type='CNN',
+                        likelihood_dist='Laplace',
                 ):
         '''
         Args:
             intermediate_likelihood:str: [None, 'Mean', 'Geom' (for Geometric 
                 distribution like averaging)]
         '''
+        self.likelihood_dist = likelihood_dist
         self.pts_per_strk = pts_per_strk
         self.z_what_dim = self.pts_per_strk * 2
         self.linear_sum = linear_sum
@@ -1589,7 +1592,6 @@ class Guide(template.Guide):
                 only_rsd_ratio_pres=only_rsd_ratio_pres,
                 no_what_post_rnn=no_what_post_rnn,
                 no_pres_post_rnn=no_pres_post_rnn,
-                feature_extractor_type=feature_extractor_type,
                 )
         # Parameters
         # self.constrain_param = constrain_param
@@ -1633,6 +1635,7 @@ class Guide(template.Guide):
                                             correlated_latent=correlated_latent,
                                             use_bezier_rnn=use_bezier_rnn,
                                             condition_by_img=condition_by_img,
+                                            likelihood_dist=likelihood_dist
                                         )
         # Inference networks
         # Style_mlp:

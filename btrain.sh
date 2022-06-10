@@ -70,9 +70,10 @@
 # sbatch -J syT execute.sh python sweep.py -m MT --beta 4 -ds sy --seed 3 -trn
 # sbatch -J syT execute.sh python sweep.py -m MT --beta 4 -ds sy --seed 4 -trn
 
-sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 0 -trn
-sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 1 -trn
-sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 2 -trn
+# sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 0 -trn -ct
+# sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 1 -trn -ct
+# sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 2 -trn -ct
+
 
 # AIR
 # sbatch -J Amn execute.sh python sweep.py -m AIR_l --beta 5 -ds mn --seed 0 -trn -ct
@@ -142,20 +143,92 @@ sbatch -J MTmlp execute.sh python sweep.py -m MTmlp --beta 4 -ds mn --seed 2 -tr
 # sbatch -J Dom execute.sh python sweep.py -m DAIR_g --beta 4 -ds om --seed 4 -trn
 
 # Ablations
-# sbatch -J mnAb1 execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 0 -trn -ct
-# sbatch -J mnAb1 execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 1 -trn -ct
-# sbatch -J mnAb1 execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 2 -trn -ct
-# sbatch -J mnAb1 execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 3 -trn -ct
-# sbatch -J mnAb1 execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 4 -trn -ct
+# sbatch -J Ab1mn execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 0 -trn -ct
+# sbatch -J Ab1mn execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 1 -trn -ct
+# sbatch -J Ab1mn execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 2 -trn -ct
+# sbatch -J Ab1mn execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 3 -trn -ct
+# sbatch -J Ab1mn execute.sh python sweep.py -m Ma1 --beta 4 -ds mn --seed 4 -trn -ct
 
-# sbatch -J mnAb2 execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 0 -trn -ct
-# sbatch -J mnAb2 execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 1 -trn -ct
-# sbatch -J mnAb2 execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 2 -trn -ct
-# sbatch -J mnAb2 execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 5 -trn -ct
-# sbatch -J mnAb2 execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 6 -trn -ct
+# sbatch -J Ab1om execute.sh python sweep.py -m MTa1 --beta 4 -ds om --seed 0 -trn
+# sbatch -J Ab1om execute.sh python sweep.py -m MTa1 --beta 4 -ds om --seed 1 -trn
+# sbatch -J Ab1om execute.sh python sweep.py -m MTa1 --beta 4 -ds om --seed 2 -trn
+# sbatch -J Ab1om execute.sh python sweep.py -m MTa1 --beta 4 -ds om --seed 3 -trn
+# sbatch -J Ab1om execute.sh python sweep.py -m MTa1 --beta 4 -ds om --seed 4 -trn
 
-# sbatch -J mnAb3 execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 0 -trn -ct
-# sbatch -J mnAb3 execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 1 -trn -ct
-# sbatch -J mnAb3 execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 2 -trn -ct
-# sbatch -J mnAb3 execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 3 -trn -ct
-# sbatch -J mnAb3 execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 4 -trn -ct
+# sbatch -J Ab1qd execute.sh python sweep.py -m MTa1 --beta 4 -ds qd --seed 0 -trn -ct
+# sbatch -J Ab1qd execute.sh python sweep.py -m MTa1 --beta 4 -ds qd --seed 1 -trn -ct
+# sbatch -J Ab1qd execute.sh python sweep.py -m MTa1 --beta 4 -ds qd --seed 2 -trn -ct
+# sbatch -J Ab1qd execute.sh python sweep.py -m MTa1 --beta 4 -ds qd --seed 3 -trn -ct
+# sbatch -J Ab1qd execute.sh python sweep.py -m MTa1 --beta 4 -ds qd --seed 4 -trn -ct
+
+# sbatch -J Ab1km execute.sh python sweep.py -m MTa1 --beta 4 -ds km --seed 0 -trn -ct
+# sbatch -J Ab1km execute.sh python sweep.py -m MTa1 --beta 4 -ds km --seed 1 -trn -ct
+# sbatch -J Ab1km execute.sh python sweep.py -m MTa1 --beta 4 -ds km --seed 2 -trn -ct
+# sbatch -J Ab1km execute.sh python sweep.py -m MTa1 --beta 4 -ds km --seed 3 -trn -ct
+# sbatch -J Ab1km execute.sh python sweep.py -m MTa1 --beta 4 -ds km --seed 4 -trn -ct
+
+# sbatch -J Ab1em execute.sh python sweep.py -m MTa1 --beta 4 -ds em --seed 0 -trn -ct
+# sbatch -J Ab1em execute.sh python sweep.py -m MTa1 --beta 4 -ds em --seed 1 -trn -ct
+# sbatch -J Ab1em execute.sh python sweep.py -m MTa1 --beta 4 -ds em --seed 2 -trn -ct
+# sbatch -J Ab1em execute.sh python sweep.py -m MTa1 --beta 4 -ds em --seed 3 -trn -ct
+# sbatch -J Ab1em execute.sh python sweep.py -m MTa1 --beta 4 -ds em --seed 4 -trn -ct
+
+# sbatch -J Ab2mn execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 0 -trn -ct
+# sbatch -J Ab2mn execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 1 -trn -ct
+# sbatch -J Ab2mn execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 2 -trn -ct
+# sbatch -J Ab2mn execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 5 -trn -ct
+# sbatch -J Ab2mn execute.sh python sweep.py -m Ma2 --beta 4 -ds mn --seed 6 -trn -ct
+
+# sbatch -J Ab2om execute.sh python sweep.py -m Ma2 --beta 4 -ds om --seed 0 -trn
+# sbatch -J Ab2om execute.sh python sweep.py -m Ma2 --beta 4 -ds om --seed 1 -trn
+# sbatch -J Ab2om execute.sh python sweep.py -m Ma2 --beta 4 -ds om --seed 2 -trn
+# sbatch -J Ab2om execute.sh python sweep.py -m Ma2 --beta 4 -ds om --seed 3 -trn
+# sbatch -J Ab2om execute.sh python sweep.py -m Ma2 --beta 4 -ds om --seed 4 -trn
+
+# sbatch -J Ab2qd execute.sh python sweep.py -m Ma2 --beta 4 -ds qd --seed 0 -trn
+# sbatch -J Ab2qd execute.sh python sweep.py -m Ma2 --beta 4 -ds qd --seed 1 -trn
+# sbatch -J Ab2qd execute.sh python sweep.py -m Ma2 --beta 4 -ds qd --seed 2 -trn
+# sbatch -J Ab2qd execute.sh python sweep.py -m Ma2 --beta 4 -ds qd --seed 3 -trn
+# sbatch -J Ab2qd execute.sh python sweep.py -m Ma2 --beta 4 -ds qd --seed 4 -trn
+
+# sbatch -J Ab2km execute.sh python sweep.py -m Ma2 --beta 4 -ds km --seed 0 -trn
+# sbatch -J Ab2km execute.sh python sweep.py -m Ma2 --beta 4 -ds km --seed 1 -trn
+# sbatch -J Ab2km execute.sh python sweep.py -m Ma2 --beta 4 -ds km --seed 2 -trn
+# sbatch -J Ab2km execute.sh python sweep.py -m Ma2 --beta 4 -ds km --seed 3 -trn
+# sbatch -J Ab2km execute.sh python sweep.py -m Ma2 --beta 4 -ds km --seed 4 -trn
+
+# sbatch -J Ab2em execute.sh python sweep.py -m Ma2 --beta 4 -ds em --seed 0 -trn
+# sbatch -J Ab2em execute.sh python sweep.py -m Ma2 --beta 4 -ds em --seed 1 -trn
+# sbatch -J Ab2em execute.sh python sweep.py -m Ma2 --beta 4 -ds em --seed 2 -trn
+# sbatch -J Ab2em execute.sh python sweep.py -m Ma2 --beta 4 -ds em --seed 3 -trn
+# sbatch -J Ab2em execute.sh python sweep.py -m Ma2 --beta 4 -ds em --seed 4 -trn
+
+# sbatch -J Ab3mn execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 0 -trn -ct
+# sbatch -J Ab3mn execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 1 -trn -ct
+# sbatch -J Ab3mn execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 2 -trn -ct
+# sbatch -J Ab3mn execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 3 -trn -ct
+# sbatch -J Ab3mn execute.sh python sweep.py -m Ma3 --beta 4 -ds mn --seed 4 -trn -ct
+
+# sbatch -J Ab3om execute.sh python sweep.py -m MTa3 --beta 4 -ds om --seed 0 -trn -ct
+# sbatch -J Ab3om execute.sh python sweep.py -m MTa3 --beta 4 -ds om --seed 1 -trn -ct
+# sbatch -J Ab3om execute.sh python sweep.py -m MTa3 --beta 4 -ds om --seed 2 -trn -ct
+# sbatch -J Ab3om execute.sh python sweep.py -m MTa3 --beta 4 -ds om --seed 3 -trn -ct
+# sbatch -J Ab3om execute.sh python sweep.py -m MTa3 --beta 4 -ds om --seed 4 -trn -ct
+ 
+# sbatch -J Ab3qd execute.sh python sweep.py -m MTa3 --beta 4 -ds qd --seed 0 -trn -ct
+# sbatch -J Ab3qd execute.sh python sweep.py -m MTa3 --beta 4 -ds qd --seed 1 -trn -ct
+# sbatch -J Ab3qd execute.sh python sweep.py -m MTa3 --beta 4 -ds qd --seed 2 -trn -ct
+# sbatch -J Ab3qd execute.sh python sweep.py -m MTa3 --beta 4 -ds qd --seed 3 -trn -ct
+# sbatch -J Ab3qd execute.sh python sweep.py -m MTa3 --beta 4 -ds qd --seed 4 -trn -ct
+ 
+# sbatch -J Ab3km execute.sh python sweep.py -m MTa3 --beta 4 -ds km --seed 0 -trn -ct
+# sbatch -J Ab3km execute.sh python sweep.py -m MTa3 --beta 4 -ds km --seed 1 -trn -ct
+# sbatch -J Ab3km execute.sh python sweep.py -m MTa3 --beta 4 -ds km --seed 2 -trn -ct
+# sbatch -J Ab3km execute.sh python sweep.py -m MTa3 --beta 4 -ds km --seed 3 -trn -ct
+# sbatch -J Ab3km execute.sh python sweep.py -m MTa3 --beta 4 -ds km --seed 4 -trn -ct
+ 
+# sbatch -J Ab3em execute.sh python sweep.py -m MTa3 --beta 4 -ds em --seed 0 -trn -ct
+# sbatch -J Ab3em execute.sh python sweep.py -m MTa3 --beta 4 -ds em --seed 1 -trn -ct
+# sbatch -J Ab3em execute.sh python sweep.py -m MTa3 --beta 4 -ds em --seed 2 -trn -ct
+# sbatch -J Ab3em execute.sh python sweep.py -m MTa3 --beta 4 -ds em --seed 3 -trn -ct
+# sbatch -J Ab3em execute.sh python sweep.py -m MTa3 --beta 4 -ds em --seed 4 -trn -ct

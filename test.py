@@ -213,7 +213,7 @@ def marginal_likelihoods(model, stats, test_loader, args,
                     dataset=test_loader.dataset,
                     invert_color=True,
                     save_as_individual_img=save_as_individual_img,
-                    multi_sample=only_reconstruction,
+                    multi_sample=(only_reconstruction and args.model_type != 'AIR'),
                 )
 
         if log_to_file:
@@ -453,9 +453,10 @@ def unconditioned_generation(model, args, writer, in_img, stats,
             gen_img_grid = 1 - gen_img_grid
             writer.add_image(f'Unconditioned Generation/out_img', gen_img_grid, 
                             ite_so_far)
-            save_imgs_dir = util.get_save_test_img_dir(args, ite_so_far, 
-                                               prefix='uncon_generation',
-                                               suffix=f'out')
+            # save_imgs_dir = util.get_save_test_img_dir(args, ite_so_far, 
+            #                                    prefix='uncon_generation',
+            #                                    suffix=f'out')
+            save_imgs_dir=f'/om/user/ycliang/uncon_gen/{args.save_model_name}.pdf'
             save_image(gen_img_grid, save_imgs_dir, nrow=NROW)
             # cummulative rendering
             plot.plot_cum_recon(args=args, imgs=None, gen=gen, 
@@ -872,8 +873,8 @@ if __name__ == "__main__":
     # Choose the tasks to test on
     test_run = False
     # broad generalization
-    mll_eval = True
-    recon_eval = False
+    mll_eval = False
+    recon_eval = True
     save_as_individual_img = True
     num_strokes_eval = False # plot a distribution of number of strokes / dataset
     clf_eval = False
