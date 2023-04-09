@@ -22,7 +22,7 @@ import matplotlib.pylab as plt
 import util, plot, losses, train
 from plot import display_transform
 from plot import save_img_debug as sid
-from models.mws.handwritten_characters.train import get_log_p_and_kl
+# from models.mws.handwritten_characters.train import get_log_p_and_kl
 from models.template import ZSample, ZLogProb
 from models.ssp import SampleCurveDist, AffineSampleCurveDist, \
             SampleCurveDistWithAffine
@@ -468,7 +468,7 @@ def unconditioned_generation(model, args, writer, in_img, stats,
         return gen_imgs
 
 def one_shot_classification(model, args, writer, its_so_far, 
-                            do_fine_tune=False):
+                            do_fine_tune=False, two_way_clf=False):
     '''Perform one shot clf as in Omniglot challenge
     '''
     from train import save
@@ -502,7 +502,7 @@ def one_shot_classification(model, args, writer, its_so_far,
                                     args, model, tst_loader, writer, 
                                     n_parse_per_ite=n_parse_per_ite, 
                                     run_per_eps=run_per_eps,
-                                    two_way_clf=False,
+                                    two_way_clf=two_way_clf,
                                     optimize=True, 
                                     tag="After Finutune")
         # get pred
@@ -874,15 +874,15 @@ if __name__ == "__main__":
     test_run = False
     # broad generalization
     mll_eval = False
-    recon_eval = True
-    save_as_individual_img = True
+    recon_eval = False
+    save_as_individual_img = False
     num_strokes_eval = False # plot a distribution of number of strokes / dataset
     clf_eval = False
     # deep generalization
     uncon_sample = False
     auto_complete_demo = False
     char_con_sample = False
-    one_shot_clf_eval = False
+    one_shot_clf_eval = True
     plot_tsne = False
     compute_fid = False
 

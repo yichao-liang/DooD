@@ -11,9 +11,8 @@ import plot
 import losses
 import test
 from models import base, air
-from models.mws.handwritten_characters.losses import get_mws_loss
+# from models.mws.handwritten_characters.losses import get_mws_loss
 
-# @profile
 def train(model, 
           optimizer, 
           scheduler, 

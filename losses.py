@@ -22,7 +22,6 @@ SequentialLoss = namedtuple('SequentialLoss', ['overall_loss',
                                                 'neg_log_prior', 
                                                 'log_posterior'])
 
-# @profile
 def get_loss_sequential(generative_model, 
                         guide, 
                         imgs, 

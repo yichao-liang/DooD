@@ -1712,7 +1712,6 @@ class Guide(template.Guide):
         # self.init_h_pr = torch.zeros(self.pr_wr_rnn_hid_dim).cuda()
         # self.init_h_wr = torch.zeros(self.pr_wr_rnn_hid_dim).cuda()
 
-    # @profile
     def forward(self, imgs, num_particles=1):#, writer=None):
         '''
         Args: 
@@ -2121,7 +2120,6 @@ class Guide(template.Guide):
         }
         return out
 
-    # @profile
     def get_z_l(self, pr_wr_mlp_in, p_state, rsd_ratio=None):
         """Predict z_pres and z_where from `pr_wr_mlp_in`
         Args:
