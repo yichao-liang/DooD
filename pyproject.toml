@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dood"
+version = "0.1.0"
+description = "Drawing out of Distribution — neuro-symbolic generative model of stroke-based drawing (NeurIPS 2022)."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Yichao Liang" },
+]
+license = { text = "MIT" }
+dependencies = [
+    "einops",
+    "kornia",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pillow",
+    "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "seaborn",
+    "tensorboard",
+    "torch",
+    "torchvision",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+develop = [
+    "black",
+    "docformatter",
+    "isort",
+    "mypy",
+    "pylint>=2.14.5",
+    "pytest-pylint>=0.18.0",
+    "pytest>=7.2.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dood = ["py.typed"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.isort]
+py_version = 310
+profile = "black"
+multi_line_output = 2
+skip_glob = ["venv/*", ".venv/*"]
+split_on_trailing_comma = true
+
+[tool.docformatter]
+line-length = 88
+wrap-summaries = 88
+wrap-descriptions = 88
+
+[tool.mypy]
+strict_equality = true
+disallow_untyped_calls = true
+warn_unreachable = true
+ignore_missing_imports = true
+exclude = ["venv/*", ".venv/*", "build/*"]
+
+# The research modules in `dood.*` pre-date this project's typing setup.
+# CI runs mypy across the tree but skips errors inside the research code;
+# tighten by removing these overrides as modules get typed.
+[[tool.mypy.overrides]]
+module = ["dood.*"]
+ignore_errors = true
