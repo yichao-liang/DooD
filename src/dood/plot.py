@@ -385,8 +385,10 @@ def plot_reconstructions(
         )
         try:
             save_image(comparision, save_imgs_dir, nrow=nrow)
-        except:
-            breakpoint()
+        except OSError as exc:
+            util.logging.warning(
+                "Failed to save reconstruction image to %s: %s", save_imgs_dir, exc
+            )
 
     # Log image in Tensorboard
     img_grid = make_grid(comparision, nrow=nrow)
@@ -777,7 +779,7 @@ def add_control_points_plot(
     if dataset_name is not None:
         tag = f"{dataset_name}/Control Points/{tag}"
     else:
-        tag = f"Constrol Points/{writer_tag}"
+        tag = f"Control Points/{writer_tag}"
     writer.add_figure(tag, fig, epoch)
     # Adding as image
     # canvas = FigureCanvas(fig)
@@ -1085,11 +1087,12 @@ def batch_add_bounding_boxes(
     assert imgs.shape[1] in [1, 3]
     assert len(z_wheres.shape) == 3
     assert z_wheres.shape[0] == imgs.shape[0]
-    if z_wheres.shape[2] == 4:
-        batch_add_bounding_boxes_skimage(
-            imgs, z_wheres, n_obj, color, z_where_type=z_where_type
-        )
-    assert z_wheres.shape[2] == 3
+    # The 4D z_where branch previously called batch_add_bounding_boxes_skimage
+    # with arguments that don't match its signature; the downstream logic also
+    # assumes z_wheres.shape[2] == 3. Assert that invariant up front.
+    assert (
+        z_wheres.shape[2] == 3
+    ), f"Unexpected z_wheres trailing dim: {z_wheres.shape[2]} (expected 3)"
 
     target_shape = list(imgs.shape)
     target_shape[1] = 3

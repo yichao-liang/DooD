@@ -103,7 +103,6 @@ class Bezier(torch.nn.Module):
             curve = rearrange(
                 self.sample_curve(control_points, steps), "b c k s -> b k (c s)"
             )
-            breakpoint()
             return self.raster(curve, sigma)
 
     def _raster_base(self, curve, sigma=5e-2):
@@ -267,6 +266,13 @@ class Bezier(torch.nn.Module):
         return raster.float().unsqueeze(1)
 
     def _raster_bounded_tight(self, curve, sigma=1e-2):
+        # Experimental raster path never used by the final paper models. The
+        # implementation below referenced an undefined `steps` local and had
+        # debug prints left in place, so calling it currently fails.
+        raise NotImplementedError(
+            "_raster_bounded_tight is an experimental scratch method; use "
+            "_raster_bounded or _raster_base instead."
+        )
         tic = time()
         print(curve)
         # align start and end points

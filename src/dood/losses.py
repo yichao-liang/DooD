@@ -536,8 +536,10 @@ def get_loss_base(generative_model, guide, imgs, loss="elbo"):
 
         return BaseLoss(
             overall_loss=loss,
-            neg_generative_log_joint_prob=-generative_model_log_prob,
+            neg_log_prior=-log_prior,
+            neg_log_likelihood=-log_likelihood,
             log_posterior=guide_log_prob,
+            neg_elbo=-generative_model_log_prob + guide_log_prob,
         )
     else:
         raise NotImplementedError("not implemented")

@@ -2723,7 +2723,7 @@ exp_dict: dict[str, list] = {
     "Full-fixed_prir-useRsd-anLr": basic_full_model
     + [
         "--anneal_lr",
-        "--prior",
+        "--prior_dist",
         "Independent",
         "--use_residual",
     ],

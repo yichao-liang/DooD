@@ -1206,8 +1206,8 @@ class GenerativeModel(nn.Module):
             else:
                 raise NotImplementedError
         else:
-            z_pres = self.presence_dict(h_l, [bs], pri_wt=None, t=t).sample()
-            z_where = self.transformation_dict(h_l, [bs], pri_wt=None).sample()
+            z_pres = self.presence_dist(h_l, [bs], pri_wt=None, t=t).sample()
+            z_where = self.transformation_dist(h_l, [bs], pri_wt=None).sample()
             z_what = self.control_points_dist(h_c, [bs], pri_wr=None).sample()
         z_pres = z_pres.view(bs, 1)
         z_pres = z_pres * p_state.z_pres
@@ -1654,7 +1654,6 @@ class Guide(template.Guide):
         self.pts_per_strk = pts_per_strk
         self.z_what_dim = self.pts_per_strk * 2
         self.linear_sum = linear_sum
-        self.residual_no_target_pres = residual_no_target_pres
         super().__init__(
             max_strks=max_strks,
             img_dim=img_dim,
@@ -1679,6 +1678,7 @@ class Guide(template.Guide):
             simple_pres=simple_pres,
             no_post_rnn=no_post_rnn,
             residual_no_target=residual_no_target,
+            residual_no_target_pres=residual_no_target_pres,
             canvas_only_to_zwhere=canvas_only_to_zwhere,
             detach_canvas_so_far=detach_canvas_so_far,
             detach_canvas_embed=detach_canvas_embed,

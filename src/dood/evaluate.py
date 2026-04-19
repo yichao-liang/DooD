@@ -256,18 +256,20 @@ def marginal_likelihoods(
                 mll = loss_tuple.neg_elbo.detach().cpu().numpy()
             else:
                 mll = loss_tuple[0].mean().detach().cpu().numpy()
-            eval_df = eval_df.append(
-                {
-                    "model_name": args.save_model_name,
-                    "seed": args.seed,
-                    "source_dataset": args.dataset,
-                    "source_ite": ite_so_far,
-                    "target_dataset": dataset_name,
-                    "num_samples": int(k),
-                    "marginal_likelihood": mll,
-                },
-                ignore_index=True,
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "model_name": args.save_model_name,
+                        "seed": args.seed,
+                        "source_dataset": args.dataset,
+                        "source_ite": ite_so_far,
+                        "target_dataset": dataset_name,
+                        "num_samples": int(k),
+                        "marginal_likelihood": mll,
+                    }
+                ]
             )
+            eval_df = pd.concat([eval_df, new_row], ignore_index=True)
             eval_df.to_csv(log_file_name)
         writer.flush()
 
@@ -457,19 +459,21 @@ def classification_evaluation(
         else:
             eval_df = pd.DataFrame()
 
-        eval_df = eval_df.append(
-            {
-                "model_name": args.save_model_name,
-                "seed": args.seed,
-                "source_dataset": args.dataset,
-                "source_ite": ite_so_far,
-                "train_ite": num_iterations,
-                "target_dataset": dataset_name,
-                "best_accuracy": best_accuray.detach().cpu().numpy(),
-                "best_epoch": best_epoch,
-            },
-            ignore_index=True,
+        new_row = pd.DataFrame(
+            [
+                {
+                    "model_name": args.save_model_name,
+                    "seed": args.seed,
+                    "source_dataset": args.dataset,
+                    "source_ite": ite_so_far,
+                    "train_ite": num_iterations,
+                    "target_dataset": dataset_name,
+                    "best_accuracy": best_accuray.detach().cpu().numpy(),
+                    "best_epoch": best_epoch,
+                }
+            ]
         )
+        eval_df = pd.concat([eval_df, new_row], ignore_index=True)
         eval_df.to_csv(log_file_name)
 
 

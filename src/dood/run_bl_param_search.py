@@ -29,40 +29,20 @@ for lr, n_lyr, rnn_h_dim, mlp_h_dim, use_maxnorm in param_list:
         with open("save/bl_hypero_searched_list.pt", "wb") as f:
             pickle.dump(searched_list, f)
 
-        if use_maxnorm:
-            subprocess.run(
-                [
-                    "python",
-                    "-m",
-                    "dood.run",
-                    "--bl_lr",
-                    str(lr),
-                    "--num_baseline_layers",
-                    str(n_lyr),
-                    "--bl_rnn_hid_dim",
-                    str(rnn_h_dim),
-                    "--bl_mlp_hid_dim",
-                    str(mlp_h_dim),
-                    "-eg",
-                ],
-                check=False,
-            )
-        else:
-            subprocess.run(
-                [
-                    "python",
-                    "-m",
-                    "dood.run",
-                    "--bl_lr",
-                    str(lr),
-                    "--num_baseline_layers",
-                    str(n_lyr),
-                    "--bl_rnn_hid_dim",
-                    str(rnn_h_dim),
-                    "--bl_mlp_hid_dim",
-                    str(mlp_h_dim),
-                    "--maxnorm",
-                    "-eg",
-                ],
-                check=False,
-            )
+        base_cmd = [
+            "python",
+            "-m",
+            "dood.run",
+            "--bl_lr",
+            str(lr),
+            "--num_baseline_layers",
+            str(n_lyr),
+            "--bl_rnn_hid_dim",
+            str(rnn_h_dim),
+            "--bl_mlp_hid_dim",
+            str(mlp_h_dim),
+        ]
+        # maxnorm is on by default; pass --no_maxnorm only when disabling it.
+        if not use_maxnorm:
+            base_cmd.append("--no_maxnorm")
+        subprocess.run(base_cmd, check=False)

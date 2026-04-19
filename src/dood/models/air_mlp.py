@@ -11,7 +11,7 @@ from dood import util
 class PresMLP(nn.Module):
     """Infer presence from RNN hidden state."""
 
-    def __init__(self, in_dim):
+    def __init__(self, in_dim, dataset=None):
         nn.Module.__init__(self)
         self.seq = nn.Sequential(
             nn.Linear(in_dim, 256),

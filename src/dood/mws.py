@@ -1169,9 +1169,7 @@ class InferenceNetwork(nn.Module):
         Returns: tensor [batch_size, obs_embedding_dim]
         """
         batch_size = obs.shape[0]
-        # result = self.obs_embedder(obs.unsqueeze(1)).view(batch_size, -1)
         result = self.obs_embedder(obs.unsqueeze(1)).view(batch_size, -1)
-        breakpoint()
         assert result.shape[1] == self.obs_embedding_dim
         return result
 

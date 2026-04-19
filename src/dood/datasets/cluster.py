@@ -331,7 +331,6 @@ def get_medoids(X, press):
     A = vstack(distantce_matrix)
 
     clustering = DBSCAN(n_jobs=-1).fit(A)
-    breakpoint()
     clusters = clustering.labels_
     print("====> Clustering finish\n")
 

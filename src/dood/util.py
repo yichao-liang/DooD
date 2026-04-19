@@ -709,8 +709,6 @@ def debug_gradient(
                         writer_tag=f"Debug-img{idx}/",
                         max_display=64,
                     )
-                breakpoint()
-        va = 1 + 1
 
 
 def get_affines(logits):
@@ -801,7 +799,7 @@ def sigmoid(x, min=0.0, max=1.0, shift=0.0, slope=1.0):
     return (max - min) / (1 + torch.exp(-slope * (-shift + x))) + min
 
 
-def constrain_parameter(param, min=5e-2, max=1e-2):
+def constrain_parameter(param, min=1e-2, max=5e-2):
     return torch.sigmoid(param) * (max - min) + min
 
 
@@ -825,9 +823,14 @@ def normalize_pixel_values(img, method="tanh", slope=0.6):
                 img_ = torch.tanh(img / (slope.clone()))
                 return img_
             else:
-                breakpoint()
-        except:
-            breakpoint()
+                raise ValueError(
+                    f"Unsupported slope shape {tuple(slope.shape)} for img "
+                    f"shape {tuple(img.shape)}"
+                )
+        except AttributeError as exc:
+            raise ValueError(
+                f"slope must be a scalar or tensor, got {type(slope).__name__}"
+            ) from exc
     elif method == "maxnorm":
         batch_dim = img.shape[0]
         max_per_recon = img.detach().clone().reshape(batch_dim, -1).max(1)[0]
@@ -1809,8 +1812,8 @@ def init_stn(
     stn = SpatialTransformerNetwork()
     if end_cnn:
         cnn = init_cnn(
-            in_dim=in_dim,
-            out_dim=out_dim,
+            mlp_out_dim=out_dim,
+            cnn_out_dim=in_dim,
             num_mlp_layers=num_mlp_layers,
         )
         return stn, cnn

@@ -42,6 +42,7 @@ class Guide(nn.Module):
         simple_pres=False,
         no_post_rnn=False,
         residual_no_target=False,
+        residual_no_target_pres=False,
         canvas_only_to_zwhere=False,
         detach_canvas_so_far=True,
         detach_canvas_embed=True,
@@ -98,6 +99,7 @@ class Guide(nn.Module):
         if no_post_rnn or no_what_post_rnn:
             assert use_residual, "no_post_rnn requires execution guide and residual"
         self.residual_no_target = residual_no_target
+        self.residual_no_target_pres = residual_no_target_pres
         if residual_no_target:
             assert (
                 use_residual
