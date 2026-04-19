@@ -3,6 +3,8 @@
 Reference implementation of **"Drawing out of Distribution with Neuro-Symbolic
 Generative Models"** — Yichao Liang, Joshua B. Tenenbaum, Tuan Anh Le,
 N. Siddharth. *NeurIPS 2022.*
+[[arXiv](https://arxiv.org/abs/2206.01829)]
+[[NeurIPS](https://proceedings.neurips.cc/paper_files/paper/2022/hash/6248a3b8279a39b3668a8a7c0e29164d-Abstract-Conference.html)]
 
 > Learning general-purpose representations from perceptual inputs is a hallmark
 > of human intelligence. We present **D**rawing **o**ut **o**f **D**istribution
@@ -142,12 +144,11 @@ line from `scripts/slurm/btrain.sh` (training) followed by
 Tooling notes:
 
 - `black`, `isort`, `docformatter` format the whole tree.
-- `mypy` runs in a *lenient* mode for `dood.*` (`ignore_errors = True` in
-  `pyproject.toml`) and strict mode elsewhere. Tighten incrementally by
-  removing the override once modules gain type annotations.
-- Pylint (via `pytest-pylint`) is scoped to `tests/` only — the research
-  code in `src/dood/` is not linted in CI yet. Extend the linting job in
-  `.github/workflows/ci.yml` to cover more modules as they are cleaned.
+- `mypy` runs across `src/dood/` and `tests/` with the settings in
+  `pyproject.toml` (permissive on third-party stubs).
+- `pylint` (via `pytest-pylint`) also runs across the whole tree with the
+  disables configured in `.pylintrc`. Tighten the disable list as the
+  research code gets cleaned up.
 
 ## Citation
 
@@ -156,7 +157,8 @@ Tooling notes:
   title     = {Drawing out of Distribution with Neuro-Symbolic Generative Models},
   author    = {Liang, Yichao and Tenenbaum, Joshua B. and Le, Tuan Anh and Siddharth, N.},
   booktitle = {Advances in Neural Information Processing Systems},
-  year      = {2022}
+  year      = {2022},
+  url       = {https://arxiv.org/abs/2206.01829}
 }
 ```
 
