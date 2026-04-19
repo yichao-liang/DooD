@@ -6,7 +6,7 @@ import numpy as np
 
 from dood import util
 
-models_2_cmd = OrderedDict(
+models_2_cmd: OrderedDict[str, list[str]] = OrderedDict(
     {
         # Works
         # 'AIR': [
@@ -260,11 +260,12 @@ models_2_cmd = OrderedDict(
     }
 )
 
-for n, args in models_2_cmd.items():
+for n, cmd_args in models_2_cmd.items():
     subprocess.run(
-        ["python", "run.py"]
-        + models_2_cmd[n]
+        ["python", "-m", "dood.run"]
+        + cmd_args
         + ["--save_model_name", n]
-        + ["--num-iterations", "300000"]
+        + ["--num-iterations", "300000"],
         #    + ['--continue_training']
+        check=False,
     )

@@ -1,3 +1,4 @@
+import ast
 import collections
 import functools
 import itertools
@@ -473,7 +474,7 @@ class GenerativeModel(nn.Module):
         uniform_mixture=False,
         use_alphabet=False,
     ):
-        super(GenerativeModel, self).__init__()
+        super().__init__()
         self._prior = nn.Module()
         self._likelihood = nn.Module()
 
@@ -568,7 +569,7 @@ class GenerativeModel(nn.Module):
                 )
                 if ":" in likelihood:
                     args = {
-                        item.split("=")[0]: eval(item.split("=")[1])
+                        item.split("=")[0]: ast.literal_eval(item.split("=")[1])
                         for item in likelihood.split(":")[1:]
                     }
                 else:
@@ -578,7 +579,7 @@ class GenerativeModel(nn.Module):
             elif likelihood.startswith("classifytest"):
                 if ":" in likelihood:
                     args = {
-                        item.split("=")[0]: eval(item.split("=")[1])
+                        item.split("=")[0]: ast.literal_eval(item.split("=")[1])
                         for item in likelihood.split(":")[1:]
                     }
                 else:
@@ -1126,7 +1127,7 @@ class InferenceNetwork(nn.Module):
         uniform_mixture=False,
         use_alphabet=False,
     ):
-        super(InferenceNetwork, self).__init__()
+        super().__init__()
         self.use_alphabet = use_alphabet
         self.obs_embedding_dim = obs_embedding_dim
         self.lstm_hidden_size = lstm_hidden_size
@@ -1355,12 +1356,6 @@ def init(run_args, device):
         memory = None
 
     return generative_model, inference_network, optimizer, memory, stats
-
-
-import functools
-import math
-
-import torch
 
 
 def safe_div(x, y, large=1e7):

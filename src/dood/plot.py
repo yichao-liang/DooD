@@ -14,7 +14,7 @@ from matplotlib import offsetbox
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from numpy import prod
 from PIL import Image
-from skimage.draw import line, line_aa
+from skimage.draw import line, line_aa  # pylint: disable=no-name-in-module
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import silhouette_score
 from torch.utils.tensorboard import SummaryWriter
@@ -57,23 +57,6 @@ def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
         size=1,
         data=dataframe,
         ax=ax,
-    ).set_title("Number of strokes vs. ELBO on images of 1s and 7s")
-    plt.tight_layout()
-    writer.add_figure("Stroke count plot", fig, epoch)
-    save_imgs_dir = util.get_save_count_swarm_img_dir(args, epoch, suffix="")
-    plt.savefig(save_imgs_dir)
-
-
-def plot_stroke_mll_swarm_plot(dataframe, args, writer, epoch):
-    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-    sns.swarmplot(
-        x="Num_strokes",
-        y="ELBO",
-        hue="Label",
-        dodge=True,
-        size=1,
-        data=dataframe,
-        ax=ax,
     ).set_title("Number of strokes vs. ELBO on images of 1s and 3s")
     plt.tight_layout()
     writer.add_figure("Stroke count plot", fig, epoch)
@@ -103,12 +86,12 @@ def plot_reconstructions(
     imgs: torch.Tensor,
     guide: torch.nn.Module,
     #  generative_model:torch.nn.Module,
-    args: argparse.ArgumentParser,
+    args: argparse.Namespace,
     writer: SummaryWriter,
-    iteration: int = None,
-    epoch: int = None,
+    iteration: int | None = None,
+    epoch: int | None = None,
     writer_tag: str = "Train",
-    dataset_name: str = None,
+    dataset_name: str | None = None,
     max_display=32,
     fix_img: torch.Tensor = None,
     recons_per_img: int = 1,
@@ -150,6 +133,9 @@ def plot_reconstructions(
         generative_model.stn_transform = guide.stn_transform
         recon_img = generative_model.img_dist_b(latent).mean
         pts = latent
+        # Placeholder: `fillers` was historically undefined in this branch,
+        # leaving an empty-row spacer for the concatenation.
+        fillers = imgs[:0]
 
         if args.inference_net_architecture == "STN":
             comparision = torch.cat(
@@ -174,7 +160,7 @@ def plot_reconstructions(
 
         # Get latents
         if multi_sample or recons_per_img > 1:
-            import classify
+            from dood import classify
 
             latent, dec_params, _, _ = classify.parse(
                 args,
@@ -377,7 +363,8 @@ def plot_reconstructions(
     # suffix = 'trn' if is_train else 'tst'
     if writer_tag[-1] == "/":
         writer_tag = writer_tag[:-1]
-    writer_tag = writer_tag + "_" + dataset_name
+    if dataset_name is not None:
+        writer_tag = writer_tag + "_" + dataset_name
 
     if save_as_individual_img:
         bs = comparision.shape[0]
@@ -658,7 +645,8 @@ def plot_multi_recon(
 
     if writer_tag[-1] == "/":
         writer_tag = writer_tag[:-1]
-    writer_tag = writer_tag + "_" + dataset_name
+    if dataset_name is not None:
+        writer_tag = writer_tag + "_" + dataset_name
     tag = writer_tag
     if dataset_name is not None:
         tag = f"{dataset_name}/Multi-reconstruction/{writer_tag}/"
@@ -735,7 +723,7 @@ def color_img_edge(imgs, z_pres, color):
 
 
 def add_control_points_plot(
-    gen, latents, writer, epoch=None, writer_tag: bool = True, dataset_name=None
+    gen, latents, writer, epoch=None, writer_tag: str = "Train", dataset_name=None
 ):
     num_shown = 32
     n = min(num_shown, latents.shape[0])
@@ -891,17 +879,14 @@ def plot_stroke_tsne(
 
     # Generate visualization plot ----------------------------------------------
     util.logging.info(f"Perform {clustering} clustering...")
-    if clustering == None:
-        color = None
-    elif clustering == "kmeans":
+    if clustering == "kmeans":
         color = KMeans(n_clusters=n_clusters).fit_predict(all_z_whats)
     elif clustering == "dbscan":
         color = DBSCAN().fit_predict(all_z_whats)
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unknown clustering: {clustering}")
     # silhouette_score
     sc = silhouette_score(all_z_whats, color)
-    color = color  # avoid black in colormap
 
     # t-sne z_whats
     util.logging.info("Generate t-sne embeddings...")
@@ -1256,7 +1241,7 @@ def add_bounding_box(img, z_where, color):
     return img
 
 
-def plot_clf_score_heatmap(score_mtrx: np.array, preds, trues):
+def plot_clf_score_heatmap(score_mtrx: np.ndarray, preds, trues):
     """Each row i is a test image, each column corresponds to it's score in class j."""
     fig, ax = plt.subplots(figsize=(12, 12))
 
@@ -1264,8 +1249,8 @@ def plot_clf_score_heatmap(score_mtrx: np.array, preds, trues):
 
     # ticks
     # Show all ticks and label them with the respective list entries
-    ax.set_xticks(np.arange(20, step=2), labels=np.arange(20, step=2))
-    ax.set_yticks(np.arange(20, step=2), labels=np.arange(20, step=2))
+    ax.set_xticks(np.arange(0, 20, 2), labels=np.arange(0, 20, 2))
+    ax.set_yticks(np.arange(0, 20, 2), labels=np.arange(0, 20, 2))
     ax.set_xlabel("Class score")
     ax.set_ylabel("Query image")
 

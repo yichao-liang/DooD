@@ -46,7 +46,7 @@ if __name__ == "__main__":
     parser = get_args_parser()
     run_args = parser.parse_args()
 
-    all_exp_args = {}
+    all_exp_args: dict[str, list] = {}
 
     ablation_exp_name = [
         "Full-sequential_prior",
@@ -127,7 +127,7 @@ if __name__ == "__main__":
             )
             if run_args.ct:
                 args.append("--continue_training")
-            subprocess.run(["python", "run.py"] + args)  # + ['--continue_training'])
+            subprocess.run(["python", "-m", "dood.run"] + args, check=False)
             print(f"==> Done training {n}\n")
 
         if evaluate:
@@ -137,16 +137,15 @@ if __name__ == "__main__":
             subprocess.run(
                 [
                     "python",
-                    "test.py",
+                    "-m",
+                    "dood.evaluate",
                     "--ckpt_path",
                     ckpt_path,
-                    # for old models
-                    # '--save_model_name', n])
-                    # for new models
                     "--tb_name",
                     tb_name,
                     "--save_model_name",
                     model_name,
-                ]
+                ],
+                check=False,
             )
             print(f"==> Done evaluating the '{n}' model\n\n")

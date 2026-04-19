@@ -515,8 +515,6 @@ def get_loss_base(generative_model, guide, imgs, loss="elbo"):
 
         guide_log_prob = guide.log_prob(imgs, latent)
         log_prior, log_likelihood = generative_model.log_prob(latent, imgs)
-        # average across batch, and average ll across dim
-        log_likelihood = log_likelihood  # / np.prod(imgs.shape[-3:])
         generative_model_log_prob = log_likelihood + log_prior
         recon_img = generative_model.img_dist_b(latent).mean
 

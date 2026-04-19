@@ -4,7 +4,6 @@ import argparse
 import itertools
 import os
 from pathlib import Path
-from sched import scheduler
 
 import matplotlib.pylab as plt
 import numpy as np
@@ -466,7 +465,6 @@ def classification_evaluation(
                 "source_ite": ite_so_far,
                 "train_ite": num_iterations,
                 "target_dataset": dataset_name,
-                "target_dataset": dataset_name,
                 "best_accuracy": best_accuray.detach().cpu().numpy(),
                 "best_epoch": best_epoch,
             },
@@ -529,8 +527,8 @@ def one_shot_classification(
     model, args, writer, its_so_far, do_fine_tune=False, two_way_clf=False
 ):
     """Perform one shot clf as in Omniglot challenge."""
-    from classify import fine_tune, optimize_and_score, parse, score
-    from train import save
+    from dood.classify import fine_tune, optimize_and_score, parse, score
+    from dood.train import save
 
     if args.model_type == "AIR":
         n_parse_per_ite, run_per_eps = 3, 3
@@ -750,7 +748,7 @@ def auto_complete(model, args, writer, partial_img, stats):
     )
     last_hs, last_z_sample = util.get_last_vars(hs, z_smpl)
 
-    from models.ssp import DecoderParam
+    from dood.models.ssp import DecoderParam
 
     new_dec_param = DecoderParam(
         sigma=dec_param.sigma[0:1, :, 0:1].median().repeat(1, bs, guide.max_strks),
@@ -865,7 +863,7 @@ def init_generator(args, model, in_img):
             generative_model.pr_wr_rnn = guide.pr_wr_rnn
         generative_model.wt_rnn = guide.wt_rnn
 
-        from models.ssp import DecoderParam
+        from dood.models.ssp import DecoderParam
 
         # breakpoint()
         decoder_param = DecoderParam(
@@ -894,8 +892,8 @@ def init_generator(args, model, in_img):
 
 
 def compute_fid_score(model, args, data_loader, writer):
-    from ignite.engine import Engine
-    from ignite.metrics import FID
+    from ignite.engine import Engine  # pylint: disable=import-error
+    from ignite.metrics import FID  # pylint: disable=import-error
 
     # Init FID evaluator
     def eval_step(engine, batch):

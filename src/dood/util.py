@@ -363,7 +363,9 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True, args=N
             download=True,
         )
     elif dataset == "Quickdraw":  # all: trn 1.38m; tst 345k; 100 cat: .4m, .1m
-        from data.QuickDraw_pytorch.DataUtils.load_data import QD_Dataset
+        from data.QuickDraw_pytorch.DataUtils.load_data import (  # pylint: disable=import-error
+            QD_Dataset,
+        )
 
         trn_dataset = QD_Dataset(
             mtype="train",
@@ -436,7 +438,7 @@ def init_dataloader(res, dataset, batch_size=64, rot=False, shuffle=True, args=N
     train_loader = DataLoader(
         trn_dataset,
         batch_size=batch_size,
-        shuffle=True if shuffle else False,
+        shuffle=bool(shuffle),
         num_workers=4,
         # worker_init_fn=seed_worker, generator=g,
     )
@@ -648,8 +650,7 @@ def geom_weights_from_z_pres(z_pres, p):
 def debug_gradient(
     name, param, imgs, guide, generative_model, optimizer, iteration, writer, args
 ):
-    import losses
-    import plot
+    from dood import losses, plot
 
     # print the gradient
     logging.info(f"{name} has grad norm: {param.grad.norm(2)}")
@@ -917,6 +918,7 @@ def init(run_args, device, init_data_loader=True):
             run_args.img_res, run_args.dataset, run_args.batch_size, args=run_args
         )
         if run_args.model_type == "MWS":
+            # pylint: disable-next=import-error
             from models.mws import handwritten_characters as mws
 
             train_loader = mws.data.get_data_loader(
@@ -1108,6 +1110,7 @@ def init(run_args, device, init_data_loader=True):
             z_dim=run_args.z_dim,
         ).to(device)
     elif run_args.model_type == "MWS":
+        # pylint: disable-next=import-error
         from models.mws import handwritten_characters as mws
 
         mws_args = mws.run.get_args_parser().parse_args(
@@ -1431,7 +1434,7 @@ class MultilayerPerceptron(nn.Module):
             Linear(dims[-2], dims[-1]) -> y
         """
 
-        super(MultilayerPerceptron, self).__init__()
+        super().__init__()
         self.dims = dims
         self.non_linearity = non_linearity
         self.linear_modules = nn.ModuleList()
@@ -1628,8 +1631,7 @@ class SpatialTransformerNetwork(nn.Module):
         x_out = spatial_transform(x, thetas)
         if output_theta:
             return x_out, thetas
-        else:
-            x_out
+        return x_out
 
 
 def spatial_transform(x, theta):

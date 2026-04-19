@@ -83,7 +83,7 @@ def parse(
     else:  # DAIR case
         recons = None
         re_dec_params = None
-        from models.air import ZLogProb
+        from dood.models.air import ZLogProb
 
         out = guide(imgs, n_parse)
         generative_model = guide.internal_decoder
@@ -151,7 +151,6 @@ def fine_tune(args, model, tst_loader, writer, continue_training=True):
     args.save_model_name = args.save_model_name + "_OneShotClf"
     clf_checkpoint_path = util.get_checkpoint_path(args)
 
-    continue_training = continue_training
     if Path(clf_checkpoint_path).exists() and continue_training:
         model, optimizer, scheduler, stats, _, trn_args = util.load_checkpoint(
             path=clf_checkpoint_path, device=device, init_data_loader=False
@@ -341,10 +340,7 @@ def optimize_and_score(
                         f"One shot classification/Run{eps} Support",
                         make_grid(display_trans(sup_img), nrow=20),
                     )
-                    if eps == 0:
-                        render_untrans = True
-                    else:
-                        render_untrans = False
+                    render_untrans = eps == 0
 
                     for ite in tqdm(range(100)):
                         optim.zero_grad()

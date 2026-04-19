@@ -64,7 +64,7 @@ def make_os_omniglot_dataset(data_dict_path):
         r_path = source_data_path + f"run{rs}"
 
         # get file names
-        with open(r_path + "/" + fname_label) as f:
+        with open(r_path + "/" + fname_label, encoding="utf-8") as f:
             content = f.read().splitlines()
         pairs = [line.split() for line in content]
         test_files = [pair[0] for pair in pairs]

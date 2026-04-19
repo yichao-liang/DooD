@@ -4,7 +4,6 @@ Sequential model with spline z_what latent variables
 """
 
 import itertools
-import pdb
 from collections import namedtuple
 
 import numpy as np
@@ -1457,7 +1456,6 @@ class SampleCurveDistWithAffine(torch.distributions.Distribution):
                 weights
         """
         # [n_affine, 7] currently [2187, 7]
-        cond_sample_curve = cond_sample_curve
         self.affines = util.get_sample_affine(cond_sample_curve.device)
 
         # bs: [ptcs, bs,]; es []
@@ -1600,11 +1598,11 @@ class Guide(template.Guide):
         img_feat_dim=256,
         z_where_type: str = "3",
         use_canvas: bool = False,
-        use_residual: bool = None,
+        use_residual: bool | None = None,
         transform_z_what: bool = False,
         input_dependent_param: bool = True,
         prior_dist: str = "Independent",
-        target_in_pos: str = None,
+        target_in_pos: str | None = None,
         feature_extractor_sharing: bool = True,
         num_mlp_layers: int = 2,
         num_bl_layers: int = 2,
@@ -1613,10 +1611,10 @@ class Guide(template.Guide):
         maxnorm: bool = True,
         sgl_strk_tanh: bool = True,
         add_strk_tanh: bool = True,
-        z_what_in_pos: str = None,
+        z_what_in_pos: str | None = None,
         constrain_param: bool = True,
         render_method: str = "bounded",
-        intermediate_likelihood: str = None,
+        intermediate_likelihood: str | None = None,
         dependent_prior: bool = False,
         prior_dependency: str = "wr|wt",
         spline_decoder: bool = True,
@@ -2551,8 +2549,8 @@ class Guide(template.Guide):
             cond_img = character_conditioned_sampling(
                 guide_out=out, decoder=self.internal_decoder
             )
-        else:
-            return None
+            return cond_img
+        return None
 
     def named_parameters(self, prefix="", recurse=True):
         for n, p in super().named_parameters(prefix=prefix, recurse=recurse):

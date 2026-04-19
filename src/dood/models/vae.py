@@ -1,6 +1,5 @@
 """Attend, Infer, Repeat-style model."""
 
-import pdb
 from collections import namedtuple
 
 import numpy as np

@@ -6,7 +6,6 @@ from numpy import prod
 from scipy.sparse import vstack
 from sklearn.cluster import DBSCAN, OPTICS
 from sklearn.neighbors import NearestNeighbors
-from sklearn_extra.cluster import KMedoids
 
 
 class LatentVariableDataset(torch.utils.data.Dataset):
@@ -135,7 +134,9 @@ def make_lv_dataset(
     args=None,
     trans_z_what=False,
 ):
-    from util import transform_z_what
+    from sklearn_extra.cluster import KMedoids  # pylint: disable=import-error
+
+    from dood.util import transform_z_what
 
     z_press = []
     z_whats = []

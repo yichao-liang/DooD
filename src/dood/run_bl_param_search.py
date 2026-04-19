@@ -33,7 +33,8 @@ for lr, n_lyr, rnn_h_dim, mlp_h_dim, use_maxnorm in param_list:
             subprocess.run(
                 [
                     "python",
-                    "run.py",
+                    "-m",
+                    "dood.run",
                     "--bl_lr",
                     str(lr),
                     "--num_baseline_layers",
@@ -43,13 +44,15 @@ for lr, n_lyr, rnn_h_dim, mlp_h_dim, use_maxnorm in param_list:
                     "--bl_mlp_hid_dim",
                     str(mlp_h_dim),
                     "-eg",
-                ]
+                ],
+                check=False,
             )
         else:
             subprocess.run(
                 [
                     "python",
-                    "run.py",
+                    "-m",
+                    "dood.run",
                     "--bl_lr",
                     str(lr),
                     "--num_baseline_layers",
@@ -60,5 +63,6 @@ for lr, n_lyr, rnn_h_dim, mlp_h_dim, use_maxnorm in param_list:
                     str(mlp_h_dim),
                     "--maxnorm",
                     "-eg",
-                ]
+                ],
+                check=False,
             )

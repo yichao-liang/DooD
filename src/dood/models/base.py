@@ -1,5 +1,3 @@
-import pdb
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -358,6 +356,7 @@ class Guide(nn.Module):
                 torch.distributions.Dirichlet(concentration),
                 reinterpreted_batch_ndims=2,
             )
+        raise NotImplementedError(f"Unknown dist: {self.dist}")
 
     def log_prob(self, imgs, latent):
         """Evaluate log q(control_points | imgs)

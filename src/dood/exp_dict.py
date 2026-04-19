@@ -27,7 +27,7 @@ full_config = [
     "seperated_z",
 ]
 
-models_2_cmd = {
+models_2_cmd: dict[str, list] = {
     "VAE": [
         "--model_type",
         "VAE",
@@ -344,7 +344,7 @@ basic_full_model = [
 full_no_canvas = basic_full_model.copy()
 full_no_canvas.remove("--use_canvas")
 
-exp_dict = {
+exp_dict: dict[str, list] = {
     # MNIT: no image
     "Full-spDec-sq40MCorPrior-dp-tr-detachRsdNotRsdEm-sepPrWrNet-noPrPosRnn-normRfLoss-anNonPrLr-lapl-tranWhat-65strk": basic_full_model
     + [

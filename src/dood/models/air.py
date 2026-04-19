@@ -2,7 +2,6 @@
 variables."""
 
 import itertools
-import pdb
 from collections import namedtuple
 
 import numpy as np

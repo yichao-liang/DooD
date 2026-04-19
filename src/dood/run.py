@@ -51,7 +51,7 @@ def main(args):
 
     # train
     if args.model_type == "MWS":
-        import models.mws.handwritten_characters as mws
+        import models.mws.handwritten_characters as mws  # pylint: disable=import-error
 
         generative_model, guide, memory = model
         mws_args = mws.run.get_args_parser().parse_args([])
